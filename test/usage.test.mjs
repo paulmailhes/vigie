@@ -77,6 +77,8 @@ test('part de la semaine : un compte entamé ailleurs ne compte pas tout son pou
   assert.equal(weekRatio(t2, [{ ...t1, tier: 'pro' }]), 49 / 50, 'autre abonnement : rien à comparer');
   assert.equal(weekRatio({ ...t2, measured: 0.07 }, [t1]), 0.07, 'hausse mesurée : elle passe devant');
   assert.equal(weekRatio({ ...t2, tier: null }, [t1]), 49 / 50, 'abonnement inconnu : son propre plafond');
+  // compte à 100 % qui continue en usage supplémentaire : son plafond est trop bas, il ne sert pas de référence
+  assert.equal(weekRatio(t1, [{ measured: null, upper: 100 / 9000, tier: 'max_20x', pct: 100 }]), 78 / 1000);
   assert.equal(toWeekPct(50, { ratio: 78 / 1000 }), 3.9);
   assert.equal(toWeekPct(50, { den: 50, pct: 49 }), 49, 'ancien calcul sans ratio');
 });
