@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readState, effective, appendHistory, actionText, matchGuard, readOnlyShell, QUESTIONS_FILE, HISTORY_FILE, DATA } from './lib/state.mjs';
@@ -220,6 +221,19 @@ function followResult(input, rule, since) {
     spawn(process.execPath, [fileURLToPath(import.meta.url), '--suivi', job, ...(CODEX ? ['--codex'] : [])], { detached: true, stdio: 'ignore' }).unref();
   } catch { /* facultatif : sans suivi, pas d'alerte d'échec */ }
 }
+// Marque valable 10 min (data/suivis) : une même commande qui échoue de nouveau plus tard est de nouveau signalée.
+function claimOnce(cle) {
+  const dir = path.join(DATA, 'suivis');
+  const mark = path.join(dir, crypto.createHash('sha256').update(String(cle)).digest('hex').slice(0, 24));
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* écrit ensuite, ou pas de marque */ }
+  try { fs.writeFileSync(mark, '', { flag: 'wx' }); return true; } catch { /* déjà posée */ }
+  try {
+    if (Date.now() - fs.statSync(mark).mtimeMs < 10 * 60_000) return false;
+    fs.rmSync(mark, { force: true });
+    fs.writeFileSync(mark, '', { flag: 'wx' });
+    return true;
+  } catch { return false; }
+}
 async function onFollow(job) {
   let j;
   try { j = JSON.parse(fs.readFileSync(job, 'utf8')); } catch { return; } finally { try { fs.unlinkSync(job); } catch { /* déjà retiré */ } }
@@ -227,9 +241,9 @@ async function onFollow(job) {
   for (const end = Date.now() + FOLLOW_MS; Date.now() < end; await sleep(Math.min(POLL_MS, 2000))) {
     const r = result();
     if (!r) continue;
-    if (!r.ok && !tail(HISTORY_FILE).some((l) => l.includes('"garde-fou-echec"') && l.includes(JSON.stringify(j.cle)))) {
-      log(j.input, 'garde-fou-echec', { ...j.info, extrait: r.extrait, cle: j.cle });
-    }
+    // Deux suivis du même appel (Codex : PreToolUse puis PermissionRequest) voient l'échec ensemble : le premier
+    // qui pose la marque (création exclusive) l'écrit, l'autre s'arrête.
+    if (!r.ok && claimOnce(j.cle)) log(j.input, 'garde-fou-echec', { ...j.info, extrait: r.extrait, cle: j.cle });
     return;
   }
 }

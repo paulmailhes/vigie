@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Bibliothèque de MCP officiels (serveurs distants des éditeurs eux-mêmes, adresses vérifiées le 2026-10-21) :
-/// on choisit, on coche les comptes, on ajoute, puis on connecte (page d'autorisation du service).
+/// un clic, et Vigie l'ajoute à tous les comptes par sa passerelle, puis ouvre une seule fois la page d'autorisation.
 /// Pas de relais tiers : un MCP voit tes données, seuls les serveurs des éditeurs sont proposés ici.
 struct MCPLibraryEntry: Identifiable, Hashable {
     let id: String          // nom du MCP une fois ajouté
@@ -11,10 +11,16 @@ struct MCPLibraryEntry: Identifiable, Hashable {
     var type = "http"
     /// Sans compte à autoriser (documentation publique).
     var open = false
+    /// Passe par la passerelle de Vigie (une autorisation pour tous les comptes). Figma n'accepte que certaines
+    /// applications (comme Claude Code) : il reste branché compte par compte.
+    var viaGateway = true
+
+    /// Services qui refusent la passerelle (inscription d'application refusée, vérifié le 2026-10-21).
+    static let gatewayRefused: Set<String> = ["mcp.figma.com"]
 
     static let all: [MCPLibraryEntry] = [
         .init(id: "notion", title: "Notion", category: "Notes et documents", url: "https://mcp.notion.com/mcp"),
-        .init(id: "figma", title: "Figma", category: "Design", url: "https://mcp.figma.com/mcp"),
+        .init(id: "figma", title: "Figma", category: "Design", url: "https://mcp.figma.com/mcp", viaGateway: false),
         .init(id: "canva", title: "Canva", category: "Design", url: "https://mcp.canva.com/mcp"),
         .init(id: "webflow", title: "Webflow", category: "Sites", url: "https://mcp.webflow.com/mcp"),
         .init(id: "wix", title: "Wix", category: "Sites", url: "https://mcp.wix.com/mcp"),
@@ -47,9 +53,6 @@ struct MCPLibrarySheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
-    @State private var selected: MCPLibraryEntry?
-    @State private var chosenAccounts: Set<String> = []
-    @State private var adding = false
     @State private var added: Set<String> = []
 
     private var accounts: [Account] { store.accounts.filter { !$0.isCodex && $0.isConnected } }
@@ -72,7 +75,7 @@ struct MCPLibrarySheet: View {
                 SheetIcon(symbol: Icon.mcp)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Bibliothèque de MCP").font(.title3.bold())
-                    Text("Les serveurs officiels des éditeurs. Ajoute-les sur tes comptes, puis connecte-les.")
+                    Text("Les serveurs officiels des éditeurs. Un clic : il est sur tous tes comptes, tu l'autorises une seule fois.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -87,9 +90,6 @@ struct MCPLibrarySheet: View {
             }
             .listStyle(.inset)
             .frame(minHeight: 300)
-            if let selected {
-                addPanel(selected)
-            }
             HStack {
                 Spacer()
                 Button("Fermer") { dismiss() }
@@ -118,52 +118,24 @@ struct MCPLibrarySheet: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
-                Button("Ajouter") {
-                    selected = entry
-                    chosenAccounts = Set(accounts.map(\.id))
-                }
-                .glassButton(selected == entry ? .primary : .secondary)
-            }
-        }
-    }
-
-    private func addPanel(_ entry: MCPLibraryEntry) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Ajouter « \(entry.title) » sur :").font(.headline)
-            HStack(spacing: 14) {
-                ForEach(accounts) { account in
-                    Toggle(account.displayName, isOn: Binding(
-                        get: { chosenAccounts.contains(account.id) },
-                        set: { on in if on { chosenAccounts.insert(account.id) } else { chosenAccounts.remove(account.id) } }))
-                }
-            }
-            .toggleStyle(.checkbox)
-            HStack {
-                Text(entry.open ? "Rien à autoriser : il marche tout de suite." : "Ensuite, ton navigateur s'ouvre pour l'autoriser sur chaque compte.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Annuler") { selected = nil }
-                    .glassButton()
-                Button { add(entry) } label: { BusyLabel(busy: adding) { Text("Ajouter") } }
+                AsyncButton("Ajouter") { await add(entry) }
                     .glassButton(.primary)
-                    .disabled(chosenAccounts.isEmpty || adding)
+                    .help(entry.open ? "Ajouté à tous tes comptes, rien à autoriser" : "Ajouté à tous tes comptes ; ton navigateur s'ouvre une fois pour l'autoriser")
             }
         }
-        .padding(12)
-        .background(.quinary, in: .rect(cornerRadius: Theme.corner))
     }
 
-    private func add(_ entry: MCPLibraryEntry) {
-        adding = true
-        let config: JSONValue = ["type": .string(entry.type), "url": .string(entry.url), "headers": .object([:])]
-        Task {
-            let ok = await store.mcpUser("add", name: entry.id, config: config, accounts: accounts.map(\.id).filter(chosenAccounts.contains))
-            adding = false
-            guard ok else { return }
-            added.insert(entry.id)
-            selected = nil
-            if !entry.open { await store.mcpConnectEverywhere(name: entry.id) }
+    /// Avec autorisation : par la passerelle (une autorisation pour tous les comptes, le navigateur s'ouvre une fois).
+    /// Sans autorisation, ou ancien format SSE : déclaré tel quel dans tous les comptes.
+    private func add(_ entry: MCPLibraryEntry) async {
+        let ok: Bool
+        if entry.open || entry.type != "http" || !entry.viaGateway {
+            let config: JSONValue = ["type": .string(entry.type), "url": .string(entry.url), "headers": .object([:])]
+            ok = await store.mcpUser("add", name: entry.id, config: config, accounts: accounts.map(\.id))
+            if ok && !entry.open { await store.mcpConnectEverywhere(name: entry.id) }
+        } else {
+            ok = await store.gateway("add", name: entry.id, ["url": .string(entry.url)])
         }
+        if ok { added.insert(entry.id) }
     }
 }

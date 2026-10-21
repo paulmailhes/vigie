@@ -31,6 +31,8 @@ struct MCPView: View {
     @State private var showLibrary = false
     @State private var removal: MCPRemoval?
     @State private var confirmRemoval = false
+    /// Projets dépliés (tous repliés au départ : on voit la liste des projets, on ouvre celui qui intéresse).
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         Group {
@@ -74,6 +76,8 @@ struct MCPView: View {
                 Task {
                     if let path = removal.projectPath {
                         _ = await store.mcpProject("remove", path: path, name: removal.name)
+                    } else if store.mcp?.gateway?[removal.name] != nil {
+                        await store.gateway("remove", name: removal.name)
                     } else {
                         _ = await store.mcpUser("remove", name: removal.name)
                     }
@@ -120,13 +124,18 @@ struct MCPView: View {
             Section {
                 let projects = mcp.projects + mcp.local
                 ForEach(projects) { project in
-                    ProjectHeaderRow(project: project, isLocal: mcp.local.contains(project)) {
-                        editor = .addProject(path: project.path)
-                    }
-                    ForEach(project.servers) { server in
-                        ProjectServerRow(project: project, server: server,
-                                         edit: { editor = .editProject(path: project.path, server: server) },
-                                         remove: { ask(MCPRemoval(name: server.name, projectPath: project.path)) })
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { expanded.contains(project.path) },
+                        set: { open in if open { expanded.insert(project.path) } else { expanded.remove(project.path) } })) {
+                        ForEach(project.servers) { server in
+                            ProjectServerRow(project: project, server: server,
+                                             edit: { editor = .editProject(path: project.path, server: server) },
+                                             remove: { ask(MCPRemoval(name: server.name, projectPath: project.path)) })
+                        }
+                    } label: {
+                        ProjectHeaderRow(project: project, isLocal: mcp.local.contains(project)) {
+                            editor = .addProject(path: project.path)
+                        }
                     }
                 }
                 if projects.isEmpty { EmptyRow(text: "Aucun .mcp.json dans ~/Code") }
@@ -239,7 +248,12 @@ struct UserMCPRow: View {
             }
             .opacity(active ? 1 : Theme.dim)
             Spacer(minLength: 8)
-            MCPConnectEverywhereButton(name: server.name, health: server.health)
+            if let gateway {
+                GatewayControls(name: server.name, server: gateway)
+            } else {
+                if migratable { GatewayMigrateButton(name: server.name) }
+                MCPConnectEverywhereButton(name: server.name, health: server.health)
+            }
             UsesLabel(count: server.uses7d)
             Toggle("Actif", isOn: everywhere)
                 .toggleStyle(.switch)
@@ -247,11 +261,22 @@ struct UserMCPRow: View {
                 .controlSize(.small)
                 .help(active ? "Actif partout · couper dans tes \(projects.count) projets" : "Coupé dans \(disabledNames) · rallumer partout")
             moreMenu
-            MCPAccountCells(name: server.name, health: server.health, declaredIn: server.accounts, path: nil) { id in
-                Task { _ = await store.mcpUser("update", name: server.name, accounts: [id]) }
+            if gateway == nil {
+                MCPAccountCells(name: server.name, health: server.health, declaredIn: server.accounts, path: nil) { id in
+                    Task { _ = await store.mcpUser("update", name: server.name, accounts: [id]) }
+                }
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Passe par la passerelle de Vigie : une autorisation pour tous les comptes.
+    private var gateway: GatewayServer? { store.mcp?.gateway?[server.name] }
+
+    /// En ligne, sans en-têtes à lui (clé d'API) : peut passer par Vigie.
+    private var migratable: Bool {
+        let host = server.target.flatMap { URL(string: $0)?.host() } ?? ""
+        return server.type == "http" && (server.config?.headers?.isEmpty ?? true) && !MCPLibraryEntry.gatewayRefused.contains(host)
     }
 
     /// D'abord ce qui sort de l'ordinaire (« coupé dans Boutique »), puis le type et l'adresse ; « absent » se lit
@@ -259,9 +284,14 @@ struct UserMCPRow: View {
     private var subtitle: String {
         var parts: [String] = []
         if !server.disabledIn.isEmpty { parts.append("coupé dans \(disabledNames)") }
-        if server.differs == true { parts.append("diffère selon le compte") }
-        parts.append(server.type ?? "stdio")
-        parts.append(MCPHelp.shortTarget(server.target))
+        if server.differs == true && gateway == nil { parts.append("diffère selon le compte") }
+        if let gateway {
+            parts.append("par Vigie, pour tous tes comptes")
+            parts.append(MCPHelp.shortTarget(gateway.url))
+        } else {
+            parts.append(server.type ?? "stdio")
+            parts.append(MCPHelp.shortTarget(server.target))
+        }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
@@ -296,7 +326,16 @@ struct UserMCPRow: View {
                     Task { _ = await store.mcpUser("update", name: server.name, accounts: accounts.map(\.id)) }
                 }
             }
-            if server.type == "http" || server.type == "sse" {
+            if gateway != nil {
+                Button("Revenir en direct (une autorisation par compte)", systemImage: "arrow.uturn.backward") {
+                    Task { await store.gateway("restore", name: server.name) }
+                }
+            } else if migratable {
+                Button("Passer par Vigie (une autorisation pour tous)", systemImage: "arrow.triangle.merge") {
+                    Task { await store.gateway("migrate", name: server.name) }
+                }
+            }
+            if gateway == nil && (server.type == "http" || server.type == "sse") {
                 Menu("Refaire l'autorisation") {
                     ForEach(accounts.filter { server.accounts.contains($0.id) && $0.isConnected }) { account in
                         Button(account.displayName) {
@@ -345,6 +384,9 @@ struct ProjectHeaderRow: View {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
             Text(project.displayName).bold()
+            Text(Fmt.count(project.servers.count, "MCP", "MCP"))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             Text(isLocal ? "\(Fmt.shortPath(project.path)) · réglage local" : Fmt.shortPath(project.path))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -356,7 +398,8 @@ struct ProjectHeaderRow: View {
                 .labelStyle(.iconOnly)
                 .help("Ajouter un MCP à ce projet")
         }
-        .padding(.top, 4)
+        .padding(.vertical, 2)
+        .contentShape(.rect)
     }
 }
 

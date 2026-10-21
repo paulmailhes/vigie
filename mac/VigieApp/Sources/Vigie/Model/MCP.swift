@@ -7,6 +7,28 @@ struct MCPState: Decodable, Equatable, Sendable {
     @Lossy var local: [ProjectMCP]
     @Lossy var connectors: [Connector]
     var connectorsDefault: String?
+    /// MCP qui passent par la passerelle de Vigie (une autorisation pour tous les comptes), par nom.
+    var gateway: [String: GatewayServer]?
+}
+
+/// Un MCP de la passerelle : adresse du service, espaces autorisés (un actif), état.
+struct GatewayServer: Decodable, Equatable, Sendable {
+    var url: String?
+    var open: Bool?
+    var active: String?
+    var connected: Bool?
+    @Lossy var profiles: [GatewayProfile]
+
+    var activeProfile: GatewayProfile? { profiles.first { $0.id == active } }
+    /// Un espace refusé par le service (jeton révoqué…) : à réautoriser.
+    var needsAuthorization: Bool { open != true && (connected != true || activeProfile?.error != nil) }
+}
+
+struct GatewayProfile: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var label: String?
+    var authorizedAt: String?
+    var error: String?
 }
 
 /// Configuration d'un MCP telle que renvoyée par le moteur (valeurs secrètes masquées « •••• »).

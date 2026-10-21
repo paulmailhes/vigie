@@ -10,6 +10,8 @@ struct WriteResult: Decodable, Equatable, Sendable {
     var correction: String?
     var delivered: Bool?
     var openUrl: String?
+    /// POST /api/v2/gateway : service sans autorisation (rien à ouvrir dans le navigateur).
+    var open: Bool?
     /// Message court facultatif renvoyé par certaines actions.
     var message: String?
     /// POST /api/v2/accounts { action: "create" } : le compte créé.

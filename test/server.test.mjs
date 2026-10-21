@@ -187,7 +187,7 @@ before(async () => {
   seed();
   const mac = (name) => path.join(TMP, 'faux-mac', name);
   const env = {
-    PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_HOME: HOME, VIGIE_CLAUDE_DIR: CLAUDE, VIGIE_DATA: DATA, VIGIE_PORT: '0', VIGIE_NO_UPDATE: '1',
+    PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_HOME: HOME, VIGIE_CLAUDE_DIR: CLAUDE, VIGIE_DATA: DATA, VIGIE_PORT: '0', VIGIE_NO_UPDATE: '1', VIGIE_NO_MCP_SYNC: '1',
     VIGIE_ACCOUNTS_ROOT: ACCOUNTS_ROOT, VIGIE_VSCODE_SETTINGS: VSC, VIGIE_RUNCAT_STATE: path.join(TMP, 'runcat.json'),
     VIGIE_QUOTA_FILE: path.join(TMP, 'quota.json'), VIGIE_CLAUDE_BIN: FAKE,
     VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même
@@ -861,6 +861,19 @@ test('historique : une ligne par issue, filtres par statut, conversation et text
   const word = one.title.split(' ')[0];
   assert.ok((await get(`/api/v2/history?window=1440&q=${encodeURIComponent(word)}`)).body.items.length > 0);
   assert.equal((await get('/api/v2/history?window=30')).status, 400);
+});
+
+test('passerelle MCP : relais et retour d\'autorisation branchés, sans en-tête X-Vigie ; état sans secret', async () => {
+  let r = await raw('POST', '/mcp/inconnu', { body: '{}', headers: { 'Content-Type': 'application/json' } });
+  assert.equal(r.status, 404);
+  assert.match(r.body.error.message, /ne passe pas par Vigie/);
+  r = await raw('GET', '/oauth/callback?state=inconnu&code=x');
+  assert.equal(r.status, 400);
+  assert.match(r.text, /Autorisation non aboutie/);
+  const inv = (await get('/api/v2/mcp')).body;
+  assert.deepEqual(inv.gateway, {}, 'rien ne passe encore par Vigie');
+  assert.equal((await post('/api/v2/gateway', { action: 'inconnue' })).status, 400);
+  assert.equal((await post('/api/v2/gateway', { action: 'migrate', name: 'absent' })).status, 400);
 });
 
 test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris, en % de la semaine du compte)', async () => {

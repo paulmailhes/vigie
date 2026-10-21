@@ -308,6 +308,21 @@ extension VigieStore {
         return ok
     }
 
+    /// Passerelle MCP : add (bibliothèque) · migrate (un MCP existant passe par Vigie) · authorize (label : un espace
+    /// de plus) · activate / rename / removeProfile (espaces) · restore (revenir en direct) · remove.
+    /// Une autorisation ouvre le navigateur (côté moteur) : on le dit, c'est une consigne.
+    @discardableResult
+    func gateway(_ action: String, name: String, _ extra: [String: JSONValue] = [:]) async -> Bool {
+        var body: [String: JSONValue] = ["action": .string(action), "name": .string(name)]
+        for (key, value) in extra { body[key] = value }
+        let result = await write("/api/v2/gateway", .object(body))
+        if let result, ["add", "migrate", "authorize"].contains(action), result.open != true {
+            show(info: "Ton navigateur s'ouvre : autorise « \(name) » une fois, pour tous tes comptes")
+        }
+        await reloadAfterWrite(mcp: true)
+        return result != nil
+    }
+
     func mcpProject(_ action: String, path: String, name: String, config: JSONValue? = nil) async -> Bool {
         var body: [String: JSONValue] = ["action": .string(action), "path": .string(path), "name": .string(name)]
         if let config { body["config"] = config }

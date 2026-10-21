@@ -18,6 +18,7 @@ import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDec
 import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
+import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -45,6 +46,9 @@ const conv = createConversations(indexer);
 const codex = createCodex({ dataDir: DATA });
 const accounts = createAccounts();
 const updater = createUpdater({ root: ROOT, dataDir: DATA });
+// Passerelle MCP : une autorisation par service pour tous les comptes (lib/gateway.mjs). Port lu au moment voulu
+// (les tests lancent le moteur sur un port libre).
+const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`) });
 const HOME = accounts.paths.home;
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
 const mcp = createMcp({
@@ -1197,6 +1201,103 @@ function mcpReply(r) {
   const error = r?.error || (Array.isArray(r?.results) ? r.results.filter((x) => !x.ok).map((x) => `${accountLabel(x.accountId)} : ${x.error}`).join(' · ') : '') || 'Échec.';
   return [400, { ...r, ok: false, error }];
 }
+// ---------- passerelle MCP ----------
+// Chaque compte Claude déclare chaque MCP de la passerelle (même adresse locale, même clé) ; les autres MCP du Mac
+// sont recopiés dans les comptes où ils manquent (jamais modifiés ni retirés ; s'ils diffèrent d'un compte à
+// l'autre, rien n'est touché). Au démarrage, toutes les 5 min et après chaque changement.
+let mcpSyncing = null;
+function syncMcpAccounts() {
+  if (mcpSyncing) return mcpSyncing;
+  mcpSyncing = (async () => {
+    const changed = [];
+    // seulement les MCP prêts : tant qu'un MCP n'est pas autorisé, les comptes gardent leur branchement direct
+    for (const name of gateway.names().filter((n) => gateway.ready(n))) {
+      const want = gateway.accountConfig(name);
+      const raw = mcp.rawUser(name).filter((x) => !x.unavailable);
+      const missing = raw.filter((x) => !x.config).map((x) => x.accountId);
+      const differ = raw.filter((x) => x.config && JSON.stringify(x.config) !== JSON.stringify(want)).map((x) => x.accountId);
+      if (missing.length) { await mcp.addUser(name, want, missing); changed.push(name); }
+      if (differ.length) { await mcp.updateUser(name, want, differ); changed.push(name); }
+    }
+    for (const name of mcp.userNames()) {
+      if (gateway.has(name)) continue;
+      const raw = mcp.rawUser(name).filter((x) => !x.unavailable);
+      const present = raw.filter((x) => x.config);
+      if (!present.length || new Set(present.map((x) => JSON.stringify(x.config))).size > 1) continue;
+      const missing = raw.filter((x) => !x.config).map((x) => x.accountId);
+      if (missing.length) { await mcp.addUser(name, present[0].config, missing); changed.push(name); }
+    }
+    if (changed.length) console.error(`[vigie] MCP recopiés dans tous les comptes : ${[...new Set(changed)].join(', ')}`);
+    return changed;
+  })().catch((e) => { console.error('[vigie] synchronisation des MCP :', clean(e)); return []; }).finally(() => { mcpSyncing = null; });
+  return mcpSyncing;
+}
+
+// POST /api/v2/gateway { action, name, … } : ajouter (bibliothèque), faire passer par Vigie un MCP existant,
+// autoriser (un espace de plus avec label), changer d'espace, renommer ou retirer un espace, revenir en direct, retirer.
+async function postGateway(body) {
+  const { action, name } = body || {};
+  try {
+    if (action === 'add' || action === 'migrate') {
+      let url = body.url;
+      if (action === 'migrate') {
+        const cfg = mcp.rawUser(name).map((x) => x.config).find(Boolean);
+        if (!cfg) return bad('Ce MCP n\'existe dans aucun compte.');
+        if (!cfg.url || (cfg.type && !['http', 'streamable-http'].includes(cfg.type))) return bad('Seuls les MCP en ligne (http) passent par Vigie.');
+        if (cfg.headers && Object.keys(cfg.headers).length) return bad('Ce MCP a ses propres en-têtes (clé d\'API) : il reste en direct.');
+        url = cfg.url;
+      } else if (mcp.userNames().includes(name) && !gateway.has(name)) {
+        return bad(`Un MCP « ${name} » existe déjà sur ce Mac.`);
+      }
+      // Les comptes ne basculent qu'une fois l'autorisation réussie (retour du navigateur) : si le service refuse,
+      // ou si la page est abandonnée, ils gardent leur branchement d'avant.
+      const existed = gateway.has(name);
+      gateway.add(name, url);
+      let a;
+      try { a = await gateway.authorize(name, body.label ? { label: body.label } : {}); } catch (e) { if (!existed) gateway.remove(name); throw e; }
+      if (a.open) await syncMcpAccounts();
+      return [200, { ok: true, ...a, gateway: gateway.status() }];
+    }
+    if (action === 'authorize') return [200, { ok: true, ...(await gateway.authorize(name, { id: body.profileId, label: body.label })), gateway: gateway.status() }];
+    if (action === 'activate') { gateway.activate(name, body.profileId); return [200, { ok: true, gateway: gateway.status() }]; }
+    if (action === 'rename') { gateway.renameProfile(name, body.profileId, body.label); return [200, { ok: true, gateway: gateway.status() }]; }
+    if (action === 'removeProfile') { gateway.removeProfile(name, body.profileId); return [200, { ok: true, gateway: gateway.status() }]; }
+    if (action === 'restore') {
+      const url = gateway.status()[name]?.url;
+      if (!url) return bad('Ce MCP ne passe pas par Vigie.');
+      const ids = mcp.rawUser(name).filter((x) => x.config).map((x) => x.accountId);
+      const r = await mcp.updateUser(name, { type: 'http', url }, ids);
+      if (!r.ok) return mcpReply(r);
+      gateway.remove(name);
+      return [200, { ok: true, gateway: gateway.status() }];
+    }
+    if (action === 'remove') {
+      const r = await mcp.removeUser(name, mcp.rawUser(name).map((x) => x.accountId));
+      if (!r.ok) return mcpReply(r);
+      gateway.remove(name);
+      return [200, { ok: true, gateway: gateway.status() }];
+    }
+    return bad('Action inconnue.');
+  } catch (e) {
+    if (e instanceof GatewayError) return bad(e.message);
+    throw e;
+  }
+}
+
+// Retour du navigateur après une autorisation : une page simple, et les comptes remis à jour.
+async function oauthCallback(url, res) {
+  const r = await gateway.callback(url.searchParams);
+  if (r.ok) syncMcpAccounts();
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const title = r.ok ? `« ${esc(r.name)} » est autorisé` : 'Autorisation non aboutie';
+  const text = r.ok ? `Espace : ${esc(r.label)}. Il marche maintenant dans tous tes comptes Claude. Tu peux fermer cet onglet.` : esc(r.error);
+  return send(res, r.ok ? 200 : 400, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Vigie</title>
+<style>body{font:16px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#f5f5f7;color:#1d1d1f}
+main{max-width:460px;padding:32px;border-radius:16px;background:#fff;box-shadow:0 4px 24px #0001}h1{font-size:22px;margin:0 0 8px}p{color:#555;line-height:1.5}
+@media(prefers-color-scheme:dark){body{background:#1d1d1f;color:#f5f5f7}main{background:#2c2c2e}p{color:#aaa}}</style></head>
+<body><main><h1>${r.ok ? '✓ ' : ''}${title}</h1><p>${text}</p></main></body></html>`, 'text/html; charset=utf-8');
+}
+
 async function postMcpUser(body) {
   const { action, name, config, accounts: ids } = body;
   if (action === 'add') return mcpReply(await mcp.addUser(name, config, ids));
@@ -1438,7 +1539,8 @@ const ROUTES = [
     const d = UUID.test(id) ? conversationV2(id) : null;
     return d ? [200, d] : bad('Conversation introuvable : plus de 48 h, ou inconnue.', 404);
   }],
-  ['GET', /^\/api\/v2\/mcp$/, () => [200, mcp.inventory({ connectorsDefault: readState().connectorsDefault })]],
+  ['GET', /^\/api\/v2\/mcp$/, () => [200, { ...mcp.inventory({ connectorsDefault: readState().connectorsDefault }), gateway: gateway.status() }]],
+  ['POST', /^\/api\/v2\/gateway$/, (_, b) => postGateway(b)],
   ['GET', /^\/api\/v2\/accounts$/, () => { const v = accounts.view(); return [200, { ...v, accounts: withCodexAccount(v.accounts || []) }]; }],
   ['GET', /^\/api\/v2\/health$/, () => [200, health()]],
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
@@ -1485,6 +1587,10 @@ async function handle(req, res) {
   if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return send(res, 403, { ok: false, error: 'Hôte refusé.' });
   let url;
   try { url = new URL(req.url, `http://${host}`); } catch { return send(res, 400, { ok: false, error: 'Adresse invalide.' }); }
+  // Passerelle MCP : relayée telle quelle (pas de lecture JSON ni d'en-tête X-Vigie : la clé du MCP suffit).
+  const relay = /^\/mcp\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+  if (relay) return gateway.proxy(req, res, decodeURIComponent(relay[1]), relay[2] || '', url.search);
+  if (req.method === 'GET' && url.pathname === '/oauth/callback') return oauthCallback(url, res);
 
   const found = ROUTES.map(([method, re, fn]) => ({ method, m: re.exec(url.pathname), fn })).filter((r) => r.m);
   if (!found.length) {
@@ -1572,4 +1678,8 @@ server.listen(PORT, HOST, () => {
   setInterval(tick, 4000);
   setTimeout(updateTick, 60_000);
   setInterval(updateTick, 30 * 60_000);
+  if (!process.env.VIGIE_NO_MCP_SYNC) {
+    setTimeout(syncMcpAccounts, 30_000);
+    setInterval(syncMcpAccounts, 5 * 60_000);
+  }
 });

@@ -38,7 +38,7 @@ struct MCPAccountCells: View {
 
     var body: some View {
         let states = accounts.map { ($0, state($0)) }
-        let ok = states.filter { $0.1 == .ok }.map(\.0)
+        // Tout va bien : rien à montrer (l'utilisateur : « tous les comptes tout le temps, on affiche les problèmes »).
         let issues = states.filter { $0.1 != .ok && $0.1 != .unknown }
         HStack(spacing: 6) {
             ForEach(issues.prefix(3), id: \.0.id) { account, st in
@@ -46,22 +46,6 @@ struct MCPAccountCells: View {
             }
             if issues.count > 3 {
                 Text("+\(issues.count - 3)").font(.caption).foregroundStyle(.secondary)
-            }
-            if !ok.isEmpty {
-                Label(issues.isEmpty && ok.count == accounts.count ? (accounts.count > 1 ? "Tous tes comptes" : ok[0].displayName) : "\(ok.count) ok",
-                      systemImage: "checkmark")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .help("Marche sur " + ok.map(\.displayName).joined(separator: ", "))
-                    .contextMenu {
-                        ForEach(ok) { account in
-                            Button("Refaire l'autorisation sur \(account.displayName)", systemImage: "arrow.clockwise") {
-                                Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
-                            }
-                        }
-                    }
-            } else if issues.isEmpty {
-                Text("pas encore vérifié").font(.callout).foregroundStyle(.tertiary)
             }
         }
         .fixedSize()
