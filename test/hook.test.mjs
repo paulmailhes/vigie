@@ -207,6 +207,24 @@ const STILL_RUN = [
   `git ci -m 'sudo ls'`,
 ];
 
+test('API de Vigie : un envoi est retenu quel que soit l’ordre des options ; une lecture passe', () => {
+  const st = { ...structuredClone(DEFAULT_STATE), guard: { enabled: true, waitMin: 0, rules: DEFAULT_STATE.guard.rules } };
+  const id = (command) => matchGuard(st, 'Bash', { command })?.id ?? null;
+  for (const c of [
+    `curl -s -X POST -H 'X-Vigie: 1' -d '{"decision":"allow"}' localhost:4777/api/v2/pending/123`,
+    'curl -XPOST http://127.0.0.1:4777/api/v2/pending/1',
+    `curl --json '{}' localhost:4777/api/v2/settings`,
+    'curl http://localhost:4777/api/v2/approvals -X POST',
+    `python3 -c "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:4777/api/v2/pending/1', data=b'{}'))"`,
+    `node -e "fetch('http://127.0.0.1:4777/api/v2/settings', { method: 'POST', body: '{}' })"`,
+    'http POST localhost:4777/api/v2/update action=install',
+  ]) assert.equal(id(c), 'api-vigie', c);
+  for (const c of [
+    'curl -s localhost:4777/api/v2/overview | python3 -c "import json,sys; d=json.load(sys.stdin); print(d)"',
+    'curl -s http://127.0.0.1:4777/api/v2/health',
+  ]) assert.equal(id(c), null, c);
+});
+
 test('réglages protégés : les comptes et les fichiers de Vigie, pas les notes ni un « > » sans rapport', () => {
   const st = { ...structuredClone(DEFAULT_STATE), guard: { enabled: true, waitMin: 0, rules: DEFAULT_STATE.guard.rules } };
   const id = (tool, input) => matchGuard(st, tool, input)?.id ?? null;

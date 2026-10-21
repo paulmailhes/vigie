@@ -1473,7 +1473,7 @@ async function tick() {
 
 rotateHistory();
 setInterval(rotateHistory, HOUR);
-// Mises à jour : relevé GitHub toutes les 6 h ; automatique (réglage autoUpdate) seulement quand rien n'attend
+// Mises à jour : relevé GitHub toutes les heures ; automatique (réglage autoUpdate) seulement quand rien n'attend
 // l'utilisateur (décision ou question en cours). Pas pendant les tests (VIGIE_NO_UPDATE).
 function updateTick() {
   if (process.env.VIGIE_NO_UPDATE) return;

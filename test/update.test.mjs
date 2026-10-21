@@ -32,15 +32,15 @@ test('versions : comparaison', () => {
   assert.equal(compareVersions('abc', '0.2.6'), 0, 'illisible : rien proposé');
 });
 
-test('mise à jour proposée : dernière version publiée, ni préversion ni brouillon ; relevé espacé de 6 h', async () => {
+test('mise à jour proposée : dernière version publiée, ni préversion ni brouillon ; un relevé par heure', async () => {
   const t = setup('0.2.6', [rel('0.2.9', { prerelease: true }), rel('0.2.8', { draft: true }), rel('0.2.7'), rel('0.2.6'), rel('0.2.5')]);
   const s = await t.u.check();
   assert.deepEqual([s.current, s.latest, s.available, s.installing], ['0.2.6', '0.2.7', true, false]);
   assert.deepEqual(s.releases.map((r) => r.version), ['0.2.7'], 'seulement les notes plus récentes');
   assert.equal(s.releases[0].notes, 'Notes 0.2.7');
   await t.u.check();
-  assert.equal(t.fetches(), 1, 'pas de nouveau relevé avant 6 h');
-  t.advance(6 * 3600_000 + 1);
+  assert.equal(t.fetches(), 1, 'pas de nouveau relevé avant une heure');
+  t.advance(3600_000 + 1);
   await t.u.check();
   assert.equal(t.fetches(), 2);
 });
