@@ -494,8 +494,9 @@ async function holdForVigie(input, rule, state, event) {
 
 // ---------- Codex (OpenAI) : hooks au même format, branchés dans ~/.codex/hooks.json avec --codex ----------
 // Son hook passe AVANT sa fenêtre d'autorisation : une action sensible peut attendre l'accord dans Vigie sans
-// fenêtre en parallèle. Sans autorisations (accès complet), seul PreToolUse voit passer les actions sensibles.
-const NO_APPROVALS = /bypass|full|never|danger|yolo/i;
+// fenêtre en parallèle. Les actions sensibles sont retenues dès PreToolUse, quel que soit le mode : Codex lance
+// sans rien demander ce qui tient dans son bac à sable (un sudo, un rm dans le projet…). Une autorisation donnée
+// en PreToolUse vaut aussi pour le PermissionRequest du même appel (lib/approvals.mjs).
 async function onCodex(input) {
   const ev = input.hook_event_name;
   // Preuve que Codex fait confiance au hook : il ne lance jamais un hook pas encore approuvé.
@@ -509,7 +510,8 @@ async function onCodex(input) {
   const tool = input.tool_name;
   const rule = matchGuard(state, tool, input.tool_input);
   if (ev === 'PreToolUse') {
-    if (!rule || readOnlyShell(tool, input.tool_input) || !NO_APPROVALS.test(String(input.permission_mode || ''))) return;
+    if (!rule || readOnlyShell(tool, input.tool_input)) return;
+    if (state.guard.mode === 'vscode') return; // la fenêtre de Codex s'en charge (PermissionRequest)
     return holdForVigie(input, rule, state, 'PreToolUse');
   }
   if (ev !== 'PermissionRequest') return;
