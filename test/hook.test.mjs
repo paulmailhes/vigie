@@ -150,8 +150,18 @@ const NOT_RUN = [
   `git tag -a v1 -m 'sudo'`,
   `git -C "/tmp/a b" commit --message='sudo rm -rf /'`,
   `git commit -m 'echo x >> ~/.zshrc'`,
+  // vus en vrai (2026-10-21) : motif de recherche, notes de version
+  `grep '"sudo -n true' ~/.vigie/data/history.jsonl | tail -4 | python3 -c "import json,sys"`,
+  `grep -rn "sudo\\|push --force" lib test | head`,
+  `rg -n 'sudo' lib`,
+  `gh release create v1 dist/x.tar.gz --title "v1" --notes "Vigie te prévient si sudo demande un mot de passe"`,
+  `gh release create v1 --notes='plus de sudo'`,
 ];
 const STILL_RUN = [
+  `grep "$(sudo cat /etc/x)" f`,
+  `grep x $(sudo ls)`,
+  `rg --pre 'sudo cat' x`,
+  `grep x f; sudo ls`,
   `bash <<'EOF'\nsudo ls\nEOF`,
   `cat <<'EOF' | bash\nsudo ls\nEOF`,
   `cat <<'EOF' |\nsudo ls\nEOF\nbash`,
@@ -196,6 +206,24 @@ const STILL_RUN = [
   // alias git inconnu : il pourrait lancer ses arguments
   `git ci -m 'sudo ls'`,
 ];
+
+test('réglages protégés : les comptes et les fichiers de Vigie, pas les notes ni un « > » sans rapport', () => {
+  const st = { ...structuredClone(DEFAULT_STATE), guard: { enabled: true, waitMin: 0, rules: DEFAULT_STATE.guard.rules } };
+  const id = (tool, input) => matchGuard(st, tool, input)?.id ?? null;
+  const H = os.homedir();
+  // libres : notes et mémoire dans le dossier d'un compte, lecture d'un fichier de Vigie avec awk
+  assert.equal(id('Write', { file_path: `${H}/.claude-comptes/travail2/projects/-x/memory/note.md`, content: 'x' }), null);
+  assert.equal(id('Edit', { file_path: `${H}/.claude-comptes/travail2/projects/-x/memory/MEMORY.md` }), null);
+  assert.equal(id('Bash', { command: "awk 'NR>0' ~/.vigie/data/history.jsonl | tail -3" }), null);
+  assert.equal(id('Bash', { command: 'tail -4 ~/.vigie/data/history.jsonl > /tmp/x.txt' }), null);
+  // toujours protégés
+  assert.equal(id('Write', { file_path: `${H}/.claude-comptes/travail2/settings.json` }), 'config-claude');
+  assert.equal(id('Write', { file_path: `${H}/.claude-comptes/travail2/.claude.json` }), 'config-claude');
+  for (const c of ['rm -rf ~/.claude-comptes/travail2', 'rm -rf ~/.claude-comptes', 'mv ~/.claude-comptes/travail2 /tmp/',
+    'echo "{}" > ~/.vigie/data/state.json', 'echo x >>~/.zshrc', "cat a > '/Users/a/.claude/settings.json'", 'cp x ~/.vigie/hook.mjs']) {
+    assert.equal(id('Bash', { command: c }), 'config-claude-shell', c);
+  }
+});
 
 test('garde-fou sudo : texte cité non exécuté libre, vrai sudo toujours attrapé', () => {
   const st = { ...structuredClone(DEFAULT_STATE), guard: { enabled: true, waitMin: 0, rules: DEFAULT_STATE.guard.rules } };

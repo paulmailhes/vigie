@@ -19,7 +19,7 @@ struct ReviewRow: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if item.isAwaitingApproval, let command = item.command, !command.isEmpty {
+                if item.needsDecision, let command = item.command, !command.isEmpty {
                     Text(command)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
@@ -79,12 +79,34 @@ struct ReviewRow: View {
                 .glassButton(.primary)
                 .help("Valable une seule fois, pour cette commande : \(item.command ?? item.title ?? "")")
             }
+        case .blocked where item.isPendingDecision:
+            // Décider d'ici, sans ouvrir la fiche ; « Voir » reste là pour la commande entière.
+            HStack(spacing: 6) {
+                Button("Voir") { store.blockedRequest = item }
+                    .glassButton()
+                    .help("La commande en entier")
+                Button {
+                    Task { _ = await store.decidePending(item, allow: false) }
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .glassButton()
+                .help("Refuser")
+                .accessibilityLabel("Refuser")
+                Button {
+                    Task { _ = await store.decidePending(item, allow: true) }
+                } label: {
+                    Label("Autoriser", systemImage: "checkmark")
+                }
+                .glassButton(.primary)
+                .help("Autoriser : \(item.command ?? item.title ?? "")")
+            }
         case .blocked:
             Button("Voir") {
                 store.blockedRequest = item
             }
-            .glassButton(item.isPendingDecision ? .primary : .secondary)
-            .help(item.isPendingDecision ? "Autoriser ou refuser" : "La commande et quoi faire")
+            .glassButton()
+            .help("La commande et quoi faire")
         case .waiting where !item.questions.isEmpty && item.pendingId != nil:
             Button("Répondre") { store.answerRequest = item }
                 .glassButton(.primary)

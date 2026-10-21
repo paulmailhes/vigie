@@ -32,36 +32,56 @@ struct OverviewView: View {
                 .padding(.horizontal, 6)
             }
 
+            // Ordre d'importance : ce qui t'attend ou a mal tourné remonte ; la consommation passe devant les
+            // acceptations quand un compte approche de sa limite.
+            CardSection(sinceHeader) {
+                SinceRow()
+            }
+
             if !urgent.isEmpty {
                 urgentSection
             }
 
             ConversationListSection()
 
-            UsageSection()
-
-            AcceptedFeedSection()
+            if usageAlert {
+                UsageSection()
+                AcceptedFeedSection()
+            } else {
+                AcceptedFeedSection()
+                UsageSection()
+            }
 
             if !later.isEmpty {
                 laterSection
-            }
-
-            CardSection(sinceHeader) {
-                SinceRow()
             }
         }
         .task { await store.followCardDetails() }
     }
 
-    /// Ce qui attend ta décision maintenant (rouge) : toujours en haut, en entier.
+    /// En haut, en entier : ce qui attend ta décision hors d'une conversation ouverte (elle l'affiche sous elle),
+    /// et ce qui a mal tourné (autorisée mais échouée, refusée, limite atteinte), où que ce soit.
     private var urgent: [ReviewItem] {
         let open = Set(store.conversations.filter(\.isOpen).map(\.id))
-        return store.toReview.filter { ($0.needsDecision || $0.reviewKind == .waiting) && !open.contains($0.conversationId ?? "") }
+        return store.toReview.filter {
+            (($0.needsDecision || $0.reviewKind == .waiting) && !open.contains($0.conversationId ?? "")) || Self.important($0)
+        }
     }
 
-    /// Le reste (questions choisies pour toi, actions laissées de côté, limites) : à relire, sans urgence.
+    private static func important(_ item: ReviewItem) -> Bool {
+        (item.reviewKind == .blocked && !item.needsDecision) || item.reviewKind == .limit
+    }
+
+    /// Le reste (questions choisies pour toi…) : à relire, sans urgence.
     private var later: [ReviewItem] {
-        store.toReview.filter { !($0.needsDecision || $0.reviewKind == .waiting) }
+        store.toReview.filter { !($0.needsDecision || $0.reviewKind == .waiting) && !Self.important($0) }
+    }
+
+    /// Un compte qui fait tourner une conversation ouverte passe 90 % de sa semaine : la consommation remonte
+    /// (un compte plein dont on ne se sert pas ne compte pas).
+    private var usageAlert: Bool {
+        let used = Set(store.conversations.filter(\.isOpen).compactMap(\.accountId))
+        return store.accounts.contains { used.contains($0.id) && ($0.usage?.week?.pct ?? 0) >= 90 }
     }
 
     private var urgentSection: some View {
@@ -71,7 +91,7 @@ struct OverviewView: View {
             }
         } header: {
             HStack(spacing: 6) {
-                Text("À décider")
+                Text("À regarder")
                 CountBadge(count: urgent.count, urgent: true)
             }
         }

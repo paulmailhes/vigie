@@ -348,12 +348,12 @@ test('Claude Code : action sensible, la fenêtre s\'affiche dans la conversation
 });
 
 // Codex, avant toute fenêtre : PreToolUse retient l'action le temps que l'utilisateur décide dans l'app.
-function preHold(command, act) {
+function preHold(command, act, extra = {}) {
   freshVigie(10);
-  const p = spawn(process.execPath, CODEX_ARGS, { env: { ...env, HOME, VIGIE_POLL_MS: '100' } });
+  const p = spawn(process.execPath, CODEX_ARGS, { env: { ...env, HOME, VIGIE_POLL_MS: '100', VIGIE_FOLLOW_MS: '8000' } });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
-  p.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'test-session', cwd: '/tmp', tool_name: 'Bash', tool_input: { command } }));
+  p.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'test-session', cwd: '/tmp', tool_name: 'Bash', tool_input: { command }, ...extra }));
   let holding = null;
   const t = setInterval(() => {
     let items = [];
@@ -407,6 +407,38 @@ test('Codex : autorisée en PreToolUse, Codex redemande en PermissionRequest : a
   // une relance identique ensuite : de nouveau à autoriser
   const third = vigieRun('sudo -n true');
   assert.equal(behavior(third.out), 'deny');
+});
+
+test('Codex : autorisée dans Vigie mais échouée (commande longue, code 127) : une seule alerte, même après les deux passages', async () => {
+  const tp = path.join(TMP, 'rollout-test.jsonl');
+  const item = (payload) => JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload }) + '\n';
+  fs.writeFileSync(tp, item({ type: 'custom_tool_call', call_id: 'call_X', name: 'exec', input: 'text(await tools.exec_command({cmd:"sudo -n true",max_output_tokens:1000}));\n' }));
+  const extra = { transcript_path: tp, tool_use_id: 'call_interne' };
+  const o = await preHold('sudo -n true', (it) => approve(it.approvalId, 'allow', { history: hist() }), extra);
+  assert.equal(o.permissionDecision, 'allow');
+  setGuard(0);
+  // second passage du même appel (PermissionRequest) : accepté, sans seconde alerte
+  assert.equal(behavior(codexRun({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo -n true' }, ...extra })), 'allow');
+  fs.appendFileSync(tp, item({ type: 'custom_tool_call_output', call_id: 'call_X', output: 'Script running with cell ID 4\nWall time 31.0 seconds\nOutput:\n' }));
+  fs.appendFileSync(tp, item({ type: 'function_call', call_id: 'call_W', name: 'wait', arguments: '{"cell_id":"4","yield_time_ms":1000}' }));
+  fs.appendFileSync(tp, item({ type: 'function_call_output', call_id: 'call_W', output: [{ type: 'input_text', text: 'Script completed\nOutput:\n' },
+    { type: 'input_text', text: '{"exit_code":127,"output":"zsh:1: operation not permitted: sudo\\n"}' }] }));
+  for (let i = 0; i < 100 && !hist().some((h) => h.event === 'garde-fou-echec'); i++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 2500)); // laisse finir le second suivi
+  const fails = hist().filter((h) => h.event === 'garde-fou-echec');
+  assert.equal(fails.length, 1, 'une seule alerte');
+  assert.equal(fails[0].extrait, 'zsh:1: operation not permitted: sudo');
+  assert.equal(fails[0].ruleId, 'sudo');
+});
+
+test('Codex : autorisée et réussie (code 0) : rien de plus', async () => {
+  const tp = path.join(TMP, 'rollout-ok.jsonl');
+  const item = (payload) => JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload }) + '\n';
+  fs.writeFileSync(tp, item({ type: 'function_call', call_id: 'call_Y', name: 'shell_command', arguments: JSON.stringify({ command: 'git push --force origin main' }) }));
+  await preHold('git push --force origin main', (it) => approve(it.approvalId, 'allow', { history: hist() }), { transcript_path: tp });
+  fs.appendFileSync(tp, item({ type: 'function_call_output', call_id: 'call_Y', output: 'Exit code: 0\nOutput:\nok' }));
+  await new Promise((r) => setTimeout(r, 2000));
+  assert.equal(hist().filter((h) => h.event === 'garde-fou-echec').length, 0);
 });
 
 test('question en attente, réponse donnée dans VS Code : vue même si l’entrée diffère un peu (champ ajouté, ordre)', () => {

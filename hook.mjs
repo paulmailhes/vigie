@@ -210,23 +210,85 @@ const FOLLOW_MS = Number(process.env.VIGIE_FOLLOW_MS) || 15 * 60_000;
 function followResult(input, rule, since) {
   const tp = transcriptFor(input);
   if (!tp || !fs.existsSync(tp)) return;
+  if (CODEX && !SHELL_LIKE.has(input.tool_name)) return; // Codex : seules les commandes ont un code de sortie lisible
   try {
     const job = path.join(os.tmpdir(), `vigie-suivi-${process.pid}-${Date.now()}.json`);
     const { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id } = input;
-    fs.writeFileSync(job, JSON.stringify({ input: { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id }, info: ruleInfo(rule), since }), { mode: 0o600 });
+    // un même appel peut être autorisé deux fois (Codex : PreToolUse puis PermissionRequest) : une seule alerte
+    const cle = `${session_id}:${tool_use_id || callHash(session_id, tool_name, tool_input)}`;
+    fs.writeFileSync(job, JSON.stringify({ input: { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id }, info: ruleInfo(rule), since, codex: CODEX, cle }), { mode: 0o600 });
     spawn(process.execPath, [fileURLToPath(import.meta.url), '--suivi', job], { detached: true, stdio: 'ignore' }).unref();
   } catch { /* facultatif : sans suivi, pas d'alerte d'échec */ }
 }
 async function onFollow(job) {
   let j;
   try { j = JSON.parse(fs.readFileSync(job, 'utf8')); } catch { return; } finally { try { fs.unlinkSync(job); } catch { /* déjà retiré */ } }
-  const result = transcriptWatcher(j.input, j.since);
+  const result = j.codex ? codexWatcher(j.input, j.since) : transcriptWatcher(j.input, j.since);
   for (const end = Date.now() + FOLLOW_MS; Date.now() < end; await sleep(Math.min(POLL_MS, 2000))) {
     const r = result();
     if (!r) continue;
-    if (!r.ok) log(j.input, 'garde-fou-echec', { ...j.info, extrait: r.extrait });
+    if (!r.ok && !tail(HISTORY_FILE).some((l) => l.includes('"garde-fou-echec"') && l.includes(JSON.stringify(j.cle)))) {
+      log(j.input, 'garde-fou-echec', { ...j.info, extrait: r.extrait, cle: j.cle });
+    }
     return;
   }
+}
+
+// Historique de Codex (rollout) : l'appel (par son identifiant, sinon par le texte de la commande), puis sa sortie ;
+// une commande longue rend « Script running with cell ID n » et finit dans un « wait » sur cette cellule.
+// Résultat : { ok: exit_code === 0, extrait } dès qu'un code de sortie est lu.
+const SHELL_LIKE = new Set(['Bash', 'shell', 'shell_command', 'exec_command', 'local_shell']);
+function codexWatcher(input, sinceMs) {
+  const tp = String(input.transcript_path || '');
+  const cmd = String(input.tool_input?.command ?? input.tool_input?.cmd ?? '');
+  const needle = cmd ? JSON.stringify(cmd).slice(1, -1) : null;
+  const ids = new Set(input.tool_use_id ? [String(input.tool_use_id)] : []);
+  const cells = new Set();
+  let offset = null, carry = '';
+  const textOf = (o) => (typeof o === 'string' ? o : Array.isArray(o) ? o.map((x) => x?.text ?? '').join('\n') : JSON.stringify(o ?? ''));
+  const scan = (line) => {
+    if (!line.includes('call')) return null;
+    let r; try { r = JSON.parse(line); } catch { return null; }
+    const p = r?.payload;
+    if (r?.type !== 'response_item' || !p?.call_id) return null;
+    if (p.type === 'custom_tool_call' || p.type === 'function_call') {
+      const args = String(p.input ?? p.arguments ?? '');
+      if (Date.parse(r.timestamp || 0) < sinceMs - 120_000) return null;
+      const cell = /"cell_id"\s*:\s*"?(\w+)/.exec(args)?.[1];
+      if ((needle && args.includes(needle)) || (cell && cells.has(cell))) ids.add(p.call_id);
+      return null;
+    }
+    if ((p.type === 'custom_tool_call_output' || p.type === 'function_call_output') && ids.has(p.call_id)) {
+      const text = textOf(p.output);
+      const code = /"exit_code"\s*:\s*(-?\d+)/.exec(text)?.[1] ?? /(?:^|\n)(?:Exit code|Process exited with code):?\s*(-?\d+)/i.exec(text)?.[1];
+      if (code !== undefined) {
+        let out = text;
+        try { out = JSON.parse(text.slice(text.indexOf('{"'))).output ?? text; } catch { /* sortie brute */ }
+        return { ok: Number(code) === 0, extrait: String(out).trim().slice(0, 300) };
+      }
+      const cell = /cell ID (\w+)/.exec(text)?.[1];
+      if (cell) cells.add(cell);
+    }
+    return null;
+  };
+  return () => {
+    if (!tp) return null;
+    try {
+      const st = fs.statSync(tp);
+      if (offset === null || st.size < offset) { offset = Math.max(0, st.size - 2 * 1024 * 1024); carry = ''; }
+      if (st.size <= offset) return null;
+      const len = Math.min(st.size - offset, 64 * 1024 * 1024);
+      const buf = Buffer.alloc(len);
+      const fd = fs.openSync(tp, 'r');
+      try { fs.readSync(fd, buf, 0, len, offset); } finally { fs.closeSync(fd); }
+      offset += len;
+      const lines = (carry + buf.toString('utf8')).split('\n');
+      carry = lines.pop() ?? '';
+      if (carry.length > 32 * 1024 * 1024) carry = '';
+      for (const line of lines) { const done = scan(line); if (done) return done; }
+    } catch { /* en cas de doute : on continue d'attendre */ }
+    return null;
+  };
 }
 
 function classifierFallback(input) {
@@ -482,7 +544,10 @@ async function holdForVigie(input, rule, state, event) {
   const hash = callHash(sid, tool, input.tool_input);
   const info = { ...ruleInfo(rule), hash };
   const ok = takeApproval({ sessionId: sid, tool, hash, event });
-  if (ok) return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId: ok.approvalId });
+  if (ok) {
+    followResult(input, rule, Date.now());
+    return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId: ok.approvalId });
+  }
   const approvalId = newApprovalId();
   const minutes = state.guard.waitMin;
   if (minutes <= 0) return decide(input, 'garde-fou-en-attente-vigie', preOutput('deny', vigieWaitMessage(rule)), { ...info, approvalId });
@@ -495,7 +560,10 @@ async function holdForVigie(input, rule, state, event) {
     if (!matchGuard(s, tool, input.tool_input)) return 'off';
     return true;
   });
-  if (r === 'allow') return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId });
+  if (r === 'allow') {
+    followResult(input, rule, start);
+    return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId });
+  }
   if (r === 'deny') {
     return decide(input, 'garde-fou-refuse-vigie', preOutput('deny', `L'utilisateur a refusé cette action dans Vigie (garde-fou : « ${rule.label} »). ` +
       'Ne la retente pas et ne cherche pas à la contourner : continue le reste du travail et signale-la dans ton compte rendu.'), { ...info, approvalId });
