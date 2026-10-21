@@ -1,31 +1,53 @@
 import SwiftUI
 import UserNotifications
 
-/// Premier lancement : ce qu'est Vigie, les actions sensibles, les comptes Claude, puis on active.
-/// Revoir à tout moment : menu Vigie > Revoir l'accueil.
+/// Les étapes de l'accueil ; Codex n'apparaît que si l'utilisateur s'en sert.
+enum OnboardingStep: Hashable {
+    case welcome, tools, guards, accounts, codex, mcps, ready
+}
+
+/// Premier lancement : ce qu'est Vigie, les outils de l'utilisateur, les actions sensibles, les comptes, Codex,
+/// les MCP, puis on active. Revoir à tout moment : menu Vigie > Revoir l'accueil.
 struct OnboardingView: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @AppStorage(OnboardingView.doneKey) private var done = false
     @State private var step: Int
+    /// Outils cochés (pré-cochés d'après ce que Vigie trouve sur le Mac).
+    @State private var choice = ToolsChoice(claudeVSCode: true)
+    @State private var choiceLoaded = false
+    /// Codex passé sans approuver ses hooks : on le redit, sans bloquer.
+    @State private var codexSkipped = false
+    private let startAt: OnboardingStep
 
     /// `start` : ouvrir directement sur une étape (captures d'écran).
-    init(start: Int = 0) { _step = State(initialValue: start) }
+    init(start: OnboardingStep = .welcome) {
+        startAt = start
+        _step = State(initialValue: 0)
+    }
 
     static let doneKey = "onboarding.done"
-    private let steps = 5
+
+    private var steps: [OnboardingStep] {
+        var list: [OnboardingStep] = [.welcome, .tools, .guards, .accounts]
+        if choice.usesCodex { list.append(.codex) }
+        return list + [.mcps, .ready]
+    }
+    private var current: OnboardingStep { steps[min(step, steps.count - 1)] }
 
     var body: some View {
         VStack(spacing: 0) {
             // Défile quand l'étape est plus haute que la fenêtre (beaucoup de comptes) : les boutons restent visibles.
             ScrollView {
                 Group {
-                    switch step {
-                    case 0: welcome
-                    case 1: guards
-                    case 2: accounts
-                    case 3: mcps
-                    default: ready
+                    switch current {
+                    case .welcome: welcome
+                    case .tools: toolsStep
+                    case .guards: guards
+                    case .accounts: accounts
+                    case .codex: codexStep
+                    case .mcps: mcps
+                    case .ready: ready
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -40,7 +62,89 @@ struct OnboardingView: View {
                 .padding(.vertical, 20)
         }
         .frame(width: 600, height: 600)
-        .task { await store.refreshAccounts() }
+        .task {
+            await store.refreshAccounts()
+            await store.refreshTools()
+            if !choiceLoaded, let tools = store.tools {
+                choice = tools.chosen ?? tools.detected ?? choice
+                if !choice.any { choice.claudeVSCode = true }
+                choiceLoaded = true
+            }
+            if let index = steps.firstIndex(of: startAt) { step = index }
+        }
+    }
+
+    // MARK: Outils
+
+    private var toolsStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header("square.grid.2x2", "Avec quoi travailles-tu ?",
+                   "Coche ce que tu utilises : Vigie s'adapte. Il a déjà coché ce qu'il a trouvé sur ton Mac.")
+            toolGroup("Claude Code", [
+                (\ToolsChoice.claudeVSCode, "Dans VS Code", "L'extension Claude Code", store.tools?.detected?.claudeVSCode == true),
+                (\ToolsChoice.claudeApp, "Dans l'app Claude", "L'onglet Code de l'app de bureau", store.tools?.detected?.claudeApp == true),
+            ])
+            toolGroup("Codex (OpenAI)", [
+                (\ToolsChoice.codexVSCode, "Dans VS Code", "L'extension Codex", store.tools?.detected?.codexVSCode == true),
+                (\ToolsChoice.codexApp, "Dans l'app ChatGPT", "Codex dans l'app de bureau", store.tools?.detected?.codexApp == true),
+            ])
+            Text("Tu peux en cocher plusieurs : Vigie suit tes conversations où qu'elles soient.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func toolGroup(_ title: String, _ rows: [(WritableKeyPath<ToolsChoice, Bool>, String, String, Bool)]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    Toggle(isOn: Binding(get: { choice[keyPath: row.0] }, set: { choice[keyPath: row.0] = $0 })) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.1)
+                                Text(row.2).font(.callout).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if row.3 {
+                                Label("Trouvé sur ton Mac", systemImage: "checkmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .padding(12)
+                    if index < rows.count - 1 { Divider() }
+                }
+            }
+            .background(.quinary, in: .rect(cornerRadius: Theme.corner))
+        }
+    }
+
+    // MARK: Codex
+
+    private var codexAccount: Account? { store.accounts.first(where: \.isCodex) }
+    private var codexReady: Bool { codexAccount?.isConnected == true && codexAccount?.hook?.trusted == true }
+
+    private var codexStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header("chevron.left.forwardslash.chevron.right", "Codex",
+                   "Deux choses à faire une seule fois. Sans elles, Vigie ne peut rien accepter pour Codex.")
+            if codexAccount == nil {
+                Label("Codex n'a pas encore été ouvert sur ce Mac : ouvre-le une fois, puis reviens ici.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(Theme.warn)
+            } else {
+                CodexSetupSteps(account: codexAccount, tools: choice)
+                    .padding(14)
+                    .background(.quinary, in: .rect(cornerRadius: Theme.corner))
+            }
+            if codexSkipped && !codexReady {
+                Label("Sans ces deux étapes, Codex n'est pas surveillé. Tu pourras les faire plus tard dans Comptes.", systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(Theme.warn)
+            }
+        }
     }
 
     // MARK: 1. Bienvenue
@@ -99,8 +203,8 @@ struct OnboardingView: View {
 
     private var accounts: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header("person.2.crop.square.stack", "Tes comptes IA",
-                   "Claude et Codex. Plusieurs abonnements Claude ? Ajoute-les : ils restent connectés, et tu choisis le compte de chaque conversation.")
+            header("person.2.crop.square.stack", "Tes comptes Claude",
+                   "Plusieurs abonnements Claude ? Ajoute-les : Vigie suit la consommation de chacun\(choice.claudeVSCode ? ", et tu choisis le compte de chaque conversation" : "").")
             VStack(spacing: 0) {
                 ForEach(store.accounts) { account in
                     OnboardingAccountRow(account: account)
@@ -113,54 +217,31 @@ struct OnboardingView: View {
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             Button("Ajouter un compte Claude", systemImage: "plus") { showAdd = true }
                 .glassButton()
-            codexRow
-            // Toujours proposé : même avec un seul compte, c'est ce lanceur qui coupe les MCP du compte.
-            Toggle(isOn: wrapperBinding) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Vigie lance tes conversations dans VS Code")
-                    Text("Chaque conversation sur le compte que tu lui choisis, et les MCP du compte coupés ou non (étape suivante).")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+            // VS Code seulement : c'est ce lanceur qui choisit le compte de chaque conversation et coupe les MCP du
+            // compte (même avec un seul compte). L'app Claude, elle, utilise le compte connecté dans l'app.
+            if choice.claudeVSCode {
+                Toggle(isOn: wrapperBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Choisir le compte de chaque conversation (VS Code)")
+                        Text("Vigie démarre tes conversations Claude dans VS Code avec le compte que tu choisis pour chacune. Recommandé, même avec un seul compte.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .toggleStyle(.switch)
             }
-            .toggleStyle(.switch)
+            if choice.claudeApp {
+                Text("Dans l'app Claude, la conversation utilise le compte connecté dans l'app.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
         .sheet(isPresented: $showAdd) { OnboardingAddAccountSheet() }
-        .sheet(isPresented: $showCodex) { CodexSetupSheet() }
     }
-
-    @State private var showCodex = false
 
     private var wrapperActive: Bool { store.accountsState?.wrapper?.active == true }
     private var wrapperBinding: Binding<Bool> {
         Binding(get: { wrapperActive }, set: { on in Task { await store.setWrapper(on) } })
-    }
-
-    /// Codex (OpenAI), s'il est installé : connexion et approbation du hook, dans une feuille dédiée.
-    @ViewBuilder
-    private var codexRow: some View {
-        if let codex = store.accounts.first(where: \.isCodex) {
-            let ready = codex.isConnected && codex.hook?.trusted == true
-            HStack(spacing: 12) {
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Codex (OpenAI)").font(.headline)
-                    Text(ready ? "Connecté, auto-accept actif" : codex.isConnected ? "Connecté · hook de Vigie à approuver" : "Pas encore connecté")
-                        .font(.callout)
-                        .foregroundStyle(ready ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.warn))
-                }
-                Spacer()
-                if !ready {
-                    Button("Connecter Codex") { showCodex = true }
-                        .glassButton(.primary)
-                }
-            }
-            .padding(12)
-            .background(.quinary, in: .rect(cornerRadius: Theme.corner))
-        }
     }
 
     // MARK: 4. MCP
@@ -193,9 +274,9 @@ struct OnboardingView: View {
                     }
                     .toggleStyle(.switch)
                     .padding(.horizontal, 12)
-                    .padding(.bottom, wrapperActive ? 10 : 4)
+                    .padding(.bottom, wrapperActive || !choice.claudeVSCode ? 10 : 4)
                     // Sans le lanceur, Claude Code charge toujours les MCP du compte : on le dit, et on propose de l'activer.
-                    if !wrapperActive && !store.connectorsDefaultOn {
+                    if choice.claudeVSCode && !wrapperActive && !store.connectorsDefaultOn {
                         HStack(spacing: 8) {
                             Label("Pour les couper, Vigie doit lancer tes conversations.", systemImage: "exclamationmark.triangle")
                                 .font(.callout)
@@ -292,7 +373,7 @@ struct OnboardingView: View {
     private var footer: some View {
         HStack {
             HStack(spacing: 6) {
-                ForEach(0..<steps, id: \.self) { index in
+                ForEach(0..<steps.count, id: \.self) { index in
                     Circle()
                         .fill(index == step ? AnyShapeStyle(Theme.action) : AnyShapeStyle(.quaternary))
                         .frame(width: 7, height: 7)
@@ -303,8 +384,16 @@ struct OnboardingView: View {
                 Button("Retour") { withAnimation(.smooth) { step -= 1 } }
                     .glassButton()
             }
-            Button(step == steps - 1 ? "Commencer" : "Continuer") {
-                if step == steps - 1 {
+            if current == .codex && !codexReady {
+                Button(codexSkipped ? "Passer quand même" : "Plus tard") {
+                    if codexSkipped { withAnimation(.smooth) { step += 1 } } else { codexSkipped = true }
+                }
+                .glassButton()
+                .help("Codex ne sera pas surveillé tant que ce n'est pas fait")
+            }
+            Button(step == steps.count - 1 ? "Commencer" : "Continuer") {
+                if current == .tools { Task { await store.saveTools(choice) } }
+                if step == steps.count - 1 {
                     done = true
                     dismiss()
                 } else {
@@ -313,6 +402,8 @@ struct OnboardingView: View {
             }
             .keyboardShortcut(.defaultAction)
             .glassButton(.primary)
+            // Codex : on n'avance qu'une fois connecté et ses hooks approuvés (ou par « Plus tard »)
+            .disabled((current == .codex && !codexReady) || (current == .tools && !choice.any))
         }
         .controlSize(.large)
     }

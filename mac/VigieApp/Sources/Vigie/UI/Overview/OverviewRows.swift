@@ -121,7 +121,9 @@ struct ReviewRow: View {
                 .help("Voir la question et y répondre d'ici")
         case .waiting, .other:
             if inConversation {
-                AsyncButton("Répondre dans VS Code") { await store.openConversationInVSCode(item.conversationId, cwd: item.cwd) }
+                AsyncButton(item.conversationId.flatMap { store.conversation($0)?.replyLabel } ?? "Répondre dans VS Code") {
+                    await store.openConversationInVSCode(item.conversationId, cwd: item.cwd)
+                }
                 .glassButton(.primary)
                 .help("Ouvre cette conversation dans VS Code")
             } else {

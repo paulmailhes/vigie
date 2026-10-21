@@ -236,3 +236,19 @@ struct PendingQuestion: Decodable, Equatable, Sendable {
         var description: String?
     }
 }
+
+/// Les outils de l'utilisateur (accueil) : ce que Vigie a trouvé sur le Mac, et ce qu'il a choisi.
+struct ToolsChoice: Codable, Equatable, Sendable {
+    var claudeVSCode = false
+    var claudeApp = false
+    var codexVSCode = false
+    var codexApp = false
+
+    var usesCodex: Bool { codexVSCode || codexApp }
+    var any: Bool { claudeVSCode || claudeApp || codexVSCode || codexApp }
+}
+
+struct ToolsState: Decodable, Equatable, Sendable {
+    var detected: ToolsChoice?
+    var chosen: ToolsChoice?
+}

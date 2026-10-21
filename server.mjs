@@ -19,6 +19,7 @@ import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAu
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
+import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -46,6 +47,8 @@ const conv = createConversations(indexer);
 const codex = createCodex({ dataDir: DATA });
 const accounts = createAccounts();
 const updater = createUpdater({ root: ROOT, dataDir: DATA });
+// Apps de bureau (Claude, ChatGPT/Codex) : titres de l'app Claude, outils installés (lib/desktop.mjs).
+const desktop = createDesktop({ home: accounts.paths.home });
 // Passerelle MCP : une autorisation par service pour tous les comptes (lib/gateway.mjs). Port lu au moment voulu
 // (les tests lancent le moteur sur un port libre).
 const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`) });
@@ -487,6 +490,9 @@ const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'
 function reviewItems(ctx, sums) {
   const titles = new Map(sums.map((s) => [s.id, s.title]));
   const title = (sid) => titles.get(sid) ?? null;
+  // « dans VS Code », « dans l'app Claude »… selon l'outil de la conversation
+  const surfaces = new Map(sums.map((s) => [s.id, surfaceOf(s)]));
+  const where = (sid) => SURFACES[surfaces.get(sid) || 'vscode'];
   const live = [], past = [];
   for (const [sid, list] of ctx.waits) {
     for (const w of list) {
@@ -496,22 +502,22 @@ function reviewItems(ctx, sums) {
         const answerable = Array.isArray(w.questions) && w.questions.length && w.pid;
         live.push({ id: `w:${sid}:${w.ts}`, kind: 'waiting', conversationId: sid, conversationTitle: title(sid),
           title: short(w.tool === 'ExitPlanMode' ? 'Plan à valider' : questionText(w.action) || 'Question de Claude', 120),
-          detail: w.ask ? (answerable ? 'Réponds ici ou dans VS Code.' : 'Réponds dans VS Code.')
-            : `Réponds ${answerable ? 'ici ou ' : ''}dans VS Code, sinon Claude choisit l'option recommandée ${when}.`,
+          detail: w.ask ? (answerable ? `Réponds ici ou dans ${where(sid)}.` : `Réponds dans ${where(sid)}.`)
+            : `Réponds ${answerable ? 'ici ou ' : ''}dans ${where(sid)}, sinon Claude choisit l'option recommandée ${when}.`,
           ...(answerable ? { pendingId: String(w.pid), questions: w.questions } : {}), ts: w.ts });
       } else {
         live.push({ id: `g:${sid}:${w.ts}`, kind: 'blocked', state: 'waiting', pendingId: w.pendingId, expiresAt: w.expiresAt,
           conversationId: sid, conversationTitle: title(sid), cwd: w.cwd ?? null,
           rule: w.rule || 'Action sensible', ruleId: w.ruleId ?? null, command: mask(w.command).slice(0, MAX_COMMAND),
           byAgent: agentName(sid, w.agentId), needsPassword: !!w.needsPassword,
-          title: short(w.rule || 'Action sensible', 120), detail: `${what(w)} · décide ici ou dans VS Code, sinon refusée ${when}.`, ts: w.ts });
+          title: short(w.rule || 'Action sensible', 120), detail: `${what(w)} · décide ici ou dans ${where(sid)}, sinon refusée ${when}.`, ts: w.ts });
       }
     }
   }
   for (const s of sums) {
     if (s.status !== 'waiting' || ctx.waits.has(s.id)) continue;
     live.push({ id: `c:${s.id}`, kind: 'waiting', conversationId: s.id, conversationTitle: s.title,
-      title: 'Attend ta réponse dans VS Code', detail: s.headline || null, ts: s.lastActivity || new Date(ctx.now).toISOString() });
+      title: `Attend ta réponse dans ${where(s.id)}`, detail: s.headline || null, ts: s.lastActivity || new Date(ctx.now).toISOString() });
   }
   // Mode « seulement par Vigie » : refusées sur le moment, à autoriser ici (une fois, pour l'appel exact).
   let awaiting = [];
@@ -534,7 +540,7 @@ function reviewItems(ctx, sums) {
   if (cx?.connected && cx.hook?.installed && !cx.hook.trusted) {
     live.push({ id: 'codex-hook', kind: 'waiting', conversationId: null, conversationTitle: 'Codex',
       title: 'Codex : approuve le hook de Vigie',
-      detail: 'Sans lui, pas d\'auto-accept pour Codex. Dans VS Code, panneau Codex : en bas, « Review hooks », accepte les deux hooks Vigie.',
+      detail: 'Sans lui, Vigie ne peut rien accepter pour Codex. Dans Codex (panneau de VS Code ou app ChatGPT) : « Review hooks », puis accepte les deux hooks Vigie.',
       ts: new Date(ctx.now).toISOString() });
   }
   for (const n of switchNotices) {
@@ -626,11 +632,14 @@ function decorate(sum, ctx, needs, accepted) {
   if (stopped) status = 'waiting';
   const tests = sum.tests ? { ...sum.tests } : null;
   if (tests?.failedRecent > 0) tests.failures = cardFailures(sum.id, ctx.now);
+  const surface = surfaceOf(sum);
+  const fromApp = surface === 'claude-app' ? desktop.claudeSessions().get(sum.id) : null;
   const out = {
     id: sum.id,
-    title: sum.title,
-    project: sum.project,
+    title: fromApp?.title || sum.title,
+    project: isScratch(sum.cwd) ? 'App Claude' : sum.project,
     cwd: sum.cwd,
+    surface,
     status,
     running: sum.running,
     accountId,
@@ -908,7 +917,7 @@ function decorateCodex(sum, ctx, needs, accepted) {
   const ov = Object.hasOwn(ctx.state.sessions, sum.id) ? ctx.state.sessions[sum.id] : null;
   const waits = ctx.waits.get(sum.id) || [];
   return {
-    id: sum.id, agent: 'codex', title: sum.title, project: sum.project, cwd: sum.cwd,
+    id: sum.id, agent: 'codex', title: sum.title, project: sum.project, cwd: sum.cwd, surface: surfaceOf(sum),
     status: sum.running && waits.length ? 'blocked' : sum.status, running: sum.running,
     accountId: 'codex', account: null,
     autoAccept: eff.autoAccept, autoAcceptOverride: typeof ov?.autoAccept === 'boolean' ? ov.autoAccept : null,
@@ -979,6 +988,12 @@ function postSettings(body) {
     s.connectorsDefault = body.connectorsDefault;
   }
   if ('autoUpdate' in body) { if (typeof body.autoUpdate !== 'boolean') return bad('Mises à jour automatiques : oui ou non.'); s.autoUpdate = body.autoUpdate; }
+  if ('tools' in body) {
+    const t = body.tools;
+    const keys = ['claudeVSCode', 'claudeApp', 'codexVSCode', 'codexApp'];
+    if (!isObj(t) || !keys.every((k) => typeof t[k] === 'boolean')) return bad('Outils illisibles.');
+    s.tools = Object.fromEntries(keys.map((k) => [k, t[k]]));
+  }
   if ('guard' in body) {
     const g = body.guard;
     if (!isObj(g)) return bad('Garde-fous illisibles.');
@@ -1107,8 +1122,28 @@ function runBin(bin, args, { input = null, timeoutMs = 15_000 } = {}) {
 
 // { kind: "conversation", id } : VS Code s'ouvre sur le dossier de la conversation, puis sur la conversation
 // elle-même (lien de l'extension Claude Code : rien n'est envoyé, la saisie reste vide).
+// L'app de bureau qui porte la conversation : pas de lien vers une conversation précise (non documenté), l'app
+// s'ouvre et la conversation est dans sa liste.
+async function openApp(bundleId, name, message) {
+  const r = await runBin(OPEN_BIN, ['-b', bundleId]);
+  if (!r.ok && !(await runBin(OPEN_BIN, ['-a', name])).ok) return bad(`${name} ne s'est pas ouverte.`);
+  return [200, { ok: true, message }];
+}
 async function openConversation(id) {
   if (typeof id !== 'string' || !UUID.test(id)) return bad('Conversation inconnue.', 404);
+  const cx = safeCodex(() => codex.summaries(), []).find((s) => s.id === id);
+  if (cx) {
+    const surface = surfaceOf(cx);
+    if (surface === 'codex-app') return openApp('com.openai.codex', 'ChatGPT', `L'app ChatGPT est ouverte : « ${short(cx.title, 60)} » est dans Codex.`);
+    if (!cx.cwd || !isDir(cx.cwd)) return bad('Le dossier de cette conversation n\'existe plus.', 404);
+    if (!(await runBin(OPEN_BIN, ['-a', 'Visual Studio Code', cx.cwd])).ok) return bad('VS Code ne s\'est pas ouvert.');
+    return [200, { ok: true, message: `VS Code est ouvert sur ${path.basename(cx.cwd)} : la conversation est dans le panneau Codex.` }];
+  }
+  const s = indexer.sessions.get(id);
+  if (surfaceOf({ entrypoint: indexer.live.get(id)?.entrypoint || s?.entrypoint }) === 'claude-app') {
+    const t = desktop.claudeSessions().get(id)?.title || s?.title;
+    return openApp('com.anthropic.claudefordesktop', 'Claude', `L'app Claude est ouverte${t ? ` : « ${short(t, 60)} » est dans Code` : ''}.`);
+  }
   const dir = launchDirOf(id);
   if (!dir) return bad('Conversation introuvable : plus de 7 jours, ou inconnue.', 404);
   if (!isDir(dir)) return bad('Le dossier de cette conversation n\'existe plus.', 404);
@@ -1546,6 +1581,7 @@ const ROUTES = [
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
   ['POST', /^\/api\/v2\/settings$/, (_, b) => postSettings(b)],
   ['GET', /^\/api\/v2\/update$/, () => [200, updater.status()]],
+  ['GET', /^\/api\/v2\/tools$/, () => [200, { detected: desktop.tools(), chosen: readState().tools }]],
   ['GET', /^\/api\/v2\/history$/, (_, __, url) => historyView(url)],
   ['POST', /^\/api\/v2\/update$/, async (_, b) => {
     if (b?.action === 'check') return [200, { ok: true, ...(await updater.check({ force: true })) }];

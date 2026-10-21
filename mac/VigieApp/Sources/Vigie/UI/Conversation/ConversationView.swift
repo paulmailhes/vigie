@@ -125,7 +125,14 @@ struct ConversationView: View {
         .navigationTitle(summary?.shortTitle ?? "Conversation")
         .navigationSubtitle(summary?.title ?? "")
         .toolbar {
-            if let cwd = summary?.cwd {
+            if let summary, summary.surface == "claude-app" || summary.surface == "codex-app" {
+                ToolbarItem {
+                    AsyncButton(summary.openLabel, systemImage: "arrow.up.forward.app") {
+                        await store.openConversationInVSCode(summary.id, cwd: summary.cwd)
+                    }
+                    .help("La conversation est dans cette app")
+                }
+            } else if let cwd = summary?.cwd {
                 ToolbarItem {
                     Button("Ouvrir dans VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
                         SystemActions.openInVSCode(path: cwd)
@@ -227,7 +234,7 @@ struct ConversationHeader: View {
                     Text("Arrêtée pour passer sur \(store.account(resume.to)?.displayName ?? "l'autre compte") : écris-lui un message (« continue ») dans VS Code, elle repart dessus.")
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
-                    AsyncButton("Ouvrir dans VS Code") { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
+                    AsyncButton(summary.openLabel) { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
                     .glassButton(.primary)
                 }
                 .padding(10)

@@ -56,6 +56,8 @@ final class VigieStore {
     var conversationTab: ConversationTab = .fil
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
+    /// Outils choisis dans l'accueil (VS Code, app Claude, app ChatGPT…), sinon ceux trouvés sur le Mac.
+    private(set) var tools: ToolsState?
     /// Historique : filtres de la page et dernière page lue.
     var historyStatus: String?
     var historyWindow = 1440
@@ -252,6 +254,18 @@ final class VigieStore {
         update(\.engineInfo, overview.engine)
         if let status = overview.update { setUpdateStatus(status) }
         update(\.loadedOnce, true)
+    }
+
+    func refreshTools() async {
+        guard !isDemo, let state = try? await client.get("/api/v2/tools", as: ToolsState.self) else { return }
+        update(\.tools, state)
+    }
+
+    func saveTools(_ choice: ToolsChoice) async {
+        update(\.tools, ToolsState(detected: tools?.detected, chosen: choice))
+        let body: JSONValue = ["tools": ["claudeVSCode": .bool(choice.claudeVSCode), "claudeApp": .bool(choice.claudeApp),
+                                         "codexVSCode": .bool(choice.codexVSCode), "codexApp": .bool(choice.codexApp)]]
+        _ = await write("/api/v2/settings", body)
     }
 
     func refreshHistory() async {

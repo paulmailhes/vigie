@@ -5,6 +5,8 @@ import SwiftUI
 struct CodexSetupSteps: View {
     @Environment(VigieStore.self) private var store
     let account: Account?
+    /// Outils cochés dans l'accueil : les instructions pour VS Code, pour l'app ChatGPT, ou les deux.
+    var tools: ToolsChoice? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -31,11 +33,19 @@ struct CodexSetupSteps: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Codex demande de faire confiance une fois à un nouveau hook (c'est une sécurité d'OpenAI). Sans ça, pas d'auto-accept pour Codex.")
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("Dans VS Code, ouvre le panneau Codex. En bas, clique « Review hooks », puis accepte les deux hooks « Vigie » (PreToolUse et PermissionRequest).")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Ou dans le Terminal : lance « codex », puis tape « /hooks ».")
+                        if tools?.codexVSCode ?? true {
+                            Label("Dans VS Code : ouvre le panneau Codex. En bas, un bandeau « Review hooks » : clique dessus et accepte les deux hooks « Vigie ».",
+                                  systemImage: "chevron.left.forwardslash.chevron.right")
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if tools?.codexApp ?? (store.tools?.detected?.codexApp == true) {
+                            Label("Dans l'app ChatGPT : ouvre Codex. Un message te propose de vérifier les hooks (« Review hooks ») : accepte les deux hooks « Vigie ».",
+                                  systemImage: "macwindow")
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text("Vigie le voit tout seul dès que c'est fait.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         AsyncButton("Vérifier", systemImage: "arrow.clockwise") { await store.refreshAccounts() }

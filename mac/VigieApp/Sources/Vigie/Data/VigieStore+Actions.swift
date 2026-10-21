@@ -185,8 +185,11 @@ extension VigieStore {
     }
 
     /// Ouvre la conversation dans VS Code (par le moteur ; sinon le dossier du projet).
+    /// Ouvre la conversation dans son outil (VS Code, app Claude, app ChatGPT). Une app de bureau ne sait pas ouvrir
+    /// une conversation précise : on dit où la trouver (consigne, pas une confirmation).
     func openConversationInVSCode(_ id: String?, cwd: String?) async {
-        if let id, await write("/api/v2/open", ["kind": "conversation", "id": .string(id)], quiet: true) != nil {
+        if let id, let result = await write("/api/v2/open", ["kind": "conversation", "id": .string(id)], quiet: true) {
+            if let message = result.message, message.hasPrefix("L'app") || message.contains("panneau Codex") { show(info: message) }
             return
         }
         if let cwd = cwd ?? id.flatMap({ conversation($0)?.cwd }) {

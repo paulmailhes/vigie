@@ -263,7 +263,7 @@ struct HistoryDetail: View {
                 }
             }
             if item.conversationId != nil {
-                AsyncButton("Ouvrir dans VS Code", systemImage: "arrow.up.forward.app") {
+                AsyncButton(item.conversationId.flatMap { store.conversation($0)?.openLabel } ?? "Ouvrir la conversation", systemImage: "arrow.up.forward.app") {
                     await store.openConversationInVSCode(item.conversationId, cwd: item.cwd)
                 }
                 .glassButton(.primary)

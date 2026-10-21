@@ -18,6 +18,8 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     var title: String?
     var project: String?
     var cwd: String?
+    /// Outil de la conversation : vscode, claude-app (app Claude), codex-app (app ChatGPT), terminal.
+    var surface: String?
     var status: String?
     var running: Bool?
     var accountId: String?
@@ -56,6 +58,23 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
 
     var state: ConversationStatus { ConversationStatus(raw: status) }
     var isCodex: Bool { agent == "codex" }
+
+    /// Le bouton qui ramène à la conversation, dans son outil.
+    var openLabel: String {
+        switch surface {
+        case "claude-app": "Ouvrir l'app Claude"
+        case "codex-app": "Ouvrir l'app ChatGPT"
+        default: "Ouvrir dans VS Code"
+        }
+    }
+
+    var replyLabel: String {
+        switch surface {
+        case "claude-app": "Répondre dans l'app Claude"
+        case "codex-app": "Répondre dans l'app ChatGPT"
+        default: "Répondre dans VS Code"
+        }
+    }
     var isOpen: Bool { state != .closed }
 
     /// Titre court affiché dans les listes : le projet (« Atelier », « Portail · back »), sinon le titre.
