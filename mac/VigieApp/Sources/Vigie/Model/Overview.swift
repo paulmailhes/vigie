@@ -108,6 +108,8 @@ struct ReviewItem: Decodable, Equatable, Sendable, Identifiable {
 
     /// La conversation est en pause sur cette action et attend ton accord dans Vigie (rien dans VS Code).
     var holding: Bool?
+    /// Question en attente : ses choix, pour répondre depuis Vigie (avec pendingId).
+    @Lossy var questions: [PendingQuestion]
 
     /// Attend ton accord dans Vigie (autoriser une fois, pour cette commande exacte).
     var isAwaitingApproval: Bool { state == "awaiting" && approvalId != nil }
@@ -191,5 +193,17 @@ struct EngineNotice: Decodable, Equatable, Sendable {
             throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "avis vide"))
         }
         text = value
+    }
+}
+
+struct PendingQuestion: Decodable, Equatable, Sendable {
+    var question: String
+    var header: String?
+    var multiSelect: Bool?
+    var options: [Option]
+
+    struct Option: Decodable, Equatable, Sendable, Hashable {
+        var label: String
+        var description: String?
     }
 }

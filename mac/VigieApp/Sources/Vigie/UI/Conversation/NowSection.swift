@@ -41,7 +41,7 @@ struct NowSection: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 3) {
                 Text("« \(prompt) »")
-                    .lineLimit(3)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Text(requestMeta(start, relaunch: relaunch))
@@ -84,14 +84,14 @@ struct NowSection: View {
         } else if let text = now?.text, !text.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text(text)
-                    .lineLimit(fullReport ? nil : 5)
+                    .lineLimit(fullReport ? nil : 3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 HStack(spacing: 8) {
                     if let ts = now?.ts {
                         Text("son dernier compte rendu · \(Fmt.when(ts, now: store.now))")
                     }
-                    if text.count > 400 {
+                    if text.count > 220 {
                         Button(fullReport ? "Réduire" : "Tout lire") {
                             withAnimation(.smooth) { fullReport.toggle() }
                         }

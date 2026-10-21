@@ -19,7 +19,7 @@ struct ConversationView: View {
                         ConversationHeader(summary: summary, model: model,
                                            contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
 
-                        // Ce qu'elle attend de toi (question, action sensible), avec ses boutons, en premier
+                        // Pour toi : ses questions et actions en attente, ses réponses choisies par Vigie à relire
                         let waiting = store.toReview.filter { $0.conversationId == conversationID }
                         if !waiting.isEmpty {
                             CardSection {
@@ -28,8 +28,8 @@ struct ConversationView: View {
                                 }
                             } header: {
                                 HStack(spacing: 6) {
-                                    Text("Elle t'attend")
-                                    CountBadge(count: waiting.count, urgent: true)
+                                    Text("Pour toi")
+                                    CountBadge(count: waiting.count, urgent: waiting.contains { $0.needsDecision || $0.reviewKind == .waiting })
                                 }
                             }
                         }
@@ -38,6 +38,11 @@ struct ConversationView: View {
                             NowSection(summary: summary, model: model)
                         } header: {
                             CardHeader(title: "Maintenant", date: model?.raw.now?.live?.ts ?? model?.raw.now?.ts)
+                        }
+
+                        // Ce qui a été accepté : automatiquement, par toi, refusé ou bloqué
+                        if let model, !model.accepted.isEmpty || !model.raw.activity.isEmpty {
+                            AcceptedSection(model: model)
                         }
 
                         if let plan = model?.raw.now?.plan, !plan.steps.isEmpty {
@@ -77,6 +82,9 @@ struct ConversationView: View {
                             }
                         } header: {
                             VStack(alignment: .leading, spacing: 8) {
+                                Text("Détails")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                                 Picker("Afficher", selection: $store.conversationTab) {
                                     ForEach(ConversationTab.allCases) { tab in
                                         Text(tab.title).tag(tab)
@@ -134,7 +142,6 @@ struct ConversationView: View {
     private func countText(_ tab: ConversationTab, model: ConversationDetailModel) -> String {
         switch tab {
         case .fil: Fmt.count(model.milestones.count, "jalon")
-        case .accepted: Fmt.count(model.accepted.count, "action")
         case .agents: "\(Fmt.int(model.runningAgents.count)) en cours"
         case .files: Fmt.count(model.files.count, "fichier")
         case .tests: Fmt.count(model.tests.count, "vérification")
@@ -451,5 +458,67 @@ struct ConversationHeader: View {
         } else {
             Text(text)
         }
+    }
+}
+
+/// Le fil de tout ce qui a été accepté dans la conversation, plus récent d'abord : la décision de chaque ligne
+/// (Vigie, toi, refusée, bloquée) ; les actions sensibles ressortent.
+struct AcceptedSection: View {
+    let model: ConversationDetailModel
+    @State private var showAll = false
+    private static let shown = 12
+
+    /// Les décisions de Vigie, plus ce que Claude Code a validé lui-même (mode auto) : commandes, fichiers
+    /// modifiés, outils, agents. Les lectures (fichiers, recherches) n'y sont pas.
+    private var feed: [Row<AcceptedItem>] {
+        let vigie = model.accepted
+        let skip = ["Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
+        var extra: [AcceptedItem] = []
+        for action in model.raw.activity {
+            guard let ts = action.ts, let title = action.title else { continue }
+            if skip.contains(where: { title.hasPrefix($0) }) { continue }
+            let kind = ItemKind(raw: action.kind)
+            // déjà dans les décisions de Vigie (même moment, même sorte d'action)
+            if vigie.contains(where: { $0.value.itemKind == kind && abs(($0.value.ts ?? .distantPast).timeIntervalSince(ts)) < 4 }) { continue }
+            extra.append(AcceptedItem(ts: ts, kind: action.kind, title: title, detail: action.detail, decision: "auto", agent: action.agent))
+        }
+        let all = (vigie.map(\.value) + extra).sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
+        return RowIDs.make(all) { "\(RowIDs.stamp($0.ts))|\($0.kind ?? "")|\($0.title ?? "")" }
+    }
+
+    var body: some View {
+        let feed = feed
+        let rows = showAll ? feed : Array(feed.prefix(Self.shown))
+        CardSection {
+            ForEach(rows) { row in
+                AcceptedRow(item: row.value)
+            }
+            if !showAll && feed.count > Self.shown {
+                ShowAllButton(count: feed.count) { showAll = true }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Text("Ce qui a été accepté")
+                Text(summary(feed))
+                    .font(.callout)
+                    .fontWeight(.regular)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// « 128 automatiques · 3 par toi · 1 sensible »
+    private func summary(_ feed: [Row<AcceptedItem>]) -> String {
+        let items = feed.map(\.value)
+        var parts: [String] = []
+        let auto = items.count { $0.decisionKind == .auto }
+        let you = items.count { $0.decisionKind == .you }
+        let blocked = items.count { $0.decisionKind == .blocked || $0.decisionKind == .waiting }
+        let denied = items.count { $0.decisionKind == .denied }
+        if auto > 0 { parts.append(Fmt.count(auto, "automatique", "automatiques")) }
+        if you > 0 { parts.append("\(Fmt.int(you)) par toi") }
+        if blocked > 0 { parts.append(Fmt.count(blocked, "sensible", "sensibles")) }
+        if denied > 0 { parts.append(Fmt.count(denied, "refusée", "refusées")) }
+        return parts.joined(separator: " · ")
     }
 }

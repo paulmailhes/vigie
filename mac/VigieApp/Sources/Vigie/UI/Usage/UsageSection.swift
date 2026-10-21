@@ -6,7 +6,8 @@ import SwiftUI
 struct UsageSection: View {
     @Environment(VigieStore.self) private var store
     @AppStorage("usage.window") private var spanRaw = UsageSpan.hour.rawValue
-    @AppStorage("usage.cumulative") private var cumulative = true
+    /// Le débit (% de la semaine par heure), jamais un total qui ne fait que monter.
+    private let cumulative = false
     /// Conversations masquées (identifiants séparés par des virgules) : les nouvelles s'affichent d'office.
     @AppStorage("usage.hidden") private var hiddenRaw = ""
     @State private var selected: Date?
@@ -27,14 +28,9 @@ struct UsageSection: View {
             Label("Consommation", systemImage: Icon.usage)
                 .labelStyle(.titleOnly)
             Spacer(minLength: 8)
-            Picker("Affichage", selection: $cumulative) {
-                Text("Cumulée").tag(true)
-                Text("Par heure").tag(false)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Cumulée : % de la semaine consommé depuis le début de la période · Par heure : débit")
+            Text("% de la semaine par heure")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Picker("Période", selection: $spanRaw) {
                 ForEach(UsageSpan.allCases) { span in
                     Text(span.label).tag(span.rawValue)
@@ -51,13 +47,15 @@ struct UsageSection: View {
     @ViewBuilder
     private var content: some View {
         if let series = store.usageSeries[span.rawValue] {
-            let lines = UsageLine.make(series, store: store, span: span, cumulative: cumulative)
+            // les conversations ouvertes seulement (les fermées et les dossiers annexes encombraient la courbe)
+            let lines = UsageLine.make(series, store: store, span: span, cumulative: cumulative).filter(\.running)
             if lines.isEmpty {
                 Label("Aucune consommation sur cette période", systemImage: "moon.zzz")
                     .foregroundStyle(.secondary)
             } else {
                 AccountTotals(series: series, span: span)
-                UsageChart(lines: lines.filter { !hidden.contains($0.id) }, allIDs: lines.map(\.id),
+                let shownLines = lines.filter { !hidden.contains($0.id) }
+                UsageChart(lines: shownLines.isEmpty ? lines : shownLines, allIDs: lines.map(\.id),
                            cumulative: cumulative, span: span, selected: $selected)
                 UsageLegend(lines: lines, hidden: hidden, cumulative: cumulative) { id, visible in
                     setVisible(id, visible)

@@ -20,16 +20,6 @@ struct ConversationTabContent: View {
         case .mcp:
             ConversationMCPList(model: model, cwd: cwd)
 
-        case .accepted:
-            if model.accepted.isEmpty {
-                EmptyRow(text: "Rien de validé pour l'instant")
-            } else {
-                ForEach(limited(model.accepted)) { row in
-                    AcceptedRow(item: row.value)
-                }
-                more(model.accepted.count)
-            }
-
         case .agents:
             ForEach(model.raw.workflows.filter { $0.status == "running" }) { workflow in
                 WorkflowRow(workflow: workflow)

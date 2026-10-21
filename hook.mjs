@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readState, effective, appendHistory, actionText, matchGuard, readOnlyShell, QUESTIONS_FILE, HISTORY_FILE, DATA } from './lib/state.mjs';
 import { pickRecommended, buildRecord, appendRecord } from './lib/questions.mjs';
-import { clearDecision, takeDecision, MAX_COMMAND } from './lib/decisions.mjs';
+import { clearDecision, takeDecision, takeAnswer, MAX_COMMAND } from './lib/decisions.mjs';
 import { callHash, newApprovalId, takeApproval, deniedApproval } from './lib/approvals.mjs';
 
 const QUESTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
@@ -252,6 +252,15 @@ async function answerQuestion(input, hookEventName, extra = {}) {
   const ti = input.tool_input || {};
   const chosen = {};
   let updatedInput = ti;
+  // Réponse donnée par l'utilisateur dans Vigie : transmise telle quelle, rien à relire ensuite.
+  const given = extra.given;
+  if (input.tool_name === 'AskUserQuestion' && given) {
+    updatedInput = { ...ti, answers: given };
+    const out = { hookSpecificOutput: { hookEventName, decision: { behavior: 'allow', updatedInput } } };
+    onKill = null;
+    if (!(await reply(out))) return log(input, 'reponse-perdue');
+    return log(input, 'question-repondue-app', { answers: given });
+  }
   if (input.tool_name === 'AskUserQuestion') {
     const answers = {};
     for (const q of ti.questions || []) {
@@ -280,19 +289,30 @@ async function onQuestionRequest(input) {
   let since = Date.now();
   let waitMin = state.questionWaitMin;
   const resolved = transcriptWatcher(input, since);
+  // Réponse donnée dans Vigie (decisions.json, à ce pid) : une entrée laissée par un ancien processus ne compte pas.
+  const pendingId = String(process.pid);
+  clearDecision(pendingId);
+  let given = null;
+  // Les questions et leurs choix, pour répondre depuis Vigie (sans les longues descriptions).
+  const questions = (input.tool_input?.questions || []).slice(0, 4).map((q) => ({ question: String(q.question || '').slice(0, 500),
+    header: q.header ? String(q.header).slice(0, 40) : null, multiSelect: !!q.multiSelect,
+    options: (q.options || []).slice(0, 6).map((o) => ({ label: String(o.label || '').slice(0, 200), description: o.description ? String(o.description).slice(0, 300) : null })) }));
+  const asked = input.tool_name === 'AskUserQuestion' && questions.length ? { questions } : {};
   // pid (noté par log) : le serveur sait ainsi si l'attente est encore en cours (un hook tué par SIGKILL ne note rien).
-  log(input, mode === 'wait' ? 'question-attente' : 'question-pour-toi', mode === 'wait' ? { minutes: waitMin } : {});
+  log(input, mode === 'wait' ? 'question-attente' : 'question-pour-toi', mode === 'wait' ? { minutes: waitMin, ...asked } : asked);
   // La fenêtre reste affichée ; on reste en éveil pour suivre un changement de réglage fait dans Vigie.
   for (;;) {
     onKill = mode === 'wait' ? () => log(input, 'question-tu-as-repondu') : null;
     let done = null;
     const r = await waitFor(() => (mode === 'wait' ? since + waitMin * 60_000 : Infinity), (s) => {
+      if ((given = takeAnswer(pendingId, { since, sessionId: sid }))) return 'app';
       if ((done = resolved())) return 'repondu';
       const m = effective(s, sid).questions;
       if (m !== mode) return `mode:${m}`;
       waitMin = s.questionWaitMin;
       return true;
     });
+    if (r === 'app') return answerQuestion(input, 'PermissionRequest', { given });
     if (r === 'timeout') return answerQuestion(input, 'PermissionRequest');
     if (r === 'mode:auto') return answerQuestion(input, 'PermissionRequest', { now: true });
     if (r === 'mode:wait') {

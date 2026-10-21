@@ -85,6 +85,10 @@ struct ReviewRow: View {
             }
             .glassButton(item.isPendingDecision ? .primary : .secondary)
             .help(item.isPendingDecision ? "Autoriser ou refuser" : "La commande et quoi faire")
+        case .waiting where !item.questions.isEmpty && item.pendingId != nil:
+            Button("Répondre") { store.answerRequest = item }
+                .glassButton(.primary)
+                .help("Voir la question et y répondre d'ici")
         case .waiting, .other:
             if inConversation {
                 Button("Répondre dans VS Code") {

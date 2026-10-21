@@ -42,6 +42,9 @@ struct RootView: View {
         .sheet(isPresented: $store.showOnboarding) {
             OnboardingView()
         }
+        .sheet(item: $store.answerRequest) { item in
+            AnswerQuestionSheet(item: item)
+        }
         .onAppear {
             store.openMainWindow = { openWindow(id: VigieApp.mainWindowID) }
             if !UserDefaults.standard.bool(forKey: OnboardingView.doneKey) && !LaunchOptions.current.isViewer {

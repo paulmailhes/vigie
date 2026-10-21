@@ -14,7 +14,7 @@ import { createConversations } from './lib/conversations.mjs';
 import { createAccounts, MAIN_ID } from './lib/accounts.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
-import { pendingGuards, recentBlocked, decide, MAX_COMMAND } from './lib/decisions.mjs';
+import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer } from './lib/decisions.mjs';
 import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES, GUARD_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints } from './lib/usage.mjs';
@@ -146,7 +146,8 @@ function pendingWaits(state, now = Date.now()) {
   for (const h of history) {
     if (!h.sessionId) continue;
     const k = `${h.sessionId}\u0000${h.action}`;
-    if (WAIT_EVENTS.has(h.event)) open.set(k, h);
+    // « toujours me demander » : la question attend aussi, et peut se répondre depuis Vigie (choix notés)
+    if (WAIT_EVENTS.has(h.event) || (h.event === 'question-pour-toi' && Array.isArray(h.questions))) open.set(k, h);
     else if (CLOSES_WAIT.test(String(h.event || ''))) open.delete(k);
   }
   const bySession = new Map();
@@ -155,11 +156,14 @@ function pendingWaits(state, now = Date.now()) {
   for (const h of open.values()) {
     if (h.event === 'garde-fou-attente') { openGuards.add(`${h.sessionId}\u0000${h.ts}`); continue; }
     if (!indexer.live.has(h.sessionId)) continue;
+    // « toujours me demander » : pas d'échéance, la question attend tant que la fenêtre est ouverte
+    const ask = h.event === 'question-pour-toi';
     const m = h.minutes === null || h.minutes === undefined || h.minutes === '' ? NaN : Number(h.minutes);
     const minutes = Number.isFinite(m) ? m : state.questionWaitMin;
-    const deadline = Date.parse(h.ts) + minutes * 60_000;
+    const deadline = ask ? Infinity : Date.parse(h.ts) + minutes * 60_000;
     if (!(deadline + 2 * 60_000 > now) || !pidAlive(h.pid)) continue;
-    add(h.sessionId, { ...h, question: true, deadline });
+    if (ask && !Array.isArray(h.questions)) continue; // ancienne ligne, ou hook qui n'attend pas
+    add(h.sessionId, { ...h, question: true, deadline, ask });
   }
   let guards = [];
   try { guards = pendingGuards({ history, state, now }); } catch (e) { console.error('[vigie] attentes des garde-fous :', clean(e)); }
@@ -431,9 +435,12 @@ function reviewItems(ctx, sums) {
       const left = minutesLeft(w.deadline, ctx.now);
       const when = left > 0 ? `dans ${left} min` : 'dans un instant';
       if (w.question) {
+        const answerable = Array.isArray(w.questions) && w.questions.length && w.pid;
         live.push({ id: `w:${sid}:${w.ts}`, kind: 'waiting', conversationId: sid, conversationTitle: title(sid),
           title: short(w.tool === 'ExitPlanMode' ? 'Plan à valider' : questionText(w.action) || 'Question de Claude', 120),
-          detail: `Réponds dans VS Code, sinon Claude choisit l'option recommandée ${when}.`, ts: w.ts });
+          detail: w.ask ? (answerable ? 'Réponds ici ou dans VS Code.' : 'Réponds dans VS Code.')
+            : `Réponds ${answerable ? 'ici ou ' : ''}dans VS Code, sinon Claude choisit l'option recommandée ${when}.`,
+          ...(answerable ? { pendingId: String(w.pid), questions: w.questions } : {}), ts: w.ts });
       } else {
         live.push({ id: `g:${sid}:${w.ts}`, kind: 'blocked', state: 'waiting', pendingId: w.pendingId, expiresAt: w.expiresAt,
           conversationId: sid, conversationTitle: title(sid), cwd: w.cwd ?? null,
@@ -888,6 +895,14 @@ function postConversationSettings(id, body) {
 function postPending(raw, body) {
   let id;
   try { id = decodeURIComponent(raw); } catch { return bad('Cette action n\'attend plus ta décision.', 404); }
+  // Réponse à une question en attente : { answers: { "<question>": "<choix>" } }
+  if (body && typeof body.answers === 'object' && body.answers !== null) {
+    const ctx = context();
+    const w = [...ctx.waits.values()].flat().find((x) => x.question && String(x.pid) === id && Array.isArray(x.questions));
+    if (!w) return bad('Cette question n\'attend plus de réponse.', 404);
+    if (!writeAnswer(id, body.answers, { sessionId: w.sessionId })) return bad('Réponse illisible.');
+    return [200, { ok: true, pendingId: id, message: 'Réponse envoyée à Claude.' }];
+  }
   const r = decide(id, body.decision, { history, state: readState() });
   return r.ok ? [200, { ok: true, pendingId: r.pendingId, decision: r.decision, message: r.message }] : bad(r.error || 'Échec.', r.status || 400);
 }

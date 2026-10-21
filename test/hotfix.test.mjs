@@ -412,3 +412,31 @@ test('question en attente, réponse donnée dans VS Code : vue même si l’entr
     resolve();
   }));
 });
+
+test('question : répondue depuis Vigie (mode « toujours me demander »), transmise à Claude telle quelle', async () => {
+  vscodeSession();
+  fs.rmSync(HISTORY_FILE, { force: true });
+  setState({ autoAccept: true, questions: 'ask' });
+  const { writeAnswer } = await import('../lib/decisions.mjs');
+  const q = { question: 'Quel fond pour la charte ?', header: 'Fond', multiSelect: false, options: [{ label: 'Fond A (Recommandé)' }, { label: 'Fond B' }] };
+  const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME, VIGIE_POLL_MS: '100' } });
+  let out = '';
+  p.stdout.on('data', (d) => { out += d; });
+  p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, transcript_path: '/nonexistent' }));
+  const t = setInterval(() => {
+    let h = [];
+    try { h = hist(); } catch { return; }
+    const w = h.find((e) => e.event === 'question-pour-toi' && Array.isArray(e.questions));
+    if (!w) return;
+    clearInterval(t);
+    assert.equal(w.questions[0].options[1].label, 'Fond B', 'les choix sont notés pour l’app');
+    assert.ok(writeAnswer(String(w.pid), { 'Quel fond pour la charte ?': 'Fond B' }, { sessionId: 'test-session' }));
+  }, 100);
+  const guardTimer = setTimeout(() => p.kill('SIGKILL'), 15_000);
+  await new Promise((resolve) => p.on('exit', resolve));
+  clearInterval(t); clearTimeout(guardTimer);
+  const o = JSON.parse(out).hookSpecificOutput.decision;
+  assert.equal(o.behavior, 'allow');
+  assert.deepEqual(o.updatedInput.answers, { 'Quel fond pour la charte ?': 'Fond B' }, 'la réponse de l’utilisateur, sans mention de Vigie');
+  assert.equal(hist().at(-1).event, 'question-repondue-app');
+});

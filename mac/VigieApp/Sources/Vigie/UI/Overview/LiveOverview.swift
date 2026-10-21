@@ -295,6 +295,13 @@ struct ConversationListRow: View {
                 .foregroundStyle(Theme.warn)
                 .help("S'emballe : \(alert.reason ?? "consommation anormale")")
         }
+        if let agents = conversation.agentsRunning, agents > 0 {
+            Label(Fmt.int(agents), systemImage: Icon.agent)
+                .labelStyle(CompactLabelStyle())
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(Fmt.count(agents, "agent au travail", "agents au travail"))
+        }
         if data.testsFailed > 0 {
             Label(Fmt.int(data.testsFailed), systemImage: Icon.testFailed)
                 .labelStyle(CompactLabelStyle())

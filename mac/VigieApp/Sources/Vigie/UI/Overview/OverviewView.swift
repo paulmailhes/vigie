@@ -4,8 +4,6 @@ import SwiftUI
 /// Le reste (depuis ton passage, graphique, acceptations) est replié en bas.
 struct OverviewView: View {
     @Environment(VigieStore.self) private var store
-    @State private var showAllReports = false
-    @AppStorage("overview.more") private var showMore = false
     @State private var showAllLater = false
 
     private static let reportsShown = 3
@@ -38,32 +36,19 @@ struct OverviewView: View {
                 urgentSection
             }
 
-            LiveSection()
-
             ConversationListSection()
+
+            UsageSection()
+
+            AcceptedFeedSection()
 
             if !later.isEmpty {
                 laterSection
             }
 
-            DisclosureGroup(isExpanded: $showMore) {
-                VStack(alignment: .leading, spacing: 22) {
-                    CardSection(sinceHeader) {
-                        SinceRow()
-                    }
-                    if !store.reports.isEmpty {
-                        reportsSection
-                    }
-                    UsageSection()
-                    AcceptedFeedSection()
-                }
-                .padding(.top, 12)
-            } label: {
-                Text("Historique et consommation")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+            CardSection(sinceHeader) {
+                SinceRow()
             }
-            .padding(.horizontal, 6)
         }
         .task { await store.followCardDetails() }
     }
@@ -109,16 +94,6 @@ struct OverviewView: View {
         }
     }
 
-    private var reportsSection: some View {
-        CardSection("Rapports et fins de mission") {
-            ForEach(showAllReports ? store.reports : Array(store.reports.prefix(Self.reportsShown))) { row in
-                ReportRow(report: row.value)
-            }
-            if !showAllReports && store.reports.count > Self.reportsShown {
-                ShowAllButton(count: store.reports.count) { showAllReports = true }
-            }
-        }
-    }
 
     private var sinceHeader: String {
         guard let since = store.since else { return "Depuis ton dernier passage" }
