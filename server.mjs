@@ -41,7 +41,7 @@ process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée
 const indexer = new Indexer({ windowHours: Number(process.env.VIGIE_WINDOW_HOURS || 48), usageDays: 7 });
 const conv = createConversations(indexer);
 // Conversations Codex (OpenAI), lues dans ~/.codex/sessions : même liste, même détail, compte « Codex ».
-const codex = createCodex();
+const codex = createCodex({ dataDir: DATA });
 const accounts = createAccounts();
 const HOME = accounts.paths.home;
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
@@ -453,6 +453,7 @@ function reviewItems(ctx, sums) {
   try { awaiting = awaitingApprovals({ history, now: ctx.now }); } catch (e) { console.error('[vigie] autorisations :', clean(e)); }
   for (const a of awaiting) {
     if (a.sessionId && conv.isThrowaway(a.sessionId) && !indexer.live.has(a.sessionId)) continue;
+    if (a.approved) continue; // autorisée : plus rien à décider
     live.push({ id: `v:${a.approvalId}`, kind: 'blocked', state: 'awaiting', approvalId: a.approvalId,
       approved: a.approved, approvedUntil: a.approvedUntil, holding: a.holding,
       conversationId: a.sessionId, conversationTitle: title(a.sessionId), cwd: a.cwd,
@@ -463,6 +464,13 @@ function reviewItems(ctx, sums) {
         : a.approved ? `${what(a)} · autorisée : elle peut la relancer à l'identique.`
         : `${what(a)} · elle a continué sans : autorise-la ici pour qu'elle puisse la relancer.`,
       ts: a.ts });
+  }
+  const cx = safeCodex(() => codex.account(), null);
+  if (cx?.connected && cx.hook?.installed && !cx.hook.trusted) {
+    live.push({ id: 'codex-hook', kind: 'waiting', conversationId: null, conversationTitle: 'Codex',
+      title: 'Codex : approuve le hook de Vigie',
+      detail: 'Sans lui, pas d\'auto-accept pour Codex. Dans VS Code, panneau Codex : en bas, « Review hooks », accepte les deux hooks Vigie.',
+      ts: new Date(ctx.now).toISOString() });
   }
   for (const n of switchNotices) {
     live.push({ id: `s:${n.sessionId}:${n.ts}`, kind: 'waiting', conversationId: n.sessionId, conversationTitle: title(n.sessionId),
@@ -1092,6 +1100,11 @@ async function postMcpConnect(body) {
   return mcpReply(await mcp.connect({ name, accountId: body.accountId, path: body.path }));
 }
 function postAccounts(body) {
+  // Codex : connexion par le navigateur (codex login), son compte n'est pas géré par le modèle des comptes Claude
+  if (body?.action === 'codexLogin') {
+    const c = safeCodex(() => codex.login(), { ok: false, error: 'Codex : connexion impossible.' });
+    return c.ok ? [200, c] : [400, c];
+  }
   const r = accounts.apply(body);
   return r.ok ? [200, r] : [400, { ...r, ok: false, error: r.error || 'Échec.' }];
 }

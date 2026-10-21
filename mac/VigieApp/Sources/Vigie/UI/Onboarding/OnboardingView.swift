@@ -103,8 +103,9 @@ struct OnboardingView: View {
                 }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
-            Button("Ajouter un compte", systemImage: "plus") { showAdd = true }
+            Button("Ajouter un compte Claude", systemImage: "plus") { showAdd = true }
                 .glassButton()
+            codexRow
             if store.accounts.count > 1 {
                 Toggle(isOn: Binding(get: { store.accountsState?.wrapper?.active == true },
                                      set: { on in Task { await store.setWrapper(on) } })) {
@@ -122,6 +123,36 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
         }
         .sheet(isPresented: $showAdd) { OnboardingAddAccountSheet() }
+        .sheet(isPresented: $showCodex) { CodexSetupSheet() }
+    }
+
+    @State private var showCodex = false
+
+    /// Codex (OpenAI), s'il est installé : connexion et approbation du hook, dans une feuille dédiée.
+    @ViewBuilder
+    private var codexRow: some View {
+        if let codex = store.accounts.first(where: \.isCodex) {
+            let ready = codex.isConnected && codex.hook?.trusted == true
+            HStack(spacing: 12) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Codex (OpenAI)").font(.headline)
+                    Text(ready ? "Connecté, auto-accept actif" : codex.isConnected ? "Connecté · hook de Vigie à approuver" : "Pas encore connecté")
+                        .font(.callout)
+                        .foregroundStyle(ready ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.warn))
+                }
+                Spacer()
+                if !ready {
+                    Button("Connecter Codex") { showCodex = true }
+                        .glassButton(.primary)
+                }
+            }
+            .padding(12)
+            .background(.quinary, in: .rect(cornerRadius: Theme.corner))
+        }
     }
 
     // MARK: 4. C'est parti

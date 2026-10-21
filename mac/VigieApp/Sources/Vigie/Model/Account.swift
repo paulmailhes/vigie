@@ -34,6 +34,9 @@ struct Account: Decodable, Equatable, Sendable, Identifiable {
     var kind: String?
     /// Forfait (Codex).
     var plan: String?
+    /// Codex : le hook de Vigie (branché, approuvé dans Codex, vu en action) et la connexion en cours.
+    @Tolerant var hook: CodexHook?
+    var connecting: Bool?
 
     var displayName: String { label ?? id }
     var isConnected: Bool { connected ?? false }
@@ -50,4 +53,10 @@ struct AccountsState: Decodable, Equatable, Sendable {
 struct WrapperState: Decodable, Equatable, Sendable {
     var path: String?
     var active: Bool?
+}
+
+struct CodexHook: Decodable, Equatable, Sendable {
+    var installed: Bool?
+    var trusted: Bool?
+    @FlexDate var seenAt: Date?
 }

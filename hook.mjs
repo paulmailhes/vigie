@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readState, effective, appendHistory, actionText, matchGuard, readOnlyShell, QUESTIONS_FILE, HISTORY_FILE } from './lib/state.mjs';
+import { readState, effective, appendHistory, actionText, matchGuard, readOnlyShell, QUESTIONS_FILE, HISTORY_FILE, DATA } from './lib/state.mjs';
 import { pickRecommended, buildRecord, appendRecord } from './lib/questions.mjs';
 import { clearDecision, takeDecision, MAX_COMMAND } from './lib/decisions.mjs';
 import { callHash, newApprovalId, takeApproval, deniedApproval } from './lib/approvals.mjs';
@@ -469,6 +469,8 @@ async function holdForVigie(input, rule, state, event) {
 const NO_APPROVALS = /bypass|full|never|danger|yolo/i;
 async function onCodex(input) {
   const ev = input.hook_event_name;
+  // Preuve que Codex fait confiance au hook : il ne lance jamais un hook pas encore approuvé.
+  try { fs.writeFileSync(path.join(DATA, 'codex-hook-seen'), new Date().toISOString()); } catch { /* facultatif */ }
   const state = readState();
   const sid = input.session_id;
   if (!effective(state, sid).autoAccept) {

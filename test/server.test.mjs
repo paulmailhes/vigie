@@ -898,15 +898,15 @@ test('garde-fous « seulement par Vigie » : réglage, élément à autoriser, a
   const ap = rj(path.join(DATA, 'approvals.json'))[A_ID];
   assert.deepEqual([ap.decision, ap.sessionId, ap.tool, ap.hash], ['allow', SID_A, 'Bash', A_ID.repeat(4)]);
   assert.ok(Math.abs(Date.parse(ap.expiresAt) - Date.now() - 2 * 3600_000) < 60_000);
-  assert.equal((await items()).find((x) => x.approvalId === A_ID).approved, true, 'reste listée jusqu\'à la relance');
+  assert.equal((await items()).find((x) => x.approvalId === A_ID), undefined, 'autorisée : plus rien à décider, elle sort de la liste');
   // refuser : l'élément sort de la liste
   r = await post('/api/v2/approvals', { approvalId: B_ID, decision: 'deny' });
   assert.equal(r.body.ok, true);
-  assert.deepEqual((await items()).map((x) => x.approvalId), [A_ID]);
+  assert.deepEqual((await items()).map((x) => x.approvalId), [], 'A autorisée (sortie), B refusée (sortie)');
   // la relance consomme l'autorisation (ligne du hook) : l'élément sort aussi
   fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'garde-fou-autorise-vigie', sessionId: SID_A,
     tool: 'Bash', action: 'sudo ls /var', approvalId: A_ID, hash: A_ID.repeat(4), pid: deadPid }) + '\n');
-  for (let i = 0; i < 80 && (await items()).length; i++) await new Promise((res) => setTimeout(res, 100));
-  assert.deepEqual(await items(), []);
+  await new Promise((res) => setTimeout(res, 4500)); // le serveur relit l'historique du hook toutes les 4 s
   assert.equal((await post('/api/v2/approvals', { approvalId: A_ID })).status, 404, 'déjà utilisée');
+  assert.deepEqual(await items(), []);
 });

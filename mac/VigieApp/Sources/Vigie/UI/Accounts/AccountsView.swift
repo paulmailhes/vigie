@@ -110,6 +110,10 @@ struct AccountCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            // Codex : connexion puis approbation du hook, tant que ce n'est pas fait
+            if account.isCodex && !(account.isConnected && account.hook?.trusted == true) {
+                CodexSetupSteps(account: account)
+            }
             if account.wrongAccount == true {
                 Label {
                     let expected = Text(account.expectedEmail.map { " (prévu : \($0))" } ?? "").foregroundStyle(.secondary)
@@ -132,7 +136,7 @@ struct AccountCard: View {
                     }
                 }
                 footer
-            } else {
+            } else if !account.isCodex {
                 Text("Connecte-le pour voir ses crédits.")
                     .foregroundStyle(.secondary)
             }
@@ -161,9 +165,7 @@ struct AccountCard: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else if account.isCodex {
-                Text("Connecte-toi dans Codex (VS Code)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                EmptyView()
             } else {
                 Button("Connecter", systemImage: "person.crop.circle.badge.plus") {
                     Task { await store.connectAccount(account.id) }
