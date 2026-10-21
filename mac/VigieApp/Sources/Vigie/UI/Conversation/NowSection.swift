@@ -172,43 +172,6 @@ struct NowSection: View {
     }
 }
 
-/// Les documents que la conversation tient à jour (sa feuille de route quand elle n'a pas de plan reconnu).
-struct TrackingDocsView: View {
-    @Environment(VigieStore.self) private var store
-    let docs: [FileItem]
-    let cwd: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(docs, id: \.path) { doc in
-                HStack(spacing: 10) {
-                    Image(systemName: "doc.text")
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(relative(doc.path))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text([doc.writes.map { Fmt.count($0, "modification") }, doc.ts.map { "dernière \(Fmt.when($0, now: store.now))" }]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 8)
-                    Button("Ouvrir") { SystemActions.openInVSCode(path: doc.path) }
-                        .glassButton()
-                        .controlSize(.small)
-                        .help("Ouvrir dans VS Code")
-                }
-            }
-        }
-    }
-
-    private func relative(_ path: String) -> String {
-        guard let cwd, path.hasPrefix(cwd + "/") else { return Fmt.shortPath(path) }
-        return String(path.dropFirst(cwd.count + 1))
-    }
-}
-
 /// Feuille de route : le document d'état que la conversation tient à jour, section par section.
 /// Ce qui dit où on en est, la suite et ce qui t'attend est déplié ; le reste se déplie au clic.
 struct RoadmapView: View {

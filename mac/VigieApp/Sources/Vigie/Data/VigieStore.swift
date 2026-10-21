@@ -56,6 +56,20 @@ final class VigieStore {
     var conversationTab: ConversationTab = .fil
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
+    /// Installation du moteur par l'app elle-même (app glissée dans Applications) : en cours, ou échouée.
+    enum Setup: Equatable { case idle, installing, failed(String) }
+    var setup: Setup = .idle
+
+    func runSetup() async {
+        setup = .installing
+        if let error = await EngineBootstrap.install() {
+            setup = .failed(error)
+        } else {
+            setup = .idle
+            await refreshOverview()
+        }
+    }
+
     /// Outils choisis dans l'accueil (VS Code, app Claude, app ChatGPT…), sinon ceux trouvés sur le Mac.
     private(set) var tools: ToolsState?
     /// Historique : filtres de la page et dernière page lue.
@@ -437,11 +451,6 @@ final class VigieStore {
         settledReview[item.id] = nil
         guard !toReview.contains(where: { $0.id == item.id }) else { return }
         toReview.insert(item, at: 0)
-    }
-
-    func patchSince(_ summary: SinceSummary, since date: Date) {
-        sinceSummary = summary
-        since = date
     }
 
     func patchAccountsState(_ change: (inout AccountsState) -> Void) {

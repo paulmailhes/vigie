@@ -66,3 +66,33 @@ struct EngineBanner: View {
         }
     }
 }
+
+/// Premier lancement de l'app glissée dans Applications : le moteur s'installe (Node.js peut être téléchargé).
+struct SetupBanner: View {
+    let setup: VigieStore.Setup
+    let retry: () -> Void
+
+    var body: some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    if setup == .installing {
+                        ProgressView().controlSize(.small)
+                        Text("Installation de Vigie… (jusqu'à une minute la première fois)")
+                    } else if case .failed(let message) = setup {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                        Text("Installation non aboutie : \(message)").lineLimit(2)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .glassEffect(.regular, in: .capsule)
+                if case .failed = setup {
+                    Button("Réessayer", systemImage: "arrow.clockwise", action: retry)
+                        .glassButton(.primary)
+                }
+            }
+        }
+        .font(.callout)
+    }
+}

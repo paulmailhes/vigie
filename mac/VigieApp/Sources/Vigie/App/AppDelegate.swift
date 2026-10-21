@@ -28,6 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        // App glissée dans Applications : elle installe ou met à jour le moteur qu'elle contient, et s'ouvre à la
+        // connexion par elle-même. Ouverte depuis le DMG : on demande d'abord de la glisser dans Applications.
+        if EngineBootstrap.placement == .mountedOrTranslocated && EngineBootstrap.bundledEngine != nil {
+            EngineBootstrap.askToMoveAndQuit()
+            return
+        }
+        if EngineBootstrap.needed { Task { await store.runSetup() } }
+        EngineBootstrap.registerLoginItem()
         Notifier.shared.start(store: store)
         store.start()
     }

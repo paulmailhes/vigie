@@ -689,15 +689,11 @@ test('questions à relire : changer prépare le texte de correction, puis la que
   assert.equal((await post('/api/v2/questions/inconnue/review', { action: 'ok' })).status, 404);
 });
 
-test('depuis une heure : fenêtre glissante, sans bouton ; « j\'ai tout vu » accepté sans rien changer (ancienne app)', async () => {
-  const before = (await get('/api/v2/overview')).body;
-  assert.ok(Math.abs(Date.parse(before.since) - (Date.now() - 3600_000)) < 2 * 60_000, 'il y a une heure');
-  const r = await post('/api/v2/seen', {});
-  assert.equal(r.status, 200);
+test('depuis une heure : fenêtre glissante, rien à remettre à zéro', async () => {
   const o = (await get('/api/v2/overview')).body;
-  assert.equal(o.since, before.since, 'le clic ne remet rien à zéro');
-  assert.deepEqual(o.sinceSummary, before.sinceSummary);
+  assert.ok(Math.abs(Date.parse(o.since) - (Date.now() - 3600_000)) < 2 * 60_000, 'il y a une heure');
   assert.ok(o.toReview.some((x) => x.id.startsWith('g:')), 'ce qui attend maintenant reste');
+  assert.equal((await post('/api/v2/seen', {})).status, 404, 'plus de « J\'ai tout vu »');
 });
 
 test('MCP : projet, coupure pour un projet, Mac via la CLI (fichiers temporaires)', async () => {
@@ -793,25 +789,6 @@ test('HTTP : adresses invalides, hôte, JSON, taille, méthode, en-têtes de sé
   }
   assert.equal((await get('/api/v2/health')).status, 200, 'toujours en vie');
   assert.doesNotMatch(logs, /Error|erreur/i, 'aucune erreur dans le journal du serveur');
-});
-
-test('v1 gardée pour l\'ancienne app : vues, saisie vide ignorée, attentes fantômes écartées', async () => {
-  const o = (await get('/api/overview')).body;
-  const hook = o.sessions.find((s) => s.id === SID_A).hook;
-  assert.deepEqual([hook.waitingForYou, hook.guardsWaiting, hook.questionsWaiting], [1, 1, 0]);
-  assert.equal((await get(`/api/session/${SID_A}`)).status, 200);
-  assert.equal((await get('/api/health')).body.ok, true);
-  assert.equal((await get('/api/history?limit=2')).body.length, 2);
-  let r = await post('/api/settings', { questionWaitMin: '', guard: { waitMin: '' } });
-  assert.equal(r.status, 200);
-  const s = rj(path.join(DATA, 'state.json'));
-  assert.deepEqual([s.questionWaitMin, s.guard.waitMin], [20, 10]);
-  r = await post('/api/settings', { questions: 'auto' });
-  assert.equal((await get('/api/v2/overview')).body.settings.questionsAuto, true, 'l\'ancien « tout de suite » est montré activé');
-  r = await post('/api/v2/settings', { questionsAuto: true });
-  assert.equal(rj(path.join(DATA, 'state.json')).questions, 'auto', 'déjà activé : le mode n\'est pas changé');
-  await post('/api/settings', { questions: 'ask' });
-  assert.equal((await post('/api/settings', { guard: { rules: [{ label: 'x', match: '(' }] } })).status, 400);
 });
 
 // ---------- fixtures de l'app ----------

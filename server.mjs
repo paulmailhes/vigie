@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Vigie — moteur local (http://127.0.0.1:4777), lancé au démarrage par launchd (io.github.paulmailhes.vigie.engine).
-// API JSON v2 pour l'app Mac (docs/api-v2.md). L'API v1 reste servie tant que l'ancienne app tourne.
+// API JSON v2 pour l'app Mac (docs/api-v2.md).
 // Aucune dépendance. Le hook ne dépend pas de ce serveur : s'il s'arrête, l'auto-accept continue.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -83,11 +83,7 @@ function writeJson(p, v) {
   fs.writeFileSync(t, JSON.stringify(v, null, 2));
   fs.renameSync(t, p);
 }
-const ui = () => {
-  const u = readJson(UI_FILE, null);
-  const ok = isObj(u) && typeof u.lastSeen === 'string' && !Number.isNaN(Date.parse(u.lastSeen));
-  return ok ? u : { ...(isObj(u) ? u : {}), lastSeen: new Date(Date.now() - 12 * HOUR).toISOString() };
-};
+const ui = () => { const u = readJson(UI_FILE, null); return isObj(u) ? u : {}; };
 // Éléments de « À regarder » écartés par l'utilisateur : { id: date }. Un élément reste caché tant qu'il ne change
 // pas (son ts n'est pas plus récent que la date où il a été écarté) ; gardés 14 jours, 500 au plus.
 const DISMISS_KEEP_MS = 14 * DAY, DISMISS_MAX = 500;
@@ -484,7 +480,7 @@ function limitResetAt(text, ts) {
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
 const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office', 'sous-agent': 'Refusée (demandée par un agent)', echec: 'Autorisée, mais elle a échoué' };
 
-// « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui s'est passé depuis son dernier passage.
+// « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui a mal tourné ces dernières 24 h.
 // Chaque garde-fou porte de quoi décider ou refaire l'action : state, pendingId, expiresAt, rule, command
 // (masquée, 4000 caractères au plus), byAgent, cwd, needsPassword.
 function reviewItems(ctx, sums) {
@@ -519,7 +515,7 @@ function reviewItems(ctx, sums) {
     live.push({ id: `c:${s.id}`, kind: 'waiting', conversationId: s.id, conversationTitle: s.title,
       title: `Attend ta réponse dans ${where(s.id)}`, detail: s.headline || null, ts: s.lastActivity || new Date(ctx.now).toISOString() });
   }
-  // Mode « seulement par Vigie » : refusées sur le moment, à autoriser ici (une fois, pour l'appel exact).
+  // Codex : actions sensibles retenues dans Vigie (lib/approvals.mjs), à autoriser ici (une fois, pour l'appel exact).
   let awaiting = [];
   try { awaiting = awaitingApprovals({ history, now: ctx.now }); } catch (e) { console.error('[vigie] autorisations :', clean(e)); }
   for (const a of awaiting) {
@@ -579,7 +575,7 @@ function countBy(items) {
 }
 
 // Acceptations de Vigie par conversation (auto-accepte, question-auto) : depuis minuit (heure locale) et
-// depuis le dernier passage de l'utilisateur. Un seul passage sur l'historique, mis en cache tant qu'il ne change pas.
+// depuis une heure. Un seul passage sur l'historique, mis en cache tant qu'il ne change pas.
 const ACCEPT_EVENTS = new Set(['auto-accepte', 'question-auto']);
 let acceptCache = { key: '', map: new Map() };
 function acceptedCounts(ctx) {
@@ -682,7 +678,7 @@ function overviewV2() {
   const accepted = acceptedCounts(ctx);
   const counts = conv.sinceCounts(ctx.lastSeen);
   const ev = eventCounts(ctx.lastSeen);
-  // Rapports : tout depuis le dernier passage, et au moins les dernières 24 h.
+  // Rapports : les dernières 24 h.
   const dayAgo = new Date(ctx.now - DAY).toISOString();
   return {
     now: new Date(ctx.now).toISOString(),
@@ -1067,7 +1063,7 @@ function postPending(raw, body) {
   return r.ok ? [200, { ok: true, pendingId: r.pendingId, decision: r.decision, message: r.message }] : bad(r.error || 'Échec.', r.status || 400);
 }
 
-// POST /api/v2/approvals { approvalId, decision?: 'deny' } (mode « seulement par Vigie », lib/approvals.mjs).
+// POST /api/v2/approvals { approvalId, decision?: 'deny' } (actions Codex retenues dans Vigie, lib/approvals.mjs).
 // allow : autorisation à usage unique (2 h) pour l'appel exact. Si la conversation attend encore (holding),
 // l'action part tout de suite (delivered: true) ; sinon l'app copie le message et ouvre la bonne fenêtre.
 const shellTool = (t) => SHELL.has(String(t || ''));
@@ -1220,13 +1216,6 @@ async function postOpen(body) {
   if (body.kind === 'conversation') return openConversation(body.id);
   if (body.kind === 'terminal') return openTerminalWith(body);
   return bad('Que faut-il ouvrir ? « conversation » ou « terminal ».');
-}
-
-function postSeen(body) {
-  const t = typeof body.ts === 'string' ? Date.parse(body.ts) : NaN;
-  const ts = Number.isFinite(t) && t <= Date.now() + 60_000 ? new Date(t).toISOString() : new Date().toISOString();
-  writeJson(UI_FILE, { ...ui(), lastSeen: ts });
-  return [200, { ok: true, since: ts }];
 }
 
 function accountLabel(id) { return accounts.load().accounts.find((a) => a.id === id)?.label || id || 'Compte'; }
@@ -1408,129 +1397,6 @@ function postQuestionReview(raw, body) {
   return r.ok ? [200, r] : bad(r.error || 'Échec.', r.status || 400);
 }
 
-// ---------- vues et réglages v1 (ancienne app de la barre des menus) ----------
-function quotas() {
-  const j = readJson(QUOTA_FILE, null);
-  if (!Array.isArray(j?.metrics)) return null;
-  return { metrics: j.metrics.map((m) => ({ title: m.title, value: m.formattedValue, ratio: m.normalizedValue })) };
-}
-function sessionNames() {
-  const m = new Map();
-  for (const s of indexer.sessions.values()) {
-    const live = indexer.live.get(s.id);
-    m.set(s.id, { title: s.title || live?.name || s.projectDir, project: path.basename(live?.cwd || s.cwd || s.projectDir) });
-  }
-  return m;
-}
-function awaySummary(since) {
-  const ev = {};
-  for (const h of history) if (h.ts >= since) ev[h.event] = (ev[h.event] || 0) + 1;
-  const per = [];
-  let tests = 0, testsFailed = 0, files = 0, artifacts = 0, limits = 0;
-  for (const s of indexer.sessions.values()) {
-    const t = s.tests.filter((x) => x.ts >= since);
-    const failed = t.filter((x) => x.ok === false && !x.red).length;
-    const f = [...s.files.values()].filter((x) => x.lastTs >= since).length;
-    const a = [...s.artifacts.values()].filter((x) => (x.lastTs || x.firstTs) >= since).length;
-    const l = s.limits.filter((x) => x.ts >= since);
-    tests += t.length; testsFailed += failed; files += f; artifacts += a; limits += l.length;
-    if (t.length || f || a || l.length) per.push({ id: s.id, tests: t.length, testsFailed: failed, files: f, artifacts: a, limits: l.length });
-  }
-  return { since, events: ev, tests, testsFailed, files, artifacts, limits, sessions: per };
-}
-function overviewV1() {
-  const state = readState();
-  const u = ui();
-  const waits = pendingWaits(state);
-  const sessions = [...indexer.sessions.values()].map((s) => {
-    const x = indexer.summary(s);
-    const ov = Object.hasOwn(state.sessions, s.id) ? state.sessions[s.id] : {};
-    const hs = history.filter((h) => h.sessionId === s.id);
-    return {
-      ...x,
-      settings: { effective: effective(state, s.id), override: { autoAccept: ov.autoAccept ?? null, questions: ov.questions ?? null } },
-      hook: {
-        accepted: hs.filter((h) => h.event === 'auto-accepte').length,
-        acceptedSinceSeen: hs.filter((h) => h.event === 'auto-accepte' && h.ts >= u.lastSeen).length,
-        blocked: hs.filter((h) => h.event === 'garde-fou-bloque').length,
-        questionsAuto: hs.filter((h) => h.event === 'question-auto').length,
-        waitingForYou: x.running ? (waits.get(s.id) || []).length : 0,
-        // séparés : une question en attente n'est pas une action sensible (constat « alerte-question »)
-        guardsWaiting: x.running ? (waits.get(s.id) || []).filter((w) => !w.question).length : 0,
-        questionsWaiting: x.running ? (waits.get(s.id) || []).filter((w) => w.question).length : 0,
-        last: hs.length ? hs[hs.length - 1] : null,
-      },
-    };
-  }).sort((a, b) => (b.running - a.running) || String(b.lastActivity || b.lastTs || '').localeCompare(String(a.lastActivity || a.lastTs || '')));
-  return {
-    now: new Date().toISOString(),
-    state: { autoAccept: state.autoAccept, questions: state.questions, questionWaitMin: state.questionWaitMin, guard: state.guard },
-    defaultGuards: DEFAULT_GUARDS,
-    ui: u,
-    away: awaySummary(u.lastSeen),
-    quotas: quotas(),
-    indexing: indexer.progress,
-    sessions,
-  };
-}
-function historyV1(q) {
-  const names = sessionNames();
-  const since = q.get('since') || '';
-  const sid = q.get('session');
-  const ev = q.get('event');
-  const n = Number(q.get('limit'));
-  const limit = Math.min(Number.isFinite(n) && n > 0 ? n : 1000, 5000);
-  const out = [];
-  for (let i = history.length - 1; i >= 0 && out.length < limit; i--) {
-    const h = history[i];
-    if (since && h.ts < since) break;
-    if (sid && h.sessionId !== sid) continue;
-    if (ev && !String(h.event || '').startsWith(ev)) continue;
-    const nm = names.get(h.sessionId);
-    out.push({ ...h, sessionTitle: nm?.title || null, project: nm?.project || (h.cwd ? path.basename(h.cwd) : null) });
-  }
-  return out;
-}
-// Une saisie vide ne devient jamais 0 (garde-fous refusés tout de suite) ni 1 min (constat « saisie vide »).
-const filled = (v) => v !== '' && v !== null && v !== undefined && typeof v !== 'boolean' && Number.isFinite(Number(v));
-const clampMin = (v) => Math.max(0, Math.min(120, Math.round(Number(v))));
-function settingsV1(body) {
-  const s = readState();
-  if (typeof body.autoAccept === 'boolean') s.autoAccept = body.autoAccept;
-  if (QUESTION_MODES.includes(body.questions)) s.questions = body.questions;
-  if (filled(body.questionWaitMin)) s.questionWaitMin = Math.max(1, clampMin(body.questionWaitMin));
-  if (isObj(body.guard)) {
-    if (typeof body.guard.enabled === 'boolean') s.guard.enabled = body.guard.enabled;
-    if (filled(body.guard.waitMin)) s.guard.waitMin = clampMin(body.guard.waitMin);
-    if (Array.isArray(body.guard.rules)) {
-      s.guard.rules = body.guard.rules.filter((r) => isObj(r) && typeof r.label === 'string' && (r.tool || r.match)).map((r) => {
-        for (const k of ['tool', 'match']) if (r[k]) new RegExp(r[k]); // lève une erreur (400) si la regex est invalide
-        return { id: String(r.id || r.label).slice(0, 60), label: r.label.slice(0, 120), tool: r.tool || undefined, match: r.match || undefined, disabled: !!r.disabled };
-      });
-    }
-    if (body.guard.reset === true) s.guard.rules = structuredClone(DEFAULT_GUARDS);
-  }
-  writeState(s);
-  return [200, { ok: true }];
-}
-function sessionSettingsV1(id, body) {
-  if (!UUID.test(id)) return bad('Conversation inconnue.', 404);
-  const s = readState();
-  const cur = { ...(Object.hasOwn(s.sessions, id) && isObj(s.sessions[id]) ? s.sessions[id] : {}) };
-  if ('autoAccept' in body) { if (typeof body.autoAccept === 'boolean') cur.autoAccept = body.autoAccept; else delete cur.autoAccept; }
-  if ('questions' in body) { if (QUESTION_MODES.includes(body.questions)) cur.questions = body.questions; else delete cur.questions; }
-  if (Object.keys(cur).length) s.sessions[id] = cur; else delete s.sessions[id];
-  writeState(s);
-  return [200, { ok: true }];
-}
-function sessionV1(id) {
-  const d = indexer.detail(id);
-  if (!d) return bad('Conversation inconnue.', 404);
-  const state = readState();
-  return [200, { ...d, settings: { effective: effective(state, id), override: (Object.hasOwn(state.sessions, id) && state.sessions[id]) || {} },
-    history: historyV1(new URLSearchParams({ session: id, limit: '1500' })) }];
-}
-
 // ---------- HTTP ----------
 const SECURITY_HEADERS = {
   'Cache-Control': 'no-store',
@@ -1591,7 +1457,6 @@ const ROUTES = [
   }],
   ['POST', new RegExp(`^/api/v2/conversation/${S}/settings$`), ([id], b) => postConversationSettings(id, b)],
   ['POST', new RegExp(`^/api/v2/questions/${S}/review$`), ([id], b) => postQuestionReview(id, b)],
-  ['POST', /^\/api\/v2\/seen$/, (_, b) => postSeen(b)],
   ['POST', /^\/api\/v2\/mcp\/user$/, (_, b) => postMcpUser(b)],
   ['POST', /^\/api\/v2\/mcp\/project$/, (_, b) => postMcpProject(b)],
   ['POST', /^\/api\/v2\/mcp\/disable$/, (_, b) => postMcpDisable(b)],
@@ -1602,14 +1467,6 @@ const ROUTES = [
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],
   ['POST', /^\/api\/v2\/review\/([^/]{1,400})\/dismiss$/, ([id]) => postDismiss(id)],
   ['POST', /^\/api\/v2\/open$/, (_, b) => postOpen(b)],
-  // v1 : ancienne app de la barre des menus, tant qu'elle tourne
-  ['GET', /^\/api\/overview$/, () => [200, overviewV1()]],
-  ['GET', /^\/api\/history$/, (_, __, url) => [200, historyV1(url.searchParams)]],
-  ['GET', /^\/api\/health$/, () => [200, health()]],
-  ['GET', new RegExp(`^/api/session/${S}$`), ([id]) => sessionV1(id)],
-  ['POST', /^\/api\/settings$/, (_, b) => settingsV1(b)],
-  ['POST', new RegExp(`^/api/session/${S}/settings$`), ([id], b) => sessionSettingsV1(id, b)],
-  ['POST', /^\/api\/seen$/, (_, b) => postSeen(b)],
 ];
 const STATIC = { '/': 'index.html', '/index.html': 'index.html' };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };

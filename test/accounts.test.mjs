@@ -857,3 +857,18 @@ test('connecter sans Terminal : la page de connexion s\'ouvre dans le navigateur
   runner.login = undefined;
 });
 
+
+test('réinstallation (accounts.json effacé) : les comptes déjà connectés sont retrouvés, sans reconnexion', () => {
+  const data = path.join(TMP, 'data réinstallée');
+  const root = path.join(TMP, 'comptes gardés');
+  wj(path.join(root, 'travail2', '.claude.json'), { oauthAccount: { emailAddress: 'deux@exemple.test' } });
+  wj(path.join(root, 'perso', '.claude.json'), { mcpServers: {} }); // jamais connecté : ignoré
+  fs.mkdirSync(path.join(root, 'Pas Un Nom'), { recursive: true });
+  const R = createAccounts({ ...opts, dataDir: data, accountsRoot: root });
+  assert.deepEqual(R.load().accounts.map((a) => [a.id, a.configDir, a.expectedEmail ?? null]),
+    [['travail1', null, null], ['travail2', path.join(root, 'travail2'), 'deux@exemple.test']]);
+  assert.ok(fs.existsSync(path.join(data, 'accounts.json')), 'enregistré : la recherche ne se refait pas');
+  const E = createAccounts({ ...opts, dataDir: path.join(TMP, 'data neuve'), accountsRoot: path.join(TMP, 'aucun compte') });
+  assert.equal(E.load().accounts.length, 1);
+  assert.equal(fs.existsSync(path.join(TMP, 'data neuve', 'accounts.json')), false, 'rien trouvé : rien écrit');
+});

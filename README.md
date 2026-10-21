@@ -22,13 +22,13 @@ Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.
 
 ## Installation
 
-Il te faut :
+Il te faut un Mac avec **macOS 26** (Tahoe) ou plus récent (Apple Silicon ou Intel), et Claude Code ou Codex : dans VS Code, dans l'app Claude ou dans l'app ChatGPT.
 
-- un Mac avec **macOS 26** (Tahoe) ou plus récent, Apple Silicon ou Intel ;
-- **Node.js 20** ou plus récent : s'il n'est pas sur ton Mac, l'installation pose sa propre copie (version officielle, vérifiée) dans `~/.vigie/node`, sans toucher au reste ;
-- **Claude Code**, dans VS Code ou dans le terminal.
+1. **Télécharge [Vigie.dmg](https://github.com/paulmailhes/vigie/releases/latest/download/Vigie.dmg)** (l'app est signée et notarisée par Apple).
+2. Ouvre-le et **glisse Vigie dans Applications**.
+3. Ouvre Vigie depuis Applications : elle s'installe toute seule (si Node.js 20 ou plus récent manque, elle pose sa propre copie officielle, vérifiée, dans `~/.vigie/node`, sans toucher au reste du Mac).
 
-Puis, dans le Terminal :
+Tu préfères le Terminal ? La même chose en une commande :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/paulmailhes/vigie/main/install.sh | bash
@@ -37,10 +37,11 @@ curl -fsSL https://raw.githubusercontent.com/paulmailhes/vigie/main/install.sh |
 L'app s'ouvre sur un court accueil :
 
 1. ce que fait Vigie ;
-2. les actions sensibles, qui restent à toi ;
-3. tes comptes IA : Claude (à ajouter et connecter en un clic) et Codex ;
-4. tes MCP ;
-5. l'auto-accept et les notifications.
+2. avec quoi tu travailles (VS Code, app Claude, app ChatGPT) ;
+3. les actions sensibles, qui restent à toi ;
+4. tes comptes Claude, puis Codex s'il fait partie de tes outils ;
+5. tes MCP ;
+6. l'auto-accept, les mises à jour et les notifications.
 
 Ensuite, Vigie vit dans la barre des menus (les jumelles).
 
@@ -97,13 +98,13 @@ Une conversation ne peut pas passer de Claude à Codex : leurs historiques sont 
 - L'**app Mac** (SwiftUI) affiche le tout et envoie tes réglages au moteur.
 - Le **lanceur de comptes** (`bin/claude-account-wrapper`, facultatif) démarre chaque conversation VS Code sur le compte que tu lui as choisi.
 
-Les fichiers de Vigie sont dans `~/.vigie`, et ses données (réglages, historique) dans `~/.vigie/data`. Le hook est branché dans `~/.claude/settings.json`. Une sauvegarde de ce fichier est faite à chaque modification.
+L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; ses données (réglages, historique) sont dans `~/.vigie/data`. Le hook est branché dans `~/.claude/settings.json` (et `~/.codex/hooks.json` pour Codex). Une sauvegarde de ces fichiers est faite à chaque modification.
 
 ## Désinstaller
 
 ```bash
-~/.vigie/scripts/uninstall.sh          # retire le hook, le moteur et l'app ; garde tes réglages
-~/.vigie/scripts/uninstall.sh --tout   # efface aussi ~/.vigie
+~/.vigie/scripts/uninstall.sh          # retire le hook et le moteur, quitte l'app ; garde tes réglages
+~/.vigie/scripts/uninstall.sh --tout   # efface aussi ~/.vigie et l'app
 ```
 
 Claude Code redevient exactement comme avant, et les conversations ouvertes reprennent tout de suite le fonctionnement normal.
@@ -116,7 +117,7 @@ node --test test/            # tests du moteur et du hook
 ./scripts/install.sh         # installe depuis les sources (construit l'app : il faut Xcode ou ses outils)
 ```
 
-L'app se construit avec `mac/build-app.sh`, et la documentation de l'API locale est dans [docs/api-v2.md](docs/api-v2.md).
+L'app se construit avec `mac/build-app.sh`, et la documentation de l'API locale est dans [docs/api-v2.md](docs/api-v2.md). Une version publiable (app signée et notarisée, `Vigie.dmg` et l'archive des mises à jour) se prépare avec `scripts/release.sh <version>`.
 
 ## Licence
 

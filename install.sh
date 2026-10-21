@@ -1,13 +1,15 @@
 #!/bin/bash
-# Vigie : installation en une commande.
+# Vigie : installation en une commande (le plus simple reste l'app : télécharge Vigie.dmg et glisse-la dans
+# Applications ; cette commande sert aussi aux mises à jour).
 #
 #   curl -fsSL https://raw.githubusercontent.com/paulmailhes/vigie/main/install.sh | bash
 #
 # Ce que fait ce script :
-#   1. vérifie le Mac (macOS 26 ou plus récent) et Node.js (version 20 ou plus récente) ; sans Node.js, installe
-#      sa propre copie (version LTS officielle, vérifiée) dans ~/.vigie/node, sans toucher au reste du Mac ;
-#   2. télécharge la dernière version de Vigie (moteur + app déjà construite) dans ~/.vigie ;
-#   3. branche le hook dans Claude Code, lance le moteur et l'app au démarrage du Mac ;
+#   1. vérifie le Mac (macOS 26 ou plus récent) ;
+#   2. télécharge la dernière version de Vigie (moteur + app signée) ;
+#   3. passe la main à scripts/bootstrap.sh : Node.js (installé dans ~/.vigie/node s'il manque), moteur dans ~/.vigie,
+#      app remplacée là où elle est (Applications, ou ~/.vigie/mac), hook dans Claude Code et Codex, lancement au
+#      démarrage ;
 #   4. ouvre Vigie, qui t'accueille et te guide.
 # Relancer la même commande met Vigie à jour ; tes réglages et ton historique (~/.vigie/data) sont gardés.
 # Tout retirer : ~/.vigie/scripts/uninstall.sh
@@ -27,69 +29,39 @@ say ""
 [ "$(uname -s)" = "Darwin" ] || stop "Vigie ne fonctionne que sur Mac."
 MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 [ "$MAJOR" -ge 26 ] || stop "Vigie demande macOS 26 ou plus récent (ce Mac : $(sw_vers -productVersion))."
-
-# Node.js 20 ou plus récent : celui du PATH, sinon les emplacements habituels (Homebrew, Volta, nvm), sinon la copie
-# de Vigie (~/.vigie/node). Aucun ne convient : Vigie installe la sienne, sans droits administrateur.
-node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 20 ]; }
-find_node() {
-  local c
-  for c in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.volta/bin/node" \
-           $(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1) "$DEST/node/bin/node"; do
-    node_ok "$c" && { echo "$c"; return 0; }
-  done
-  return 1
-}
-install_node() {
-  local arch line sum file
-  case "$(uname -m)" in arm64) arch=arm64 ;; *) arch=x64 ;; esac
-  say "… Node.js 20 ou plus récent est introuvable : installation de sa propre copie (Node.js LTS) dans $DEST/node"
-  line="$(curl -fsSL https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt | grep -E "  node-v[0-9.]+-darwin-$arch\.tar\.gz$" | head -1)" \
-    || stop "Impossible de joindre nodejs.org. Installe Node.js toi-même (https://nodejs.org), puis relance cette commande."
-  sum="${line%% *}"; file="${line##* }"
-  curl -fsSL "https://nodejs.org/dist/latest-v24.x/$file" -o "$TMP/$file" || stop "Téléchargement de Node.js impossible."
-  [ "$(shasum -a 256 "$TMP/$file" | cut -d' ' -f1)" = "$sum" ] || stop "Node.js téléchargé ne correspond pas à son empreinte officielle : installation arrêtée."
-  mkdir -p "$TMP/node" "$DEST"
-  tar -xzf "$TMP/$file" -C "$TMP/node" --strip-components 1 || stop "Archive de Node.js illisible."
-  rsync -a --delete "$TMP/node/" "$DEST/node/"
-}
-TMP="$(mktemp -d)"
-trap 'find "$TMP" -delete 2>/dev/null || true' EXIT
-# VIGIE_OWN_NODE=1 : toujours la copie de Vigie, même si le Mac a déjà Node.js (essais).
-NODE=""
-if [ -z "${VIGIE_OWN_NODE:-}" ]; then NODE="$(find_node || true)"; elif node_ok "$DEST/node/bin/node"; then NODE="$DEST/node/bin/node"; fi
-if [ -z "$NODE" ]; then
-  install_node
-  NODE="$DEST/node/bin/node"
-  node_ok "$NODE" || stop "La copie de Node.js ne démarre pas ($NODE)."
-fi
-say "✓ macOS $(sw_vers -productVersion), Node.js $("$NODE" -v) ($NODE)"
-
+say "✓ macOS $(sw_vers -productVersion)"
 if [ ! -d "$HOME/.claude" ]; then
   say "! Claude Code ne semble pas encore installé (pas de dossier ~/.claude). Vigie s'installe quand même :"
   say "  il veillera dès que tu utiliseras Claude Code."
 fi
 
-# 2. Téléchargement (curl ne pose pas d'attribut de quarantaine : l'app s'ouvre sans alerte de Gatekeeper)
+# 2. Téléchargement (curl ne pose pas d'attribut de quarantaine ; l'app est de toute façon signée et notarisée)
+TMP="$(mktemp -d)"
+trap 'find "$TMP" -delete 2>/dev/null || true' EXIT
 say "… téléchargement de Vigie"
 curl -fsSL "$URL" -o "$TMP/vigie.tar.gz" || stop "Téléchargement impossible ($URL)."
 mkdir -p "$TMP/x"
 tar -xzf "$TMP/vigie.tar.gz" -C "$TMP/x" || stop "Archive illisible."
 [ -f "$TMP/x/server.mjs" ] && [ -d "$TMP/x/mac/Vigie.app" ] || stop "Archive incomplète."
 
-mkdir -p "$DEST"
-# Mise à jour : tout est remplacé, sauf data/ (réglages, historique, comptes) et node/ (sa copie de Node.js).
-rsync -a --delete --exclude data --exclude node "$TMP/x/" "$DEST/"
-say "✓ Vigie est dans $DEST"
-
-# 3. Hook, moteur, app au démarrage
-VIGIE_PREBUILT=1 VIGIE_NODE="$NODE" "$DEST/scripts/install.sh"
+# 3. Node.js, moteur, app, hooks, lancement au démarrage
+if [ -x "$TMP/x/scripts/bootstrap.sh" ]; then
+  VIGIE_HOME="$DEST" "$TMP/x/scripts/bootstrap.sh"
+else
+  # archive d'avant bootstrap.sh (0.2.13 et avant) : on ne sait plus l'installer d'ici
+  stop "Archive trop ancienne pour cet installeur."
+fi
 
 # 4. L'app (VIGIE_DRY_RUN : essai, rien n'est relié ni ouvert ; VIGIE_UPDATE : mise à jour lancée par Vigie, l'app
-#    est déjà relancée par launchd, on ne lui fait pas prendre le premier plan)
+#    est relancée par l'installation, on ne lui fait pas prendre le premier plan)
+APP="$DEST/mac/Vigie.app"
+[ -f "$DEST/data/app.path" ] && APP="$(cat "$DEST/data/app.path")"
 if [ -z "${VIGIE_DRY_RUN:-}" ]; then
-  mkdir -p "$HOME/Applications"
-  ln -sfn "$DEST/mac/Vigie.app" "$HOME/Applications/Vigie.app"
-  [ -n "${VIGIE_UPDATE:-}" ] || open "$DEST/mac/Vigie.app" || true
+  if [ "$APP" = "$DEST/mac/Vigie.app" ]; then
+    mkdir -p "$HOME/Applications"
+    ln -sfn "$APP" "$HOME/Applications/Vigie.app"
+  fi
+  [ -n "${VIGIE_UPDATE:-}" ] || open "$APP" || true
 fi
 say ""
 say "Vigie est installé. Son accueil vient de s'ouvrir ; ensuite il vit dans la barre des menus (les jumelles)."

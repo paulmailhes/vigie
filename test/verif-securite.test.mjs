@@ -65,7 +65,7 @@ test('accounts.json abîmé ou illisible : jamais remplacé en tâche de fond', 
 test('uninstall.sh retire aussi le lanceur de VS Code, seulement s\'il désigne ce dossier', () => {
   // Le morceau de uninstall.sh est extrait tel quel et lancé seul (sans launchctl ni kill).
   const sh = fs.readFileSync(path.join(ROOT, 'scripts', 'uninstall.sh'), 'utf8');
-  const js = /--input-type=module -e '([\s\S]*?)' "\$ROOT\/lib\/accounts\.mjs"/.exec(sh)?.[1];
+  const js = /--input-type=module -e '([^']*)' "\$ROOT\/lib\/accounts\.mjs"/.exec(sh)?.[1];
   assert.ok(js, 'le retrait du lanceur est bien dans uninstall.sh');
   const wrap = path.join(ROOT, 'bin', 'claude-account-wrapper');
   const env = { PATH: '/usr/bin:/bin', HOME, VIGIE_HOME: HOME, VIGIE_DATA: DATA, VIGIE_VSCODE_SETTINGS: VSC, VIGIE_ACCOUNTS_ROOT: ACC, VIGIE_RUNCAT_STATE: path.join(TMP, 'rc.json') };

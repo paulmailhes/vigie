@@ -84,38 +84,3 @@ struct CodexSetupSteps: View {
     }
 }
 
-/// Feuille « Connecter Codex » (accueil, page Comptes) : bloquante tant que les deux étapes ne sont pas faites.
-struct CodexSetupSheet: View {
-    @Environment(VigieStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-
-    private var account: Account? { store.accounts.first(where: \.isCodex) ?? store.accountsState?.accounts.first(where: \.isCodex) }
-    private var ready: Bool { account?.isConnected == true && account?.hook?.trusted == true }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: "chevron.left.forwardslash.chevron.right")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Connecter Codex (OpenAI)").font(.title3.bold())
-                    Text("Tes conversations Codex dans Vigie, avec l'auto-accept et les garde-fous.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            CodexSetupSteps(account: account)
-            HStack {
-                Button("Plus tard") { dismiss() }
-                    .glassButton()
-                    .help("Codex restera visible dans Vigie, mais sans auto-accept")
-                Spacer()
-                Button("Terminé") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .glassButton(.primary)
-                    .disabled(!ready)
-            }
-            .controlSize(.large)
-        }
-        .padding(24)
-        .frame(width: 520)
-    }
-}

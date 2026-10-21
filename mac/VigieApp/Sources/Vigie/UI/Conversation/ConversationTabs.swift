@@ -113,69 +113,6 @@ struct EmptyRow: View {
     }
 }
 
-/// Une demande de l'utilisateur et ce qu'elle a donné.
-struct ChapterRow: View {
-    @Environment(VigieStore.self) private var store
-    let chapter: Chapter
-    @State private var expanded = false
-
-    var body: some View {
-        let inProgress = chapter.end == nil
-        HStack(alignment: .top, spacing: 10) {
-            Capsule()
-                .fill(inProgress ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
-                .frame(width: 3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("« \(chapter.prompt ?? "Demande") »")
-                    .lineLimit(expanded ? nil : 1)
-                if let outcome = chapter.outcome, !outcome.isEmpty {
-                    Text(outcome)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(expanded ? nil : 1)
-                }
-                Text(metaLine(inProgress: inProgress))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            Button(expanded ? "Réduire" : "Déplier", systemImage: expanded ? "chevron.up" : "chevron.down") {
-                withAnimation(.smooth) { expanded.toggle() }
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 2)
-    }
-
-    /// « hier 22:14 · 21 min · 24 fichiers · 40 tests dont 3 en échec · 6 commits ».
-    private func metaLine(inProgress: Bool) -> String {
-        var parts: [String] = []
-        let start = chapter.start.map { Fmt.when($0, now: store.now) } ?? ""
-        let duration = Fmt.duration(ms: chapter.durationMs)
-        if !start.isEmpty { parts.append(start) }
-        if inProgress {
-            parts.append(duration.isEmpty ? "en cours" : "en cours depuis \(duration)")
-        } else if !duration.isEmpty {
-            parts.append(duration)
-        }
-        if let stats = chapter.stats {
-            if let value = stats.workflows, value > 0 { parts.append(Fmt.count(value, "workflow")) }
-            if let value = stats.agents, value > 0 { parts.append(Fmt.count(value, "agent")) }
-            if let value = stats.artifacts, value > 0 { parts.append(Fmt.count(value, "rapport")) }
-            if let value = stats.files, value > 0 { parts.append(Fmt.count(value, "fichier")) }
-            if let value = stats.tests, value > 0 {
-                let failed = stats.testsFailed ?? 0
-                parts.append(Fmt.count(value, "test") + (failed > 0 ? " dont \(Fmt.int(failed)) en échec" : ""))
-            }
-            if let value = stats.commits, value > 0 { parts.append(Fmt.count(value, "commit")) }
-        }
-        return parts.joined(separator: " · ")
-    }
-}
-
 /// Une décision de Vigie : seules les décisions qui sortent de l'ordinaire portent une étiquette.
 struct AcceptedRow: View {
     @Environment(VigieStore.self) private var store

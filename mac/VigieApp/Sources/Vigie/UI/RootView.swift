@@ -12,7 +12,11 @@ struct RootView: View {
         } detail: {
             DetailView()
                 .overlay(alignment: .top) {
-                    if showBanner {
+                    if store.setup != .idle {
+                        SetupBanner(setup: store.setup) { Task { await store.runSetup() } }
+                            .padding(.top, 10)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if showBanner {
                         EngineBanner(connection: store.connection, restarting: store.restarting) {
                             store.restartEngine()
                         }

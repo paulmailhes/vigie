@@ -137,39 +137,3 @@ struct ReviewRow: View {
     }
 }
 
-/// Un rapport ou une fin de mission (artefact publié, mission terminée, workflow fini).
-struct ReportRow: View {
-    @Environment(VigieStore.self) private var store
-    let report: Report
-
-    var body: some View {
-        HStack(spacing: 10) {
-            RowIcon(symbol: Theme.symbol(for: report.reportKind))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(report.title ?? "Mise à jour")
-                    .lineLimit(1)
-                Text(detailLine)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: 8)
-            if let url = report.url, !url.isEmpty {
-                Button("Ouvrir") { SystemActions.open(url) }
-                    .glassButton()
-                    .help("Ouvrir sur claude.ai")
-            } else if let id = report.conversationId {
-                Button("Voir") { store.route = .conversation(id) }
-                    .glassButton()
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var detailLine: String {
-        [report.conversationTitle, report.detail, report.ts.map { Fmt.when($0, now: store.now) }]
-            .compactMap { $0?.isEmpty == false ? $0 : nil }
-            .joined(separator: " · ")
-    }
-}

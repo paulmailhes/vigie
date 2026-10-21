@@ -19,7 +19,7 @@ const ours = (c) => /\s--vigie\b/.test(c) || c.includes('auto-accept/hook.mjs') 
 const WANTED = {
   // 7300 s : au-delà de l'attente maximale réglable (120 min) ; le hook s'arrête seul juste avant.
   PermissionRequest: { matcher: '*', timeout: 7300 },
-  // Questions, et actions sensibles « seulement par Vigie » retenues avant toute fenêtre (attente ≤ 120 min).
+  // Questions, et actions sensibles : la fenêtre de la conversation s'affiche (permissionDecision « ask »).
   PreToolUse: { matcher: 'AskUserQuestion|ExitPlanMode|Bash|Monitor|PowerShell|Write|Edit|MultiEdit|NotebookEdit|mcp__.*', timeout: 7300 },
   PermissionDenied: { matcher: '*', timeout: 30 },
 };

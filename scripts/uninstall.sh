@@ -13,6 +13,22 @@ LA="${VIGIE_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}"
 GUI="gui/$(id -u)"
 DRY="${VIGIE_DRY_RUN:-}"
 run() { if [ -n "$DRY" ]; then echo "[essai] $*"; else "$@"; fi; }
+PORT="${VIGIE_PORT:-4777}"
+
+# MCP passés par Vigie : rebranchés en direct dans chaque compte (le moteur tourne encore), sinon ils viseraient
+# un Vigie arrêté. Leurs jetons, gardés par Vigie, sont oubliés : chaque compte se reconnectera au service.
+if [ -z "$DRY" ]; then
+  "$NODE" --input-type=module -e '
+const base = `http://127.0.0.1:${process.argv[1]}/api/v2`;
+let names = [];
+try { names = Object.keys((await (await fetch(`${base}/mcp`)).json()).gateway || {}); } catch { process.exit(0); }
+for (const name of names) {
+  const r = await fetch(`${base}/gateway`, { method: "POST", headers: { "content-type": "application/json", "x-vigie": "1" }, body: JSON.stringify({ action: "restore", name }) })
+    .then((x) => x.json()).catch((e) => ({ error: String(e) }));
+  console.log(r.ok ? `MCP ${name} : rebranché en direct` : `MCP ${name} : ${r.error}`);
+}
+' "$PORT" || echo "MCP : passerelle non vérifiée."
+fi
 
 "$NODE" "$ROOT/scripts/settings.mjs" uninstall
 
@@ -43,8 +59,27 @@ done
 if [ -L "$HOME/Applications/Vigie.app" ] && [ "$(readlink "$HOME/Applications/Vigie.app")" = "$ROOT/mac/Vigie.app" ]; then
   run rm -f "$HOME/Applications/Vigie.app"
 fi
-# --tout : le dossier d'installation (~/.vigie) part aussi, réglages et historique compris.
+# App glissée dans Applications (data/app.path) : elle est quittée et ne s'ouvre plus à la connexion ; avec --tout,
+# elle part aussi.
+STANDALONE_APP=""
+[ -f "$ROOT/data/app.path" ] && STANDALONE_APP="$(cat "$ROOT/data/app.path")"
+if [ -n "$STANDALONE_APP" ]; then
+  run pkill -x Vigie 2>/dev/null || true
+  [ -x "$STANDALONE_APP/Contents/MacOS/Vigie" ] && { run "$STANDALONE_APP/Contents/MacOS/Vigie" --desinscrire || true; }
+  case "$STANDALONE_APP" in
+    */Vigie.app) if [ "${1:-}" = "--tout" ] && [ -d "$STANDALONE_APP" ]; then run rm -rf "$STANDALONE_APP"; echo "App $STANDALONE_APP retirée."; fi ;;
+  esac
+fi
+# --tout : le dossier d'installation (~/.vigie) part aussi, réglages et historique compris, avec ce que macOS garde
+# pour l'app (préférences, dont l'accueil déjà vu ; autorisations ; jetons des MCP ; journal d'installation).
+# Les comptes Claude (~/.claude-comptes et leurs connexions) ne sont jamais touchés.
 if [ "${1:-}" = "--tout" ]; then
+  run defaults delete io.github.paulmailhes.vigie 2>/dev/null || true
+  run tccutil reset All io.github.paulmailhes.vigie >/dev/null 2>&1 || true
+  if [ -z "$DRY" ]; then
+    while security delete-generic-password -s "Vigie MCP" >/dev/null 2>&1; do :; done
+  fi
+  run rm -f "$HOME/Library/Logs/Vigie-installation.log"
   case "$ROOT" in
     "$HOME/.vigie") run rm -rf "$ROOT"; echo "Dossier $ROOT effacé." ;;
     *) echo "--tout n'efface que ~/.vigie (ici : $ROOT, gardé)." ;;

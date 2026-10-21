@@ -102,15 +102,6 @@ extension VigieStore {
 
     // MARK: Vue d'ensemble
 
-    func markSeen() async {
-        let previous = sinceSummary
-        patchSince(SinceSummary(accepted: 0, questionsAuto: 0, blocked: 0, reports: 0, testsFailed: 0, limits: 0), since: .now)
-        if await write("/api/v2/seen", [:]) == nil, let previous {
-            patchSince(previous, since: since ?? .now)
-        }
-        await reloadAfterWrite()
-    }
-
     func acceptReview(_ item: ReviewItem) async {
         removeReview(item.id)
         await write("/api/v2/questions/\(encode(item.questionID))/review", ["action": "ok"])
@@ -142,7 +133,7 @@ extension VigieStore {
         return result != nil
     }
 
-    /// Mode « seulement par Vigie » : autorise une fois, pour la commande exacte, ou refuse.
+    /// Action Codex retenue dans Vigie : autorise une fois, pour la commande exacte, ou refuse.
     /// Autorisée sans livraison directe : le message est copié et la conversation ouverte.
     func decideApproval(_ item: ReviewItem, allow: Bool) async -> Bool {
         guard let approval = item.approvalId else { return false }

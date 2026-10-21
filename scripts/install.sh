@@ -15,7 +15,11 @@ LA="${VIGIE_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}"
 PORT="${VIGIE_PORT:-4777}"
 GUI="gui/$(id -u)"
 DRY="${VIGIE_DRY_RUN:-}"
-APP="$ROOT/mac/Vigie.app"
+# L'app : celle glissée dans Applications (VIGIE_APP, donnée par bootstrap.sh), sinon celle de ce dossier (Terminal).
+APP="${VIGIE_APP:-$ROOT/mac/Vigie.app}"
+# Glissée dans Applications : elle s'ouvre à la connexion par elle-même (élément d'ouverture de macOS), pas par
+# l'agent « menu » de launchd, qui en lancerait une seconde copie.
+case "$APP" in "$ROOT"/*) STANDALONE= ;; *) STANDALONE=1 ;; esac
 run() { if [ -n "$DRY" ]; then echo "[essai] $*"; else "$@"; fi; }
 
 echo "1/4 Hook dans Claude Code"
@@ -63,7 +67,17 @@ cat > "$LA/io.github.paulmailhes.vigie.engine.plist" <<PLIST
 </plist>
 PLIST
 MENU=1
-if [ -x "$APP_BIN" ] || [ -n "$DRY" ]; then
+# où est l'app (mises à jour : bootstrap.sh la remplace là où elle est)
+if [ -n "$STANDALONE" ]; then
+  [ -n "$DRY" ] || printf '%s\n' "$APP" > "$ROOT/data/app.path"
+else
+  rm -f "$ROOT/data/app.path"
+fi
+if [ -n "$STANDALONE" ]; then
+  MENU=
+  rm -f "$LA/io.github.paulmailhes.vigie.menu.plist"
+  echo "App : $APP (elle s'ouvre à la connexion par elle-même)"
+elif [ -x "$APP_BIN" ] || [ -n "$DRY" ]; then
   cat > "$LA/io.github.paulmailhes.vigie.menu.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -101,11 +115,17 @@ for pid in $(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true); do
 done
 run launchctl bootstrap "$GUI" "$LA/io.github.paulmailhes.vigie.engine.plist"
 if [ -n "$MENU" ]; then run launchctl bootstrap "$GUI" "$LA/io.github.paulmailhes.vigie.menu.plist"; fi
+# Mise à jour d'une app glissée dans Applications : elle vient d'être remplacée, on la relance au second plan.
+if [ -n "$STANDALONE" ] && [ -n "${VIGIE_UPDATE:-}" ] && [ -z "$DRY" ]; then
+  pkill -x Vigie 2>/dev/null || true
+  sleep 1
+  open -g "$APP" || true
+fi
 
 echo "4/4 Vérification"
 if [ -n "$DRY" ]; then echo "[essai] terminé"; exit 0; fi
-for i in $(seq 1 60); do curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null && break; sleep 1; done
-if curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null; then
+for i in $(seq 1 60); do curl -sf "http://127.0.0.1:$PORT/api/v2/health" >/dev/null && break; sleep 1; done
+if curl -sf "http://127.0.0.1:$PORT/api/v2/health" >/dev/null; then
   echo "Vigie tourne. Ouvre l'app Vigie (icône dans la barre des menus)."
 else
   echo "Le moteur ne répond pas, voir $ROOT/data/server.log"; exit 1

@@ -9,6 +9,14 @@ struct VigieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = VigieStore.shared
 
+    init() {
+        // --desinscrire (scripts/uninstall.sh) : retire l'ouverture à la connexion, puis quitte sans rien afficher.
+        if CommandLine.arguments.contains("--desinscrire") {
+            EngineBootstrap.unregisterLoginItem()
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         Window("Vigie", id: Self.mainWindowID) {
             RootView()
