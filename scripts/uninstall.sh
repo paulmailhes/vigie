@@ -5,7 +5,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODE=""
-for c in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.volta/bin/node"; do
+for c in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.volta/bin/node" "$ROOT/node/bin/node"; do
   if [ -n "$c" ] && [ -x "$c" ]; then NODE="$c"; break; fi
 done
 [ -x "$NODE" ] || { echo "Node.js introuvable : impossible de débrancher le hook proprement." >&2; exit 1; }

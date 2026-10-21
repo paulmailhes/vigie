@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Node.js : VIGIE_NODE (donné par install.sh), sinon le PATH, sinon les emplacements habituels.
 NODE="${VIGIE_NODE:-}"
-for c in "$NODE" "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.volta/bin/node"; do
+for c in "$NODE" "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.volta/bin/node" "$ROOT/node/bin/node"; do
   if [ -n "$c" ] && [ -x "$c" ]; then NODE="$c"; break; fi
 done
 [ -x "$NODE" ] || { echo "Node.js introuvable : installe-le (https://nodejs.org), puis relance." >&2; exit 1; }
@@ -19,7 +19,7 @@ APP="$ROOT/mac/Vigie.app"
 run() { if [ -n "$DRY" ]; then echo "[essai] $*"; else "$@"; fi; }
 
 echo "1/4 Hook dans Claude Code"
-"$NODE" "$ROOT/scripts/settings.mjs" install "$@"
+VIGIE_NODE="$NODE" "$NODE" "$ROOT/scripts/settings.mjs" install "$@"
 
 echo "2/4 App Vigie"
 # Version publiée : l'app est déjà construite (VIGIE_PREBUILT=1). Depuis les sources : mac/build-app.sh la

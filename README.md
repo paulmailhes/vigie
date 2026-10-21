@@ -25,7 +25,7 @@ Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.
 Il te faut :
 
 - un Mac avec **macOS 26** (Tahoe) ou plus récent, Apple Silicon ou Intel ;
-- **Node.js 20** ou plus récent ([nodejs.org](https://nodejs.org), ou `brew install node`) ;
+- **Node.js 20** ou plus récent : s'il n'est pas sur ton Mac, l'installation pose sa propre copie (version officielle, vérifiée) dans `~/.vigie/node`, sans toucher au reste ;
 - **Claude Code**, dans VS Code ou dans le terminal.
 
 Puis, dans le Terminal :

@@ -8,7 +8,9 @@ import path from 'node:path';
 import { ROOT, STATE_FILE, DEFAULT_STATE, writeState } from '../lib/state.mjs';
 
 const SETTINGS = process.env.VIGIE_CLAUDE_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json');
-const NODE = fs.existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : process.execPath;
+// Le Node.js choisi par l'installateur (VIGIE_NODE), sinon celui de Homebrew (chemin stable d'une mise à jour à
+// l'autre), sinon celui qui exécute ce script.
+const NODE = process.env.VIGIE_NODE || (fs.existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : process.execPath);
 const HOOK = path.join(ROOT, 'hook.mjs');
 // Chemins entre guillemets (dossier renommé, espaces) ; --vigie marque nos entrées quel que soit le dossier.
 const COMMAND = `"${NODE}" "${HOOK}" --vigie`;
