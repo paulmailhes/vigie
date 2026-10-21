@@ -56,6 +56,9 @@ final class VigieStore {
     var conversationTab: ConversationTab = .fil
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
+    /// Mise à jour de Vigie (bandeau, Réglages) ; « Quoi de neuf » après une mise à jour.
+    private(set) var updateStatus: UpdateStatus?
+    var whatsNew: [ReleaseNote]?
     /// Question en attente à laquelle répondre depuis Vigie.
     var answerRequest: ReviewItem?
     var changeRequest: ReviewItem?
@@ -241,7 +244,40 @@ final class VigieStore {
         update(\.conversations, Self.stableOrder(overview.conversations))
         update(\.recentAccepted, overview.recentAccepted)
         update(\.engineInfo, overview.engine)
+        if let status = overview.update { setUpdateStatus(status) }
         update(\.loadedOnce, true)
+    }
+
+    func refreshUpdate() async {
+        guard !isDemo, let status = try? await client.get("/api/v2/update", as: UpdateStatus.self) else { return }
+        setUpdateStatus(status)
+    }
+
+    private func setUpdateStatus(_ status: UpdateStatus) {
+        update(\.updateStatus, status)
+        noteWhatsNew()
+    }
+
+    /// Premier lancement après une mise à jour : les notes des versions arrivées, une seule fois.
+    /// Première installation : rien (l'accueil s'en charge), la version est seulement notée.
+    private func noteWhatsNew() {
+        guard !isDemo, !LaunchOptions.current.isViewer, let current = updateStatus?.current else { return }
+        let key = "whatsNew.shownVersion"
+        let defaults = UserDefaults.standard
+        guard let shown = defaults.string(forKey: key) else { defaults.set(current, forKey: key); return }
+        guard Self.isNewer(current, than: shown) else { return }
+        defaults.set(current, forKey: key)
+        let notes = (updateStatus?.releases ?? []).filter { Self.isNewer($0.version, than: shown) && !Self.isNewer($0.version, than: current) }
+        if !notes.isEmpty { whatsNew = notes }
+    }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l > r }
+        }
+        return false
     }
 
     private func update<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<VigieStore, Value>, _ value: Value) {

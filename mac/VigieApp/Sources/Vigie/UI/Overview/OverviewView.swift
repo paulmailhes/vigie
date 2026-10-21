@@ -22,6 +22,8 @@ struct OverviewView: View {
 
     private var content: some View {
         Page {
+            UpdateBanner()
+
             if let notices = store.engineInfo?.notices, !notices.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(notices.enumerated()), id: \.offset) { _, notice in

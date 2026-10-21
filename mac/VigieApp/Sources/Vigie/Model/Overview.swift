@@ -13,6 +13,26 @@ struct Overview: Decodable, Equatable, Sendable {
     @Tolerant var engine: EngineInfo?
     /// Fil des dernières acceptations, toutes conversations (facultatif, plus récent d'abord).
     @Lossy var recentAccepted: [RecentAccepted]
+    /// Mise à jour de Vigie (dernière version publiée sur GitHub, installation en cours).
+    @Tolerant var update: UpdateStatus?
+}
+
+struct UpdateStatus: Decodable, Equatable, Sendable {
+    var current: String?
+    var latest: String?
+    var available: Bool?
+    var installing: Bool?
+    var lastError: String?
+    var previous: String?
+    /// Notes des versions plus récentes que celle d'avant la mise à jour.
+    @Lossy var releases: [ReleaseNote]
+}
+
+struct ReleaseNote: Decodable, Equatable, Sendable, Identifiable {
+    var version: String
+    var name: String?
+    var notes: String?
+    var id: String { version }
 }
 
 /// Une acceptation du fil : quoi, dans quelle conversation, quand.
@@ -35,10 +55,11 @@ struct EngineSettings: Decodable, Equatable, Sendable {
     var questionsAuto: Bool?
     var questionWaitMin: Int?
     var connectorsDefault: String?
+    var autoUpdate: Bool?
     @Tolerant var guardRules: GuardSettings?
 
     enum CodingKeys: String, CodingKey {
-        case autoAccept, questionsAuto, questionWaitMin, connectorsDefault
+        case autoAccept, questionsAuto, questionWaitMin, connectorsDefault, autoUpdate
         case guardRules = "guard"
     }
 }

@@ -250,7 +250,7 @@ struct OnboardingView: View {
     private var ready: some View {
         @Bindable var store = store
         return VStack(alignment: .leading, spacing: 20) {
-            header("checkmark.seal.fill", "C'est prêt", "Trois réglages, modifiables à tout moment.")
+            header("checkmark.seal.fill", "C'est prêt", "Quelques réglages, modifiables à tout moment.")
             VStack(spacing: 0) {
                 setting("Auto-accept", "Valide les demandes d'autorisation dans toutes tes conversations (sauf les actions sensibles).",
                         isOn: $store.autoAccept)
@@ -258,6 +258,10 @@ struct OnboardingView: View {
                 setting("Répondre aux questions quand tu n'es pas là",
                         "Si Claude te pose une question et que tu ne réponds pas en \(store.questionWaitMin) min, il prend l'option recommandée. Tu relis ensuite dans Vigie.",
                         isOn: $store.questionsAuto)
+                Divider()
+                setting("Mises à jour automatiques",
+                        "Vigie installe tout seul ses nouvelles versions et te montre ce qui a changé.",
+                        isOn: $store.autoUpdate)
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {

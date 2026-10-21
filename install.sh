@@ -84,11 +84,12 @@ say "✓ Vigie est dans $DEST"
 # 3. Hook, moteur, app au démarrage
 VIGIE_PREBUILT=1 VIGIE_NODE="$NODE" "$DEST/scripts/install.sh"
 
-# 4. L'app (VIGIE_DRY_RUN : essai, rien n'est relié ni ouvert)
+# 4. L'app (VIGIE_DRY_RUN : essai, rien n'est relié ni ouvert ; VIGIE_UPDATE : mise à jour lancée par Vigie, l'app
+#    est déjà relancée par launchd, on ne lui fait pas prendre le premier plan)
 if [ -z "${VIGIE_DRY_RUN:-}" ]; then
   mkdir -p "$HOME/Applications"
   ln -sfn "$DEST/mac/Vigie.app" "$HOME/Applications/Vigie.app"
-  open "$DEST/mac/Vigie.app" || true
+  [ -n "${VIGIE_UPDATE:-}" ] || open "$DEST/mac/Vigie.app" || true
 fi
 say ""
 say "Vigie est installé. Son accueil vient de s'ouvrir ; ensuite il vit dans la barre des menus (les jumelles)."

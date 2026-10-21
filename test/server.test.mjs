@@ -187,7 +187,7 @@ before(async () => {
   seed();
   const mac = (name) => path.join(TMP, 'faux-mac', name);
   const env = {
-    PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_HOME: HOME, VIGIE_CLAUDE_DIR: CLAUDE, VIGIE_DATA: DATA, VIGIE_PORT: '0',
+    PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_HOME: HOME, VIGIE_CLAUDE_DIR: CLAUDE, VIGIE_DATA: DATA, VIGIE_PORT: '0', VIGIE_NO_UPDATE: '1',
     VIGIE_ACCOUNTS_ROOT: ACCOUNTS_ROOT, VIGIE_VSCODE_SETTINGS: VSC, VIGIE_RUNCAT_STATE: path.join(TMP, 'runcat.json'),
     VIGIE_QUOTA_FILE: path.join(TMP, 'quota.json'), VIGIE_CLAUDE_BIN: FAKE,
     VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même

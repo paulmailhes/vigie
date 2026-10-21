@@ -11,6 +11,8 @@ echo "2/3 App (universelle)"
 VIGIE_UNIVERSAL=1 VIGIE_VERSION="$VERSION" ./mac/build-app.sh >/dev/null
 echo "3/3 Archive"
 mkdir -p dist
+# VERSION : lue par le moteur pour proposer les mises à jour (lib/update.mjs)
+echo "$VERSION" > VERSION
 tar -czf dist/vigie.tar.gz --exclude '.DS_Store' --exclude 'docs/images' \
-  hook.mjs server.mjs lib bin scripts public docs README.md LICENSE mac/Vigie.app
+  VERSION hook.mjs server.mjs lib bin scripts public docs README.md LICENSE mac/Vigie.app
 echo "Prêt : dist/vigie.tar.gz ($(du -h dist/vigie.tar.gz | cut -f1)) — version $VERSION"

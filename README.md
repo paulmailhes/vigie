@@ -44,7 +44,7 @@ L'app s'ouvre sur un court accueil :
 
 Ensuite, Vigie vit dans la barre des menus (les jumelles).
 
-**Mettre à jour :** relance la même commande. Tes réglages et ton historique sont gardés.
+**Mises à jour :** Vigie se met à jour tout seul (Réglages › Mises à jour), sans Terminal, et te montre ce qui a changé. Tu peux aussi relancer la même commande. Tes réglages et ton historique sont gardés.
 
 ## Plusieurs comptes Claude
 

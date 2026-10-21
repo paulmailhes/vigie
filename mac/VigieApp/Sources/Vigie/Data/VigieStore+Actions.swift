@@ -28,6 +28,26 @@ extension VigieStore {
         }
     }
 
+    var autoUpdate: Bool {
+        get { settings?.autoUpdate ?? true }
+        set {
+            patchSettings { $0.autoUpdate = newValue }
+            Task { await sendSettings(["autoUpdate": .bool(newValue)]) }
+        }
+    }
+
+    /// Installe la dernière version (sans Terminal) : Vigie redémarre tout seul, le bandeau suit l'avancée.
+    func installUpdate() async {
+        guard await write("/api/v2/update", ["action": "install"]) != nil else { return }
+        await refreshUpdate()
+    }
+
+    func checkUpdate() async {
+        guard await write("/api/v2/update", ["action": "check"], quiet: true) != nil else { return }
+        await refreshUpdate()
+        if updateStatus?.available != true { show(info: "Vigie est à jour") }
+    }
+
     var connectorsDefaultOn: Bool {
         get { (settings?.connectorsDefault ?? mcp?.connectorsDefault) == "on" }
         set {

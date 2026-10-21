@@ -14,6 +14,9 @@ struct SettingsView: View {
             Tab("Notifications", systemImage: "bell", value: SettingsTab.notifications) {
                 NotificationSettingsView()
             }
+            Tab("Mises à jour", systemImage: "arrow.down.circle", value: SettingsTab.updates) {
+                UpdateSettingsView()
+            }
         }
         .frame(width: 520)
         .frame(minHeight: 420)

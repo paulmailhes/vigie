@@ -64,5 +64,5 @@ enum Connection: Equatable, Sendable {
 
 /// Les onglets de la fenêtre Réglages.
 enum SettingsTab: String, Hashable, Sendable {
-    case guards, notifications
+    case guards, notifications, updates
 }

@@ -17,6 +17,7 @@ import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
 import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
+import { createUpdater } from './lib/update.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -43,6 +44,7 @@ const conv = createConversations(indexer);
 // Conversations Codex (OpenAI), lues dans ~/.codex/sessions : même liste, même détail, compte « Codex ».
 const codex = createCodex({ dataDir: DATA });
 const accounts = createAccounts();
+const updater = createUpdater({ root: ROOT, dataDir: DATA });
 const HOME = accounts.paths.home;
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
 const mcp = createMcp({
@@ -406,6 +408,7 @@ function settingsView(state) {
     questionsAuto: questionsAuto(state),
     questionWaitMin: Math.round(state.questionWaitMin),
     connectorsDefault: state.connectorsDefault,
+    autoUpdate: state.autoUpdate,
     guard: {
       enabled: state.guard.enabled,
       waitMin: Math.round(state.guard.waitMin),
@@ -685,6 +688,7 @@ function overviewV2() {
     conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
     engine: { indexing: !indexer.progress.done, wrapperActive: ctx.wrapperActive, notices: healthNotices },
+    update: updater.status(),
   };
 }
 
@@ -887,6 +891,7 @@ function postSettings(body) {
     if (body.connectorsDefault !== 'on' && body.connectorsDefault !== 'off') return bad('Connecteurs : on ou off.');
     s.connectorsDefault = body.connectorsDefault;
   }
+  if ('autoUpdate' in body) { if (typeof body.autoUpdate !== 'boolean') return bad('Mises à jour automatiques : oui ou non.'); s.autoUpdate = body.autoUpdate; }
   if ('guard' in body) {
     const g = body.guard;
     if (!isObj(g)) return bad('Garde-fous illisibles.');
@@ -1355,6 +1360,13 @@ const ROUTES = [
   ['GET', /^\/api\/v2\/health$/, () => [200, health()]],
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
   ['POST', /^\/api\/v2\/settings$/, (_, b) => postSettings(b)],
+  ['GET', /^\/api\/v2\/update$/, () => [200, updater.status()]],
+  ['POST', /^\/api\/v2\/update$/, async (_, b) => {
+    if (b?.action === 'check') return [200, { ok: true, ...(await updater.check({ force: true })) }];
+    if (b?.action !== 'install') return bad('Action : check ou install.');
+    const r = updater.install();
+    return r.ok ? [200, { ...r, update: updater.status() }] : bad(r.error, r.status);
+  }],
   ['POST', new RegExp(`^/api/v2/conversation/${S}/settings$`), ([id], b) => postConversationSettings(id, b)],
   ['POST', new RegExp(`^/api/v2/questions/${S}/review$`), ([id], b) => postQuestionReview(id, b)],
   ['POST', /^\/api\/v2\/seen$/, (_, b) => postSeen(b)],
@@ -1461,8 +1473,19 @@ async function tick() {
 
 rotateHistory();
 setInterval(rotateHistory, HOUR);
+// Mises à jour : relevé GitHub toutes les 6 h ; automatique (réglage autoUpdate) seulement quand rien n'attend
+// l'utilisateur (décision ou question en cours). Pas pendant les tests (VIGIE_NO_UPDATE).
+function updateTick() {
+  if (process.env.VIGIE_NO_UPDATE) return;
+  const state = readState();
+  let busy = true;
+  try { busy = pendingWaits(state).size > 0; } catch { /* prudence : on attend */ }
+  updater.tick({ auto: state.autoUpdate, busy }).catch((e) => console.error('[vigie] mise à jour :', clean(e)));
+}
 server.listen(PORT, HOST, () => {
   console.log(`[vigie] http://${HOST}:${server.address().port}`);
   tick();
   setInterval(tick, 4000);
+  setTimeout(updateTick, 60_000);
+  setInterval(updateTick, 30 * 60_000);
 });
