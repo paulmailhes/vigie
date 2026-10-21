@@ -72,8 +72,8 @@ struct GuardSettingsView: View {
         if store.guardMode == "vscode" {
             return "Une fenêtre s'ouvre dans VS Code : tu autorises ou refuses là-bas, ou dans Vigie, pendant le délai choisi."
         }
-        return "L'action est refusée sur le moment et Claude continue le reste. Tu l'autorises une fois dans Vigie, "
-            + "pour la commande exacte ; la conversation la relance alors à l'identique."
+        return "La conversation se met en pause et l'action t'attend ici, dans Vigie (rien ne s'affiche dans VS Code). "
+            + "Tu l'autorises en un clic ; sans réponse dans le délai, elle est refusée et la conversation continue le reste."
     }
 }
 

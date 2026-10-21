@@ -583,7 +583,7 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
 const SETTINGS_SCRIPT = path.join(ROOT, 'scripts', 'settings.mjs');
 function settingsEnv(home, data) {
   const env = { ...ENV, HOME: home, VIGIE_DATA: data };
-  delete env.VIGIE_CLAUDE_SETTINGS;
+  delete env.VIGIE_CLAUDE_SETTINGS; delete env.CODEX_HOME; delete env.VIGIE_CODEX_HOOKS;
   return env;
 }
 const oursCount = (s) => Object.values(s.hooks || {}).flat().flatMap((g) => g.hooks).filter((h) => /--vigie|auto-accept\/hook\.mjs/.test(h.command)).length;
@@ -665,4 +665,43 @@ test('install.sh / uninstall.sh en mode essai : fichiers corrects, rien de lanc�
   assert.equal(oursCount(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'))), 0);
   waiting.child.kill('SIGTERM');
   assert.equal((await waiting.done).out, null);
+});
+
+test('Codex : hook branché dans ~/.codex/hooks.json (hooks des autres gardés), puis débranché', () => {
+  const home = fs.mkdtempSync(path.join(TMP, 'home-'));
+  const data = fs.mkdtempSync(path.join(TMP, 'data-'));
+  const hooksFile = path.join(home, '.codex', 'hooks.json');
+  fs.mkdirSync(path.dirname(hooksFile), { recursive: true });
+  const other = { type: 'command', command: 'echo autre-hook-codex' };
+  fs.writeFileSync(hooksFile, JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [other] }] } }));
+  const env = settingsEnv(home, data);
+  assert.equal(spawnSync(process.execPath, [SETTINGS_SCRIPT, 'install'], { encoding: 'utf8', env }).status, 0);
+  let h = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+  const cmds = Object.values(h.hooks).flat().flatMap((g) => g.hooks).map((x) => x.command);
+  assert.ok(cmds.includes('echo autre-hook-codex'), 'le hook des autres reste');
+  assert.equal(cmds.filter((c) => / --vigie --codex$/.test(c)).length, 2, 'PermissionRequest et PreToolUse');
+  assert.equal(h.hooks.PermissionRequest[0].matcher, '*');
+  // réinstaller ne double rien
+  spawnSync(process.execPath, [SETTINGS_SCRIPT, 'install'], { encoding: 'utf8', env });
+  h = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+  assert.equal(Object.values(h.hooks).flat().flatMap((g) => g.hooks).filter((x) => /--codex/.test(x.command)).length, 2);
+  spawnSync(process.execPath, [SETTINGS_SCRIPT, 'uninstall'], { encoding: 'utf8', env });
+  h = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+  assert.deepEqual(Object.values(h.hooks).flat().flatMap((g) => g.hooks).map((x) => x.command), ['echo autre-hook-codex']);
+});
+
+test('Codex : demande ordinaire acceptée, action sensible retenue pour Vigie, auto-accept coupé : rien', () => {
+  const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie', waitMin: 0 } });
+  const codexRun = (tool_name, tool_input, extra = {}) => {
+    const r = spawnSync(process.execPath, [HOOK, '--vigie', '--codex'], { input: JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: '01a12fe9-e384-7742-8e40-074aa1632763', turn_id: 't1', cwd: '/tmp', tool_name, tool_input, ...extra }), encoding: 'utf8', env: { ...ENV, VIGIE_DATA: sb.data } });
+    return r.stdout ? JSON.parse(r.stdout) : null;
+  };
+  assert.equal(codexRun('Bash', { command: 'npm test' }).hookSpecificOutput.decision.behavior, 'allow');
+  const sudo = codexRun('Bash', { command: 'sudo rm -rf /var/x' });
+  assert.equal(sudo.hookSpecificOutput.decision.behavior, 'deny', 'attente à 0 : refus, à autoriser dans Vigie');
+  assert.match(sudo.hookSpecificOutput.decision.message, /en attente de l'accord de l'utilisateur dans Vigie/);
+  const patch = codexRun('apply_patch', { command: `*** Begin Patch\n*** Update File: ${os.homedir()}/.zshrc\n@@\n-a\n+b\n*** End Patch` });
+  assert.equal(patch.hookSpecificOutput.decision.behavior, 'deny', 'réglages du shell modifiés par un patch : garde-fou');
+  sb.set({ autoAccept: false });
+  assert.equal(codexRun('Bash', { command: 'npm test' }), null, 'auto-accept coupé : la fenêtre de Codex');
 });

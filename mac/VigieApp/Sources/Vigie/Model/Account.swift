@@ -30,8 +30,14 @@ struct Account: Decodable, Equatable, Sendable, Identifiable {
     var keychainItem: String?
     var dirReady: Bool?
 
+    /// « codex » : le compte ChatGPT de Codex (relevé dans ses fils, pas de connexion gérée par Vigie).
+    var kind: String?
+    /// Forfait (Codex).
+    var plan: String?
+
     var displayName: String { label ?? id }
     var isConnected: Bool { connected ?? false }
+    var isCodex: Bool { kind == "codex" }
 }
 
 /// GET /api/v2/accounts

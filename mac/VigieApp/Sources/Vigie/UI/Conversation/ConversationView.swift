@@ -281,9 +281,18 @@ struct ConversationHeader: View {
     private var controls: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
-                accountMenu
-                autoAcceptMenu
-                connectorsMenu
+                if summary.isCodex {
+                    Label("Codex", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.quinary, in: .capsule)
+                        .help("Conversation Codex (OpenAI), sur ton compte ChatGPT")
+                    autoAcceptMenu
+                } else {
+                    accountMenu
+                    autoAcceptMenu
+                    connectorsMenu
+                }
             }
         }
         .tint(.primary) // réglages : neutres, le bleu reste aux actions

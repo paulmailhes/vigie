@@ -25,7 +25,7 @@ struct AccountsView: View {
 
                         Section {
                             Picker(selection: $store.defaultAccountID) {
-                                ForEach(accounts) { account in
+                                ForEach(accounts.filter { !$0.isCodex }) { account in
                                     Text(account.displayName).tag(account.id)
                                 }
                             } label: {
@@ -36,7 +36,7 @@ struct AccountsView: View {
                             Toggle(isOn: wrapperToggle) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Un compte par conversation dans VS Code")
-                                    Text(wrapperActive ? "Chaque conversation garde son compte" : "Désactivé : VS Code utilise Travail 1")
+                                    Text(wrapperActive ? "Chaque conversation garde son compte" : "Désactivé : VS Code utilise le compte principal")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -123,7 +123,9 @@ struct AccountCard: View {
             if account.isConnected {
                 let usage = account.usage
                 VStack(spacing: 8) {
-                    UsageGaugeRow(title: "Session 5 h", window: usage?.session)
+                    if !account.isCodex || usage?.session != nil {
+                        UsageGaugeRow(title: "Session 5 h", window: usage?.session)
+                    }
                     UsageGaugeRow(title: "Semaine", window: usage?.week)
                     if let model = usage?.weekModel {
                         UsageGaugeRow(title: "Semaine \(model.label ?? "modèle")", window: model)
@@ -143,7 +145,8 @@ struct AccountCard: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(account.displayName)
                     .font(.title3.bold())
-                Text(account.email ?? account.expectedEmail ?? "Adresse inconnue")
+                Text(account.isCodex ? "Codex (OpenAI) · ton compte ChatGPT\(account.plan.map { " · forfait \($0)" } ?? "")"
+                     : account.email ?? account.expectedEmail ?? "Adresse inconnue")
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
@@ -155,6 +158,10 @@ struct AccountCard: View {
             }
             if account.isConnected {
                 Label("Connecté", systemImage: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if account.isCodex {
+                Text("Connecte-toi dans Codex (VS Code)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
@@ -178,7 +185,7 @@ struct AccountCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
-            if missing || old {
+            if (missing || old) && !account.isCodex {
                 Button("Actualiser", systemImage: "arrow.clockwise") {
                     Task { await store.refreshUsage(account.id) }
                 }
@@ -192,7 +199,7 @@ struct AccountCard: View {
     private func observedText(_ observed: Date?, source: String?) -> String {
         guard let observed else { return "Pas encore de relevé" }
         let origin: String = switch source {
-        case "session": ", par une conversation"
+        case "session": account.isCodex ? ", par une conversation Codex" : ", par une conversation"
         case "ping": ", par une requête rapide"
         default: ""
         }

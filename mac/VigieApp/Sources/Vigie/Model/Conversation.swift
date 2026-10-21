@@ -21,6 +21,8 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     var status: String?
     var running: Bool?
     var accountId: String?
+    /// « codex » pour une conversation Codex (OpenAI) ; absent pour Claude Code.
+    var agent: String?
     var autoAccept: Bool?
     var autoAcceptOverride: Bool?
     var connectors: String?
@@ -53,6 +55,7 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     @Tolerant var resume: ResumeInfo?
 
     var state: ConversationStatus { ConversationStatus(raw: status) }
+    var isCodex: Bool { agent == "codex" }
     var isOpen: Bool { state != .closed }
 
     /// Titre court affiché dans les listes : le projet (« Atelier », « Portail · back »), sinon le titre.

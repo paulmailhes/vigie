@@ -106,7 +106,10 @@ struct ReviewItem: Decodable, Equatable, Sendable, Identifiable {
     /// La conversation attend encore ta décision (autoriser ou refuser depuis l'app).
     var isPendingDecision: Bool { state == "waiting" && pendingId != nil }
 
-    /// Refusée sur le moment, attend ton accord dans Vigie (autoriser une fois, pour cette commande exacte).
+    /// La conversation est en pause sur cette action et attend ton accord dans Vigie (rien dans VS Code).
+    var holding: Bool?
+
+    /// Attend ton accord dans Vigie (autoriser une fois, pour cette commande exacte).
     var isAwaitingApproval: Bool { state == "awaiting" && approvalId != nil }
 
     /// Une décision t'attend : dans VS Code (pendingId) ou dans Vigie (approvalId).

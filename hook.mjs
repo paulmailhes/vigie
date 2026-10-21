@@ -20,6 +20,8 @@ import { clearDecision, takeDecision, MAX_COMMAND } from './lib/decisions.mjs';
 import { callHash, newApprovalId, takeApproval, deniedApproval } from './lib/approvals.mjs';
 
 const QUESTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+// Branché pour Codex (~/.codex/hooks.json) : « hook.mjs --vigie --codex ».
+const CODEX = process.argv.includes('--codex');
 // Outils qui exigent un humain : Claude Code ignore un « allow » sans réponse fournie.
 const HUMAN_ONLY = new Set(['OfferChromeSetup', 'PublishPlugin', 'ShowOnboardingRolePicker']);
 // VIGIE_POLL_MS et VIGIE_HOOK_LIFETIME_MS ne servent qu'aux tests.
@@ -57,6 +59,7 @@ function log(input, event, extra = {}) {
     action: actionText(input.tool_name, ti).slice(0, guarded ? MAX_COMMAND : 600),
     description: typeof ti.description === 'string' ? ti.description.slice(0, 200) : undefined,
     pid: process.pid,
+    ...(CODEX ? { app: 'codex' } : {}),
     ...extra,
   });
 }
@@ -414,7 +417,25 @@ async function onPreToolUseGuard(input) {
   const tool = input.tool_name;
   const rule = matchGuard(state, tool, input.tool_input);
   if (!rule || readOnlyShell(tool, input.tool_input)) return;
+  return holdForVigie(input, rule, state, 'PreToolUse');
+}
+
+// Réponses selon l'événement : PreToolUse (permissionDecision) ou PermissionRequest (decision.behavior).
+// Codex exige, pour autoriser en PreToolUse, l'entrée (même inchangée) dans updatedInput.
+function verdict(event, allow, reason) {
+  if (event === 'PermissionRequest') {
+    return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: allow ? { behavior: 'allow' } : { behavior: 'deny', message: reason } } };
+  }
+  const out = preOutput(allow ? 'allow' : 'deny', reason);
+  if (allow && CODEX && input?.tool_input) out.hookSpecificOutput.updatedInput = input.tool_input;
+  return out;
+}
+
+async function holdForVigie(input, rule, state, event) {
+  const sid = input.session_id;
+  const tool = input.tool_name;
   guarded = true;
+  const preOutput = (decision, reason) => verdict(event, decision === 'allow', reason);
   const hash = callHash(sid, tool, input.tool_input);
   const info = { ...ruleInfo(rule), hash };
   const ok = takeApproval({ sessionId: sid, tool, hash });
@@ -442,6 +463,31 @@ async function onPreToolUseGuard(input) {
   log(input, 'garde-fou-vigie-clos', { ...info, approvalId, raison: r });
 }
 
+// ---------- Codex (OpenAI) : hooks au même format, branchés dans ~/.codex/hooks.json avec --codex ----------
+// Son hook passe AVANT sa fenêtre d'autorisation : une action sensible peut attendre l'accord dans Vigie sans
+// fenêtre en parallèle. Sans autorisations (accès complet), seul PreToolUse voit passer les actions sensibles.
+const NO_APPROVALS = /bypass|full|never|danger|yolo/i;
+async function onCodex(input) {
+  const ev = input.hook_event_name;
+  const state = readState();
+  const sid = input.session_id;
+  if (!effective(state, sid).autoAccept) {
+    if (ev === 'PermissionRequest') log(input, 'demande-pour-toi');
+    return;
+  }
+  const tool = input.tool_name;
+  const rule = matchGuard(state, tool, input.tool_input);
+  if (ev === 'PreToolUse') {
+    if (!rule || readOnlyShell(tool, input.tool_input) || !NO_APPROVALS.test(String(input.permission_mode || ''))) return;
+    return holdForVigie(input, rule, state, 'PreToolUse');
+  }
+  if (ev !== 'PermissionRequest') return;
+  if (!rule) return decide(input, 'auto-accepte', ALLOW);
+  guarded = true;
+  if (state.guard.mode === 'vscode') return log(input, 'garde-fou-pour-toi', ruleInfo(rule)); // la fenêtre de Codex s'en charge
+  return holdForVigie(input, rule, state, 'PermissionRequest');
+}
+
 async function onPreToolUse(input) {
   if (!QUESTION_TOOLS.has(input.tool_name)) return onPreToolUseGuard(input);
   if (input.agent_id) return;
@@ -455,7 +501,8 @@ function onPermissionDenied(input) {
 
 const input = readStdin();
 try {
-  if (input?.hook_event_name === 'PermissionRequest') await onPermissionRequest(input);
+  if (CODEX) await onCodex(input);
+  else if (input?.hook_event_name === 'PermissionRequest') await onPermissionRequest(input);
   else if (input?.hook_event_name === 'PreToolUse') await onPreToolUse(input);
   else if (input?.hook_event_name === 'PermissionDenied') onPermissionDenied(input);
 } catch (e) {

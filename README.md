@@ -1,6 +1,6 @@
 # Vigie
 
-**Vigie veille sur Claude Code pendant que tu travailles… ou pendant que tu dors.**
+**Vigie veille sur Claude Code (et Codex) pendant que tu travailles… ou pendant que tu dors.**
 
 Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fenêtre « Autoriser ? » qui attend depuis le début ? Vigie s'en charge à ta place. Les demandes sans risque sont validées toutes seules, et les actions sensibles t'attendent toujours. Tu suis tout dans une petite app Mac : tes conversations, ta consommation, tes comptes et tes MCP.
 
@@ -69,6 +69,21 @@ Changer le compte d'une conversation la relance sur l'autre compte avec tout son
 ![MCP](docs/images/mcp.png)
 
 Chaque MCP a une colonne par compte : ✓ quand il marche, **Connecter** quand il faut l'autoriser, **Échec** en rouge s'il échoue. « Partout » le connecte sur tous tes comptes, l'un après l'autre. Chaque compte Claude garde sa propre autorisation : il faut connecter un MCP une fois par compte.
+
+## Codex (OpenAI)
+
+Vigie suit aussi tes conversations **Codex** (l'extension VS Code d'OpenAI), dans la même liste, avec une pastille « Codex ». Pour chacune, tu vois :
+
+- ta demande et son message en direct ;
+- son plan et ses commits ;
+- ses agents ;
+- sa consommation : la semaine de ton compte ChatGPT et l'heure de remise à zéro.
+
+L'auto-accept marche aussi pour Codex : Vigie branche son hook dans `~/.codex/hooks.json`. Les demandes d'autorisation sont acceptées, et les actions sensibles t'attendent dans Vigie, comme pour Claude.
+
+**Une étape à faire une fois :** Codex demande de faire confiance à un nouveau hook. Dans le Terminal, lance `codex`, tape `/hooks` et accepte celui de Vigie.
+
+Une conversation ne peut pas passer de Claude à Codex : leurs historiques sont incompatibles.
 
 ## Comment ça marche
 

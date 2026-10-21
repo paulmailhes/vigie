@@ -76,3 +76,36 @@ fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', { mode });
 fs.chmodSync(tmp, mode);
 fs.renameSync(tmp, SETTINGS);
 console.log(`${action === 'install' ? 'Hook branché' : 'Hook débranché'} dans ${SETTINGS}${backup ? ` (sauvegarde : ${backup})` : ''}`);
+
+// ---------- Codex (OpenAI) : ~/.codex/hooks.json, même hook avec --codex ----------
+// Seulement si Codex est installé (dossier ~/.codex). Les hooks des autres sont gardés ; une sauvegarde est faite.
+// Codex demande de faire confiance une fois à un hook nouveau ou modifié (commande /hooks dans Codex).
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+const CODEX_HOOKS = process.env.VIGIE_CODEX_HOOKS || path.join(CODEX_HOME, 'hooks.json');
+if (fs.existsSync(path.dirname(CODEX_HOOKS))) {
+  let craw = null;
+  try { craw = fs.readFileSync(CODEX_HOOKS, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const conf = craw ? JSON.parse(craw) : {};
+  if (!conf || typeof conf !== 'object' || Array.isArray(conf)) throw new Error(`${CODEX_HOOKS} n'est pas un objet JSON`);
+  const ch = conf.hooks && typeof conf.hooks === 'object' ? conf.hooks : {};
+  for (const ev of Object.keys(ch)) {
+    if (!Array.isArray(ch[ev])) continue;
+    ch[ev] = ch[ev].map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !ours(String(h.command || ''))) })).filter((g) => g.hooks.length > 0);
+    if (!ch[ev].length) delete ch[ev];
+  }
+  if (action === 'install') {
+    const cmd = `${COMMAND} --codex`;
+    (ch.PermissionRequest ||= []).push({ matcher: '*', hooks: [{ type: 'command', command: cmd, timeout: 7300, statusMessage: 'Vigie' }] });
+    (ch.PreToolUse ||= []).push({ matcher: 'Bash|apply_patch|mcp__.*', hooks: [{ type: 'command', command: cmd, timeout: 7300, statusMessage: 'Vigie' }] });
+  }
+  if (Object.keys(ch).length) conf.hooks = ch; else delete conf.hooks;
+  if (craw !== null) fs.writeFileSync(`${CODEX_HOOKS}.bak-vigie-${new Date().toISOString().replace(/[:.]/g, '-')}`, craw, { mode: 0o600 });
+  if (craw !== null || action === 'install') {
+    const ctmp = `${CODEX_HOOKS}.vigie.tmp`;
+    fs.writeFileSync(ctmp, JSON.stringify(conf, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(ctmp, CODEX_HOOKS);
+    console.log(action === 'install'
+      ? `Hook branché dans ${CODEX_HOOKS} (Codex : fais-lui confiance une fois avec /hooks)`
+      : `Hook débranché de ${CODEX_HOOKS}`);
+  }
+}

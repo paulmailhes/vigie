@@ -9,6 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { Indexer, actionKind, maskSecrets } from './lib/indexer.mjs';
+import { createCodex } from './lib/codex.mjs';
 import { createConversations } from './lib/conversations.mjs';
 import { createAccounts, MAIN_ID } from './lib/accounts.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
@@ -39,6 +40,8 @@ process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée
 
 const indexer = new Indexer({ windowHours: Number(process.env.VIGIE_WINDOW_HOURS || 48), usageDays: 7 });
 const conv = createConversations(indexer);
+// Conversations Codex (OpenAI), lues dans ~/.codex/sessions : même liste, même détail, compte « Codex ».
+const codex = createCodex();
 const accounts = createAccounts();
 const HOME = accounts.paths.home;
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
@@ -451,12 +454,14 @@ function reviewItems(ctx, sums) {
   for (const a of awaiting) {
     if (a.sessionId && conv.isThrowaway(a.sessionId) && !indexer.live.has(a.sessionId)) continue;
     live.push({ id: `v:${a.approvalId}`, kind: 'blocked', state: 'awaiting', approvalId: a.approvalId,
-      approved: a.approved, approvedUntil: a.approvedUntil,
+      approved: a.approved, approvedUntil: a.approvedUntil, holding: a.holding,
       conversationId: a.sessionId, conversationTitle: title(a.sessionId), cwd: a.cwd,
       rule: a.rule || 'Action sensible', ruleId: a.ruleId, command: mask(a.command).slice(0, MAX_COMMAND),
       byAgent: agentName(a.sessionId, a.agentId), needsPassword: a.needsPassword,
       title: short(a.rule || 'Action sensible', 120),
-      detail: a.approved ? `${what(a)} · autorisée : Claude peut la relancer à l'identique.` : `${what(a)} · refusée sur le moment : autorise-la ici pour cette commande exacte.`,
+      detail: a.holding ? `${what(a)} · en pause, elle attend ton accord ici (rien ne s'affiche dans VS Code)`
+        : a.approved ? `${what(a)} · autorisée : elle peut la relancer à l'identique.`
+        : `${what(a)} · elle a continué sans : autorise-la ici pour qu'elle puisse la relancer.`,
       ts: a.ts });
   }
   for (const n of switchNotices) {
@@ -585,7 +590,8 @@ function decorate(sum, ctx, needs, accepted) {
 function overviewV2() {
   const ctx = context();
   const sums = conv.summaries();
-  const review = reviewItems(ctx, sums);
+  const codexSums = safeCodex(() => codex.summaries(), []);
+  const review = reviewItems(ctx, [...sums, ...codexSums]);
   const needs = countBy(review);
   const accepted = acceptedCounts(ctx);
   const counts = conv.sinceCounts(ctx.lastSeen);
@@ -606,8 +612,8 @@ function overviewV2() {
     },
     toReview: review,
     reports: conv.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo).slice(0, MAX_REPORTS),
-    accounts: ctx.accSums,
-    conversations: sums.map((s) => decorate(s, ctx, needs, accepted)),
+    accounts: withCodexAccount(ctx.accSums),
+    conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
     engine: { indexing: !indexer.progress.done, wrapperActive: ctx.wrapperActive, notices: healthNotices },
   };
@@ -730,7 +736,37 @@ function conversationMcp(used, cwd, accountId, connectors) {
   return [...out.values()].sort((a, b) => (b.uses - a.uses) || a.name.localeCompare(b.name));
 }
 
+// Codex : ses erreurs de lecture ne doivent jamais faire tomber la vue d'ensemble.
+function safeCodex(fn, fallback) {
+  try { return fn(); } catch (e) { console.error('[vigie] Codex :', e?.message || e); return fallback; }
+}
+const withCodexAccount = (list) => { const a = safeCodex(() => codex.account(), null); return a ? [...list, a] : list; };
+
+// Une conversation Codex, au format des conversations Claude (compte « codex », pas de bascule ni de connecteurs).
+function decorateCodex(sum, ctx, needs, accepted) {
+  const eff = effective(ctx.state, sum.id);
+  const ov = Object.hasOwn(ctx.state.sessions, sum.id) ? ctx.state.sessions[sum.id] : null;
+  const waits = ctx.waits.get(sum.id) || [];
+  return {
+    id: sum.id, agent: 'codex', title: sum.title, project: sum.project, cwd: sum.cwd,
+    status: sum.running && waits.length ? 'blocked' : sum.status, running: sum.running,
+    accountId: 'codex', account: null,
+    autoAccept: eff.autoAccept, autoAcceptOverride: typeof ov?.autoAccept === 'boolean' ? ov.autoAccept : null,
+    connectors: null, agentsRunning: sum.agentsRunning || 0, workflowsRunning: 0, weekPct: null,
+    rate: sum.rate, alert: null, lastActivity: sum.lastActivity, needsYou: needs.get(sum.id) || 0,
+    headline: sum.headline, contextTokens: null, pendingAccountId: null,
+    progress: sum.progress ?? null, tests: null, accepted: accepted.get(sum.id) || { today: 0, sinceSeen: 0 }, artifacts: null,
+    startedAt: sum.startedAt,
+  };
+}
+
 function conversationV2(id) {
+  if (safeCodex(() => codex.has(id), false)) {
+    const d = codex.detail(id);
+    const ctx = context();
+    const needs = countBy(reviewItems(ctx, [d.summary]));
+    return { ...d, summary: decorateCodex(d.summary, ctx, needs, acceptedCounts(ctx)), accepted: acceptedFor(id, ctx) };
+  }
   const d = conv.detail(id);
   if (!d) return null;
   const ctx = context();
@@ -813,6 +849,7 @@ function postConversationSettings(id, body) {
   if ('autoAccept' in body && body.autoAccept !== null && typeof body.autoAccept !== 'boolean') return bad('Auto-accept : oui, non ou par défaut.');
   if ('connectors' in body && ![null, 'on', 'off'].includes(body.connectors)) return bad('Connecteurs : on, off ou par défaut.');
   if ('accountId' in body && typeof body.accountId !== 'string') return bad('Compte inconnu.');
+  if ('accountId' in body && safeCodex(() => codex.has(id), false)) return bad('Une conversation Codex utilise ton compte ChatGPT : pas de changement de compte.');
   let sw = null;
   // La bascule d'abord : si elle est refusée, rien d'autre n'est changé.
   if ('accountId' in body) {
@@ -1233,7 +1270,7 @@ const ROUTES = [
     return d ? [200, d] : bad('Conversation introuvable : plus de 48 h, ou inconnue.', 404);
   }],
   ['GET', /^\/api\/v2\/mcp$/, () => [200, mcp.inventory({ connectorsDefault: readState().connectorsDefault })]],
-  ['GET', /^\/api\/v2\/accounts$/, () => [200, accounts.view()]],
+  ['GET', /^\/api\/v2\/accounts$/, () => { const v = accounts.view(); return [200, { ...v, accounts: withCodexAccount(v.accounts || []) }]; }],
   ['GET', /^\/api\/v2\/health$/, () => [200, health()]],
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
   ['POST', /^\/api\/v2\/settings$/, (_, b) => postSettings(b)],

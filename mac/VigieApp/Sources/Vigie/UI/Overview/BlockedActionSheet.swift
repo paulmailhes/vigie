@@ -40,8 +40,11 @@ struct BlockedActionSheet: View {
                     .font(.title3.bold())
                     .lineLimit(2)
                 if item.isAwaitingApproval {
-                    Text("Refusée sur le moment : elle attend ton accord dans Vigie")
+                    Text(item.holding == true
+                         ? "En pause : la conversation attend ton accord ici. Rien ne s'affiche dans VS Code."
+                         : "Elle a continué sans : autorise-la ici pour qu'elle puisse la relancer.")
                         .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if waiting {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(remaining(now: store.isDemo ? store.now : context.date))

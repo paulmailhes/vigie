@@ -47,12 +47,15 @@ struct SidebarView: View {
                 }
             }
 
+            // Une seule entrée : tous les comptes sont sur la même page ; leur aperçu reste visible ici.
             Section("Comptes") {
-                ForEach(store.accounts) { account in
-                    SidebarAccountRow(account: account)
-                        .tag(Route.account(account.id))
-                        .standInHighlight(standIn && store.route == .account(account.id))
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(store.accounts) { account in
+                        SidebarAccountRow(account: account)
+                    }
                 }
+                .tag(Route.account(accountsRouteID))
+                .standInHighlight(standIn && store.route == .account(accountsRouteID))
             }
 
             Section("Outils") {
@@ -63,6 +66,12 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 360)
+    }
+
+    /// La page Comptes, quel que soit le compte d'où l'on vient.
+    private var accountsRouteID: String {
+        if case .account(let id) = store.route { return id }
+        return store.accounts.first?.id ?? "principal"
     }
 
     private var openConversations: [ConversationSummary] {
