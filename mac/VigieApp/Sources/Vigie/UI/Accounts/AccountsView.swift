@@ -54,9 +54,7 @@ struct AccountsView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItem {
-                Button("Actualiser les relevés", systemImage: "arrow.clockwise") {
-                    Task { await store.refreshUsage(nil) }
-                }
+                AsyncButton("Actualiser les relevés", systemImage: "arrow.clockwise") { await store.refreshUsage(nil) }
                 .help("Relever à nouveau les crédits de tous les comptes")
             }
             ToolbarItem {
@@ -167,9 +165,7 @@ struct AccountCard: View {
             } else if account.isCodex {
                 EmptyView()
             } else {
-                Button("Connecter", systemImage: "person.crop.circle.badge.plus") {
-                    Task { await store.connectAccount(account.id) }
-                }
+                AsyncButton("Connecter", systemImage: "person.crop.circle.badge.plus") { await store.connectAccount(account.id) }
                 .glassButton(.primary)
                 .help("Ouvre Terminal pour te connecter (/login)")
             }
@@ -188,9 +184,7 @@ struct AccountCard: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if (missing || old) && !account.isCodex {
-                Button("Actualiser", systemImage: "arrow.clockwise") {
-                    Task { await store.refreshUsage(account.id) }
-                }
+                AsyncButton("Actualiser", systemImage: "arrow.clockwise") { await store.refreshUsage(account.id) }
                 .glassButton()
                 .controlSize(.small)
                 .help("Relever les crédits de ce compte (une petite requête, au plus toutes les 10 min)")

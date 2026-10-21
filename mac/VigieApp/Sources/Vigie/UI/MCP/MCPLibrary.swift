@@ -145,7 +145,7 @@ struct MCPLibrarySheet: View {
                 Spacer()
                 Button("Annuler") { selected = nil }
                     .glassButton()
-                Button(adding ? "Ajout…" : "Ajouter") { add(entry) }
+                Button { add(entry) } label: { BusyLabel(busy: adding) { Text("Ajouter") } }
                     .glassButton(.primary)
                     .disabled(chosenAccounts.isEmpty || adding)
             }

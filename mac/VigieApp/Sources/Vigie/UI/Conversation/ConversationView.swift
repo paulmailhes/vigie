@@ -195,6 +195,16 @@ struct ConversationHeader: View {
 
     @State private var pendingAccount: Account?
     @State private var confirmSwitch = false
+    /// Menu dont l'action attend le moteur (« account », « auto », « mcp ») : une roue tourne sur son libellé.
+    @State private var busy: String?
+
+    private func run(_ menu: String, _ work: @escaping @MainActor () async -> Void) {
+        busy = menu
+        Task { @MainActor in
+            await work()
+            if busy == menu { busy = nil }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -217,9 +227,7 @@ struct ConversationHeader: View {
                     Text("Arrêtée pour passer sur \(store.account(resume.to)?.displayName ?? "l'autre compte") : écris-lui un message (« continue ») dans VS Code, elle repart dessus.")
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
-                    Button("Ouvrir dans VS Code") {
-                        Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
-                    }
+                    AsyncButton("Ouvrir dans VS Code") { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
                     .glassButton(.primary)
                 }
                 .padding(10)
@@ -230,11 +238,11 @@ struct ConversationHeader: View {
         .confirmationDialog(pendingAccount.map { "Passer sur \($0.displayName) ?" } ?? "",
                             isPresented: $confirmSwitch, titleVisibility: .visible, presenting: pendingAccount) { account in
             Button(summary.state == .working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
-                Task { await store.switchAccount(of: summary.id, to: account.id) }
+                run("account") { await store.switchAccount(of: summary.id, to: account.id) }
             }
             if summary.state == .working {
                 Button("Tout de suite (interrompt)") {
-                    Task { await store.switchAccount(of: summary.id, to: account.id, now: true) }
+                    run("account") { await store.switchAccount(of: summary.id, to: account.id, now: true) }
                 }
             }
             Button("Annuler", role: .cancel) {}
@@ -342,7 +350,7 @@ struct ConversationHeader: View {
                 .disabled(!account.isConnected && account.id != currentAccount?.id)
             }
         } label: {
-            Label(currentAccount?.displayName ?? "Compte", systemImage: "person.crop.circle")
+            BusyLabel(busy: busy == "account") { Label(currentAccount?.displayName ?? "Compte", systemImage: "person.crop.circle") }
         }
         .menuStyle(.button)
         .glassButton()
@@ -374,9 +382,7 @@ struct ConversationHeader: View {
                     .foregroundStyle(pendingTo == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(Theme.warn))
                 if let pendingTo {
                     Text("→ \(accountName(pendingTo)) à la fin du tour")
-                    Button("Tout de suite") {
-                        Task { await store.switchAccount(of: summary.id, to: pendingTo, now: true) }
-                    }
+                    AsyncButton("Tout de suite") { await store.switchAccount(of: summary.id, to: pendingTo, now: true) }
                     .buttonStyle(.borderless)
                     .help("Interrompt son travail et relance la conversation sur \(accountName(pendingTo)). Tu écris « continue » pour la reprendre.")
                 }
@@ -398,22 +404,24 @@ struct ConversationHeader: View {
     private var autoAcceptMenu: some View {
         Menu {
             Button {
-                Task { await store.setAutoAccept(nil, for: summary.id) }
+                run("auto") { await store.setAutoAccept(nil, for: summary.id) }
             } label: {
                 choiceLabel("Comme le réglage général (\(store.autoAccept ? "oui" : "non"))", selected: summary.autoAcceptOverride == nil)
             }
             Button {
-                Task { await store.setAutoAccept(true, for: summary.id) }
+                run("auto") { await store.setAutoAccept(true, for: summary.id) }
             } label: {
                 choiceLabel("Toujours", selected: summary.autoAcceptOverride == true)
             }
             Button {
-                Task { await store.setAutoAccept(false, for: summary.id) }
+                run("auto") { await store.setAutoAccept(false, for: summary.id) }
             } label: {
                 choiceLabel("Jamais", selected: summary.autoAcceptOverride == false)
             }
         } label: {
-            Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
+            BusyLabel(busy: busy == "auto") {
+                Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
+            }
         }
         .menuStyle(.button)
         .glassButton()
@@ -434,17 +442,17 @@ struct ConversationHeader: View {
         let on = summary.connectors == "on"
         return Menu {
             Button {
-                Task { await store.setConnectors(false, for: summary.id) }
+                run("mcp") { await store.setConnectors(false, for: summary.id) }
             } label: {
                 choiceLabel("Coupés (recommandé)", selected: !on)
             }
             Button {
-                Task { await store.setConnectors(true, for: summary.id) }
+                run("mcp") { await store.setConnectors(true, for: summary.id) }
             } label: {
                 choiceLabel("Activés", selected: on)
             }
         } label: {
-            Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp)
+            BusyLabel(busy: busy == "mcp") { Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp) }
         }
         .menuStyle(.button)
         .glassButton()

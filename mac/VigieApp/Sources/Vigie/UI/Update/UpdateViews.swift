@@ -25,7 +25,7 @@ struct UpdateBanner: View {
                         Button("Nouveautés") { store.whatsNew = update.releases }
                             .glassButton()
                     }
-                    Button("Mettre à jour") { Task { await store.installUpdate() } }
+                    AsyncButton("Mettre à jour") { await store.installUpdate() }
                         .glassButton(.primary)
                 }
             }
@@ -118,14 +118,20 @@ struct UpdateSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                LabeledContent("Version installée", value: store.updateStatus?.current ?? "…")
+                LabeledContent("Version installée") {
+                    if let update = store.updateStatus, update.available != true, let checked = update.checkedAt {
+                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.when(checked, now: store.now))")
+                    } else {
+                        Text(store.updateStatus?.current ?? "…")
+                    }
+                }
                 if let update = store.updateStatus, update.available == true, let latest = update.latest {
                     LabeledContent("Disponible", value: latest)
                 }
                 HStack {
-                    Button("Vérifier maintenant") { Task { await store.checkUpdate() } }
+                    AsyncButton("Vérifier maintenant") { await store.checkUpdate() }
                     if store.updateStatus?.available == true {
-                        Button("Mettre à jour") { Task { await store.installUpdate() } }
+                        AsyncButton("Mettre à jour") { await store.installUpdate() }
                             .disabled(store.updateStatus?.installing == true)
                     }
                     if let releases = store.updateStatus?.releases, !releases.isEmpty {

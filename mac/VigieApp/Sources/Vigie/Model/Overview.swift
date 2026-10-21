@@ -24,6 +24,7 @@ struct UpdateStatus: Decodable, Equatable, Sendable {
     var installing: Bool?
     var lastError: String?
     var previous: String?
+    @FlexDate var checkedAt: Date?
     /// Notes des versions plus récentes que celle d'avant la mise à jour.
     @Lossy var releases: [ReleaseNote]
 }

@@ -116,9 +116,8 @@ struct AnswerQuestionSheet: View {
             let chosen = question.options.map(\.label).filter { picks[question.question, default: []].contains($0) }
             answers[question.question] = chosen.joined(separator: ", ")
         }
-        Task {
-            if await store.answerPending(item, answers: answers) { dismiss() }
-            sending = false
-        }
+        // Tout de suite : la question disparaît ; elle revient avec un message seulement si l'envoi échoue.
+        dismiss()
+        Task { _ = await store.answerPending(item, answers: answers) }
     }
 }

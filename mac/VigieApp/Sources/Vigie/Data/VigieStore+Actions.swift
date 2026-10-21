@@ -44,8 +44,7 @@ extension VigieStore {
 
     func checkUpdate() async {
         guard await write("/api/v2/update", ["action": "check"], quiet: true) != nil else { return }
-        await refreshUpdate()
-        if updateStatus?.available != true { show(info: "Vigie est à jour") }
+        await refreshUpdate() // le résultat s'affiche dans la page (« À jour · vérifié à … »)
     }
 
     var connectorsDefaultOn: Bool {
@@ -137,9 +136,8 @@ extension VigieStore {
         guard let pending = item.pendingId else { return false }
         removeReview(item.id) // tout de suite ; il revient seulement si le moteur refuse
         let result = await write("/api/v2/pending/\(encode(pending))", ["decision": .string(allow ? "allow" : "deny")])
+        // Rien à annoncer : l'élément a déjà disparu (seul un échec est signalé, par une notification).
         if result == nil { restoreReview(item) }
-        // Autorisée : rien à dire (seul un échec est signalé ensuite, par une notification).
-        else if !allow { show(info: result?.message ?? "Refusée") }
         await reloadAfterWrite(conversation: item.conversationId)
         return result != nil
     }
@@ -156,11 +154,7 @@ extension VigieStore {
             await reloadAfterWrite(conversation: item.conversationId)
             return false
         }
-        if !allow {
-            show(info: "Refusée : rien n'est envoyé")
-        } else if result.delivered == true {
-            show(info: result.message ?? "Autorisée : elle se lance dans sa conversation")
-        } else {
+        if allow && result.delivered != true {
             // Elle avait continué sans : rien ne s'ouvre (VS Code choisissait souvent la mauvaise fenêtre) ;
             // le message est copié, à coller dans sa conversation si elle ne relance pas l'action d'elle-même.
             if let message = result.message, !message.isEmpty { SystemActions.copy(message) }
@@ -175,11 +169,10 @@ extension VigieStore {
         guard let pending = item.pendingId else { return false }
         let body: [String: JSONValue] = ["answers": .object(answers.mapValues { .string($0) })]
         removeReview(item.id)
-        guard let result = await write("/api/v2/pending/\(encode(pending))", .object(body)) else {
+        guard await write("/api/v2/pending/\(encode(pending))", .object(body)) != nil else {
             restoreReview(item)
             return false
         }
-        show(info: result.message ?? "Réponse envoyée à Claude")
         await reloadAfterWrite(conversation: item.conversationId)
         return true
     }
@@ -187,14 +180,13 @@ extension VigieStore {
     /// Retire un élément de « À regarder ».
     func dismissReview(_ item: ReviewItem) async {
         removeReview(item.id)
-        await write("/api/v2/review/\(encode(item.id))/dismiss", [:])
+        if await write("/api/v2/review/\(encode(item.id))/dismiss", [:]) == nil { restoreReview(item) }
         await reloadAfterWrite()
     }
 
     /// Ouvre la conversation dans VS Code (par le moteur ; sinon le dossier du projet).
     func openConversationInVSCode(_ id: String?, cwd: String?) async {
         if let id, await write("/api/v2/open", ["kind": "conversation", "id": .string(id)], quiet: true) != nil {
-            show(info: "Conversation ouverte dans VS Code")
             return
         }
         if let cwd = cwd ?? id.flatMap({ conversation($0)?.cwd }) {
@@ -250,8 +242,7 @@ extension VigieStore {
     // MARK: Comptes
 
     func createAccount(label: String) async {
-        let result = await write("/api/v2/accounts", ["action": "create", "label": .string(label)])
-        if result != nil { show(info: result?.message ?? "Compte « \(label) » ajouté") }
+        _ = await write("/api/v2/accounts", ["action": "create", "label": .string(label)])
         await reloadAfterWrite(accounts: true)
     }
 
@@ -292,11 +283,7 @@ extension VigieStore {
     func refreshUsage(_ id: String?) async {
         var body: [String: JSONValue] = ["action": "refresh"]
         if let id { body["id"] = .string(id) }
-        let result = await write("/api/v2/accounts", .object(body))
-        if result != nil {
-            let name = id.flatMap { account($0)?.displayName }
-            show(info: result?.message ?? (name.map { "Relevé de \($0) demandé" } ?? "Relevé des comptes demandé"))
-        }
+        _ = await write("/api/v2/accounts", .object(body))
         await reloadAfterWrite(accounts: true)
     }
 
@@ -306,10 +293,7 @@ extension VigieStore {
             wrapper.active = enable
             state.wrapper = wrapper
         }
-        let result = await write("/api/v2/accounts", ["action": "wrapper", "enable": .bool(enable)])
-        if result != nil {
-            show(info: result?.message ?? (enable ? "Choix du compte activé dans VS Code" : "Choix du compte désactivé"))
-        }
+        _ = await write("/api/v2/accounts", ["action": "wrapper", "enable": .bool(enable)])
         await reloadAfterWrite(accounts: true)
     }
 
@@ -340,9 +324,7 @@ extension VigieStore {
                 }
             }
         }
-        if await write("/api/v2/mcp/disable", ["path": .string(path), "name": .string(name), "disabled": .bool(disabled)]) != nil {
-            show(info: disabled ? "« \(name) » coupé ici" : "« \(name) » rallumé")
-        }
+        _ = await write("/api/v2/mcp/disable", ["path": .string(path), "name": .string(name), "disabled": .bool(disabled)])
         await reloadAfterWrite(mcp: true)
     }
 
@@ -360,14 +342,8 @@ extension VigieStore {
                 state.user[index].disabledIn = list
             }
         }
-        var failed = 0
         for path in paths {
-            let result = await write("/api/v2/mcp/disable", ["path": .string(path), "name": .string(name), "disabled": .bool(disabled)])
-            if result == nil { failed += 1 }
-        }
-        if failed == 0 {
-            let count = Fmt.count(paths.count, "projet")
-            show(info: disabled ? "« \(name) » coupé dans \(count)" : "« \(name) » rallumé dans \(count)")
+            _ = await write("/api/v2/mcp/disable", ["path": .string(path), "name": .string(name), "disabled": .bool(disabled)])
         }
         await reloadAfterWrite(mcp: true)
     }
@@ -385,7 +361,6 @@ extension VigieStore {
         mcpChecking = true
         defer { mcpChecking = false }
         guard await write("/api/v2/mcp/check", .object(body)) != nil else { return }
-        show(info: "Vérification lancée")
         guard !isDemo else { return }
         try? await Task.sleep(for: .seconds(8))
         await refreshMCP()

@@ -551,8 +551,9 @@ function reviewItems(ctx, sums) {
         : `${BLOCKED_WHY[b.by] || 'Refusée'} : ${what(b)}. À faire toi-même.`, ts: b.ts });
   }
   // Limite atteinte ces dernières 24 h, tant qu'elle n'est pas remise à zéro.
+  // (conversations ouvertes seulement : une conversation fermée n'attend rien, la carte du compte dit déjà la limite)
   for (const s of indexer.sessions.values()) {
-    if (conv.isThrowaway(s.id)) continue;
+    if (conv.isThrowaway(s.id) || !indexer.live.has(s.id)) continue;
     const l = s.limits.reduce((m, x) => (x.ts >= ctx.reviewSince && (!m || x.ts > m.ts) ? x : m), null);
     if (!l || !(limitResetAt(l.text, l.ts) > ctx.now)) continue;
     past.push({ id: `l:${s.id}:${l.ts}`, kind: 'limit', conversationId: s.id, conversationTitle: title(s.id), title: 'Limite atteinte', detail: short(l.text, 200), ts: l.ts });

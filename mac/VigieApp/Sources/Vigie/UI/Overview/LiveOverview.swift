@@ -339,8 +339,8 @@ struct ConversationListRow: View {
         if !store.urgentItems(for: conversation.id).isEmpty {
             EmptyView()
         } else if let resume = conversation.resume {
-            Button {
-                Task { await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd) }
+            AsyncButton {
+                await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd)
             } label: {
                 Pill(text: "À relancer", alert: true, symbol: "arrow.clockwise")
             }

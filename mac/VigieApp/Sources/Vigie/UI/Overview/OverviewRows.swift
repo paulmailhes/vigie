@@ -46,36 +46,41 @@ struct ReviewRow: View {
             .joined(separator: " · ")
     }
 
+    /// Retirer de « À regarder » ce qui n'attend pas de décision (limite, refus, échec).
+    private var dismissButton: some View {
+        AsyncButton { await store.dismissReview(item) } label: { Image(systemName: "xmark") }
+            .glassButton()
+            .help("Retirer")
+            .accessibilityLabel("Retirer")
+    }
+
     @ViewBuilder
     private var actions: some View {
         switch item.reviewKind {
         case .question:
             HStack(spacing: 6) {
-                Button("Ça me va") {
-                    Task { await store.acceptReview(item) }
-                }
+                AsyncButton("Ça me va") { await store.acceptReview(item) }
                 Button("Changer") {
                     store.changeRequest = item
                 }
             }
             .glassButton()
         case .limit:
-            Button("Comptes") {
-                store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
+            HStack(spacing: 6) {
+                Button("Comptes") {
+                    store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
+                }
+                .glassButton()
+                dismissButton
             }
-            .glassButton()
         case .blocked where item.isAwaitingApproval:
             HStack(spacing: 6) {
                 Button("Voir") { store.blockedRequest = item }
                     .glassButton()
                     .help("La commande exacte")
-                Button("Refuser") {
-                    Task { _ = await store.decideApproval(item, allow: false) }
-                }
+                AsyncButton("Refuser") { _ = await store.decideApproval(item, allow: false) }
                 .glassButton()
-                Button("Autoriser une fois") {
-                    Task { _ = await store.decideApproval(item, allow: true) }
-                }
+                AsyncButton("Autoriser une fois") { _ = await store.decideApproval(item, allow: true) }
                 .glassButton(.primary)
                 .help("Valable une seule fois, pour cette commande : \(item.command ?? item.title ?? "")")
             }
@@ -85,16 +90,16 @@ struct ReviewRow: View {
                 Button("Voir") { store.blockedRequest = item }
                     .glassButton()
                     .help("La commande en entier")
-                Button {
-                    Task { _ = await store.decidePending(item, allow: false) }
+                AsyncButton {
+                    _ = await store.decidePending(item, allow: false)
                 } label: {
                     Image(systemName: "xmark")
                 }
                 .glassButton()
                 .help("Refuser")
                 .accessibilityLabel("Refuser")
-                Button {
-                    Task { _ = await store.decidePending(item, allow: true) }
+                AsyncButton {
+                    _ = await store.decidePending(item, allow: true)
                 } label: {
                     Label("Autoriser", systemImage: "checkmark")
                 }
@@ -102,20 +107,21 @@ struct ReviewRow: View {
                 .help("Autoriser : \(item.command ?? item.title ?? "")")
             }
         case .blocked:
-            Button("Voir") {
-                store.blockedRequest = item
+            HStack(spacing: 6) {
+                Button("Voir") {
+                    store.blockedRequest = item
+                }
+                .glassButton()
+                .help("La commande et quoi faire")
+                dismissButton
             }
-            .glassButton()
-            .help("La commande et quoi faire")
         case .waiting where !item.questions.isEmpty && item.pendingId != nil:
             Button("Répondre") { store.answerRequest = item }
                 .glassButton(.primary)
                 .help("Voir la question et y répondre d'ici")
         case .waiting, .other:
             if inConversation {
-                Button("Répondre dans VS Code") {
-                    Task { await store.openConversationInVSCode(item.conversationId, cwd: item.cwd) }
-                }
+                AsyncButton("Répondre dans VS Code") { await store.openConversationInVSCode(item.conversationId, cwd: item.cwd) }
                 .glassButton(.primary)
                 .help("Ouvre cette conversation dans VS Code")
             } else {

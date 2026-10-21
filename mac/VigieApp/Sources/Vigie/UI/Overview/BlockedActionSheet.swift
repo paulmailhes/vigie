@@ -7,6 +7,7 @@ struct BlockedActionSheet: View {
 
     let item: ReviewItem
     @State private var sending = false
+    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -136,9 +137,9 @@ struct BlockedActionSheet: View {
             Spacer()
             if item.isAwaitingApproval {
                 if let command = item.command, !command.isEmpty {
-                    Button("Copier la commande") {
+                    Button(copied ? "Copiée" : "Copier la commande", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         SystemActions.copy(command)
-                        store.show(info: "Commande copiée")
+                        copied = true
                     }
                     .glassButton()
                 }
@@ -164,9 +165,9 @@ struct BlockedActionSheet: View {
                 .glassButton()
                 .help("Retirer de « À regarder »")
                 if let command = item.command, !command.isEmpty {
-                    Button("Copier la commande") {
+                    Button(copied ? "Copiée" : "Copier la commande", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         SystemActions.copy(command)
-                        store.show(info: "Commande copiée")
+                        copied = true
                     }
                     .glassButton()
                     if item.needsPassword == true {
@@ -192,21 +193,14 @@ struct BlockedActionSheet: View {
         item.conversationId.flatMap { store.conversation($0)?.cwd }
     }
 
+    // Tout de suite : la fiche se ferme et l'élément disparaît ; il revient avec un message seulement si ça échoue.
     private func approve(_ allow: Bool) {
-        sending = true
-        Task {
-            let ok = await store.decideApproval(item, allow: allow)
-            sending = false
-            if ok { dismiss() }
-        }
+        dismiss()
+        Task { _ = await store.decideApproval(item, allow: allow) }
     }
 
     private func decide(allow: Bool) {
-        sending = true
-        Task {
-            let ok = await store.decidePending(item, allow: allow)
-            sending = false
-            if ok { dismiss() }
-        }
+        dismiss()
+        Task { _ = await store.decidePending(item, allow: allow) }
     }
 }

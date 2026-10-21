@@ -14,9 +14,7 @@ struct CodexSetupSteps: View {
                         .foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: 10) {
-                        Button(account?.connecting == true ? "Connexion en cours…" : "Connecter Codex") {
-                            Task { await store.codexLogin() }
-                        }
+                        AsyncButton(account?.connecting == true ? "Connexion en cours…" : "Connecter Codex") { await store.codexLogin() }
                         .glassButton(.primary)
                         .disabled(account?.connecting == true)
                         Text("La page de connexion d'OpenAI s'ouvre dans ton navigateur.")
@@ -40,9 +38,7 @@ struct CodexSetupSteps: View {
                         Text("Ou dans le Terminal : lance « codex », puis tape « /hooks ».")
                             .font(.callout)
                             .foregroundStyle(.secondary)
-                        Button("Vérifier", systemImage: "arrow.clockwise") {
-                            Task { await store.refreshAccounts() }
-                        }
+                        AsyncButton("Vérifier", systemImage: "arrow.clockwise") { await store.refreshAccounts() }
                         .glassButton()
                         .controlSize(.small)
                     }

@@ -65,7 +65,9 @@ struct MCPEditorSheet: View {
                     .keyboardShortcut(.cancelAction)
                     .glassButton()
                 if mode == .form {
-                    Button(isEditing ? "Enregistrer" : "Ajouter", action: submit)
+                    Button(action: submit) {
+                        BusyLabel(busy: sending) { Text(isEditing ? "Enregistrer" : "Ajouter") }
+                    }
                         .keyboardShortcut(.defaultAction)
                         .glassButton(.primary)
                         .disabled(!canSubmit)
@@ -263,10 +265,7 @@ struct MCPEditorSheet: View {
                 await store.mcpUser(action, name: name, config: config, accounts: ids)
             }
             sending = false
-            if ok {
-                store.show(info: isEditing ? "« \(name) » modifié" : "« \(name) » ajouté")
-                dismiss()
-            }
+            if ok { dismiss() }
         }
     }
 }

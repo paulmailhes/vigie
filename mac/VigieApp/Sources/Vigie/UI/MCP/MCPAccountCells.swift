@@ -71,9 +71,7 @@ struct MCPAccountCells: View {
     private func chip(_ account: Account, _ st: State) -> some View {
         switch st {
         case .connect:
-            Button("\(account.displayName) · Connecter") {
-                Task { await store.mcpConnect(name: name, accountId: account.id, path: path) }
-            }
+            AsyncButton("\(account.displayName) · Connecter") { await store.mcpConnect(name: name, accountId: account.id, path: path) }
             .buttonStyle(.borderedProminent)
             .tint(Theme.warn)
             .controlSize(.small)
@@ -119,9 +117,7 @@ struct MCPConnectEverywhereButton: View {
     var body: some View {
         let waiting = health.filter { [.needsAuth, .failed].contains($0.mcpStatus) && store.account($0.accountId)?.isConnected == true }
         if waiting.count > 1 {
-            Button("Partout") {
-                Task { await store.mcpConnectEverywhere(name: name) }
-            }
+            AsyncButton("Partout") { await store.mcpConnectEverywhere(name: name) }
             .buttonStyle(.borderless)
             .help("Connecter « \(name) » sur \(waiting.compactMap { store.account($0.accountId)?.displayName }.joined(separator: ", ")), un compte après l'autre")
         } else {

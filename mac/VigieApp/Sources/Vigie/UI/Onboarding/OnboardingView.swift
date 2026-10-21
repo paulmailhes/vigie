@@ -382,7 +382,7 @@ struct OnboardingAccountRow: View {
                 Label("Connecté", systemImage: "checkmark")
                     .foregroundStyle(.secondary)
             } else {
-                Button("Connecter") { Task { await store.connectAccount(account.id) } }
+                AsyncButton("Connecter") { await store.connectAccount(account.id) }
                     .glassButton(.primary)
                     .help("Ouvre la page de connexion de Claude dans ton navigateur")
             }

@@ -44,9 +44,7 @@ struct MCPView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItem {
-                Button("Vérifier maintenant", systemImage: "arrow.triangle.2.circlepath") {
-                    Task { await store.mcpCheck() }
-                }
+                AsyncButton("Vérifier maintenant", systemImage: "arrow.triangle.2.circlepath") { await store.mcpCheck() }
                 .help("Vérifie tout de suite l'état des MCP dans chaque compte")
                 .disabled(store.mcpChecking)
             }
