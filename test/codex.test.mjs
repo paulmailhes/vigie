@@ -12,6 +12,8 @@ const DAY = path.join(HOME, 'sessions', '2026', '10', '20');
 fs.mkdirSync(DAY, { recursive: true });
 const NOW = Date.parse('2026-10-20T10:10:00Z');
 const ID = '01a12fe9-e384-7742-8e40-074aa1632763';
+// Codex tourne mais n'a aucun fil chargé (les tests ne dépendent pas des processus du Mac)
+const CODEX_RUNS = () => ({ running: true, files: new Set() });
 const SUB = '01a12fe9-0000-7000-8000-000000000001';
 const line = (ts, type, payload) => JSON.stringify({ timestamp: ts, type, payload });
 const resets = Math.floor(Date.parse('2026-10-25T10:00:00Z') / 1000);
@@ -44,7 +46,7 @@ test('outils : commandes du mode code et d’un appel shell, fichiers d’un pat
 test('une conversation Codex : en cours, son plan, son commit, son agent, sa consommation', () => {
   // fichiers « modifiés maintenant » : la conversation est au travail
   for (const f of fs.readdirSync(DAY)) fs.utimesSync(path.join(DAY, f), NOW / 1000, NOW / 1000);
-  const c = createCodex({ codexHome: HOME, now: () => NOW });
+  const c = createCodex({ codexHome: HOME, now: () => NOW, liveFiles: CODEX_RUNS });
   const list = c.summaries();
   assert.deepEqual(list.map((s) => s.id), [ID], 'l’agent n’est pas listé à part');
   const s = list[0];
@@ -64,6 +66,18 @@ test('une conversation Codex : en cours, son plan, son commit, son agent, sa con
   const a = c.account();
   assert.deepEqual([a.id, a.plan, a.usage.week.pct], ['codex', 'pro', 12]);
   // après la remise à zéro, l’ancien pourcentage ne vaut plus rien
-  const later = createCodex({ codexHome: HOME, now: () => Date.parse('2026-10-26T00:00:00Z') });
+  const later = createCodex({ codexHome: HOME, now: () => Date.parse('2026-10-26T00:00:00Z'), liveFiles: CODEX_RUNS });
   assert.equal(later.account().usage.week.pct, null);
+});
+
+test('conversation Codex ouverte : fil chargé par Codex, ou active depuis moins de 30 min ; Codex fermé : aucune', () => {
+  const file = path.join(DAY, fs.readdirSync(DAY).find((f) => f.includes(ID)));
+  const quiet = NOW + 45 * 60_000; // 45 min après la dernière activité, plus de tour en cours
+  for (const f of fs.readdirSync(DAY)) fs.utimesSync(path.join(DAY, f), NOW / 1000, NOW / 1000);
+  const state = (liveFiles, at = quiet) => createCodex({ codexHome: HOME, now: () => at, liveFiles }).summaries().find((s) => s.id === ID).status;
+  assert.equal(state(() => ({ running: true, files: new Set([file]) })), 'idle', 'chargée par Codex : ouverte, même sans activité récente');
+  assert.equal(state(() => ({ running: true, files: new Set() })), 'closed', 'plus chargée, rien depuis 45 min : fermée (avant : 12 h)');
+  assert.equal(state(() => ({ running: true, files: null })), 'closed', 'relevé illisible : la règle des 30 min');
+  assert.equal(state(() => ({ running: false, files: new Set() }), NOW), 'closed', 'Codex ne tourne pas : rien d’ouvert, même en plein tour');
+  assert.notEqual(state(() => ({ running: true, files: null }), NOW + 10 * 60_000), 'closed', 'active il y a 10 min : ouverte');
 });

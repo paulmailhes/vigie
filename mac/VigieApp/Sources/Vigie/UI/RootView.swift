@@ -80,6 +80,8 @@ struct DetailView: View {
             AccountsView(highlight: id)
         case .mcp:
             MCPView()
+        case .history:
+            HistoryView()
         }
     }
 }

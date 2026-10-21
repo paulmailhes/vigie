@@ -137,7 +137,7 @@ struct SinceRow: View {
     var body: some View {
         let summary = store.sinceSummary
         HStack(alignment: .center, spacing: 16) {
-            FlowStats(items: items(summary))
+            FlowStats(items: items(summary)) { status in store.openHistory(status: status, window: 60) }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
@@ -147,12 +147,17 @@ struct SinceRow: View {
         let accepted = summary?.accepted ?? 0
         let questions = summary?.questionsAuto ?? 0
         let blocked = summary?.blocked ?? 0
+        let refused = summary?.refused ?? 0
+        let failedActions = summary?.failed ?? 0
         let reports = summary?.reports ?? 0
         let failed = summary?.testsFailed ?? 0
         let limits = summary?.limits ?? 0
-        var list: [FlowStats.Item] = [.init(value: accepted, label: accepted > 1 ? "acceptées" : "acceptée")]
-        if questions > 0 { list.append(.init(value: questions, label: questions > 1 ? "questions choisies" : "question choisie")) }
-        if blocked > 0 { list.append(.init(value: blocked, label: blocked > 1 ? "bloquées" : "bloquée", alert: true)) }
+        // un clic sur un chiffre ouvre l'historique de l'heure, filtré sur ce statut
+        var list: [FlowStats.Item] = [.init(value: accepted, label: accepted > 1 ? "acceptées" : "acceptée", history: "accepted")]
+        if questions > 0 { list.append(.init(value: questions, label: questions > 1 ? "questions choisies" : "question choisie", history: "question")) }
+        if refused > 0 { list.append(.init(value: refused, label: refused > 1 ? "refusées" : "refusée", history: "refused")) }
+        if blocked > 0 { list.append(.init(value: blocked, label: blocked > 1 ? "bloquées" : "bloquée", alert: true, history: "blocked")) }
+        if failedActions > 0 { list.append(.init(value: failedActions, label: failedActions > 1 ? "échouées" : "échouée", alert: true, history: "failed")) }
         if reports > 0 { list.append(.init(value: reports, label: reports > 1 ? "rapports" : "rapport")) }
         if failed > 0 { list.append(.init(value: failed, label: failed > 1 ? "tests en échec" : "test en échec")) }
         if limits > 0 { list.append(.init(value: limits, label: limits > 1 ? "limites atteintes" : "limite atteinte")) }
@@ -166,23 +171,42 @@ struct FlowStats: View {
         var value: Int
         var label: String
         var alert = false
+        /// Statut de l'historique ouvert au clic (nil : pas cliquable).
+        var history: String? = nil
     }
 
     let items: [Item]
+    var open: ((String) -> Void)? = nil
 
     var body: some View {
-        items.enumerated().reduce(Text("")) { text, entry in
-            let (index, item) = entry
-            let separator = index == 0 ? Text("") : Text("  ·  ").foregroundStyle(.tertiary)
-            let number = Text(Fmt.int(item.value)).bold().monospacedDigit()
-                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
-            // Espaces insécables : un chiffre et son mot ne sont jamais coupés en fin de ligne.
-            let word = Text("\u{00A0}" + item.label.replacingOccurrences(of: " ", with: "\u{00A0}"))
-                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
-            return Text("\(text)\(separator)\(number)\(word)")
+        FlowLayout(spacing: 6) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                HStack(spacing: 6) {
+                    if index > 0 { Text("·").foregroundStyle(.tertiary) }
+                    stat(item)
+                }
+            }
         }
         .font(.title3)
-        .fixedSize(horizontal: false, vertical: true)
         .contentTransition(.numericText())
+    }
+
+    @ViewBuilder
+    private func stat(_ item: Item) -> some View {
+        let label = HStack(spacing: 4) {
+            Text(Fmt.int(item.value)).bold().monospacedDigit()
+                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
+            Text(item.label)
+                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+        }
+        .fixedSize()
+        if let key = item.history, let open {
+            Button { open(key) } label: { label.contentShape(.rect) }
+                .buttonStyle(.plain)
+                .help("Voir le détail dans l'historique")
+                .pointerStyle(.link)
+        } else {
+            label
+        }
     }
 }

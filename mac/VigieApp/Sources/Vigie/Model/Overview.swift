@@ -86,7 +86,12 @@ struct GuardRule: Decodable, Equatable, Sendable, Identifiable {
 struct SinceSummary: Decodable, Equatable, Sendable {
     var accepted: Int?
     var questionsAuto: Int?
+    /// Personne n'a répondu à temps, ou jamais validée à ta place.
     var blocked: Int?
+    /// Refusées par toi.
+    var refused: Int?
+    /// Autorisées, mais en échec.
+    var failed: Int?
     var reports: Int?
     var testsFailed: Int?
     var limits: Int?

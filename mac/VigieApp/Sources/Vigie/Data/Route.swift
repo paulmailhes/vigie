@@ -6,6 +6,8 @@ enum Route: Hashable, Sendable {
     case conversation(String)
     case account(String)
     case mcp
+    /// Toutes les demandes et leur issue (filtres dans le store : historyStatus, historyWindow…).
+    case history
 }
 
 /// Les onglets du détail d'une conversation.

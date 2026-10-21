@@ -678,7 +678,10 @@ function overviewV2() {
     sinceSummary: {
       accepted: ev['auto-accepte'] || 0,
       questionsAuto: ev['question-auto'] || 0,
-      blocked: (ev['garde-fou-bloque'] || 0) + (ev['garde-fou-en-attente-vigie'] || 0),
+      // comment chaque action s'est terminée (le début d'une attente n'est pas un blocage)
+      blocked: (ev['garde-fou-bloque'] || 0) + (ev['garde-fou-delai-vigie'] || 0),
+      refused: (ev['garde-fou-refuse-app'] || 0) + (ev['garde-fou-refuse-vigie'] || 0),
+      failed: ev['garde-fou-echec'] || 0,
       reports: counts.reports,
       testsFailed: counts.testsFailed,
       limits: counts.limits,
@@ -784,6 +787,85 @@ function recentAccepted(ctx, sums) {
     });
   }
   return out;
+}
+
+// ---------- historique : toutes les demandes, avec leur issue ----------
+// GET /api/v2/history?window=60|1440|10080&status=…&conversation=…&q=… : une ligne par issue (le début d'une attente
+// n'en est pas une, sauf si elle attend encore), la plus récente d'abord, et le nombre de lignes par statut.
+// status : accepted (autorisée, par Vigie ou par toi) · refused (par toi, ou par le mode auto de Claude) · blocked
+// (personne n'a répondu à temps, ou jamais validée à ta place) · failed (autorisée mais en échec) · question ·
+// vscode (laissée à ta fenêtre VS Code) · waiting (attend encore).
+const HISTORY_WINDOWS = new Set([60, 1440, 10080]);
+const HISTORY_STATUS = {
+  'auto-accepte': 'accepted', 'garde-fou-autorise-app': 'accepted', 'garde-fou-autorise-vigie': 'accepted',
+  'garde-fou-tu-as-repondu': 'vscode', 'demande-pour-toi': 'vscode', 'garde-fou-pour-toi': 'vscode', 'refus-classifieur-pour-toi': 'vscode',
+  'garde-fou-rendu': 'vscode', 'reponse-perdue': 'vscode',
+  'garde-fou-refuse-app': 'refused', 'garde-fou-refuse-vigie': 'refused', 'refuse-mode-auto': 'refused',
+  'garde-fou-bloque': 'blocked', 'garde-fou-delai-vigie': 'blocked',
+  'garde-fou-echec': 'failed',
+  'question-auto': 'question', 'question-repondue-app': 'question', 'question-tu-as-repondu': 'question', 'question-rendue': 'question', 'question-pour-toi': 'question',
+  'garde-fou-attente': 'waiting', 'garde-fou-en-attente-vigie': 'waiting', 'question-attente': 'waiting',
+};
+function historyReason(h) {
+  const rule = h.rule ? ` (garde-fou : « ${h.rule} »)` : '';
+  switch (h.event) {
+    case 'auto-accepte': return 'Acceptée automatiquement par Vigie';
+    case 'garde-fou-autorise-app': case 'garde-fou-autorise-vigie': return `Autorisée par toi dans Vigie${rule}`;
+    case 'garde-fou-tu-as-repondu': return `Décidée par toi dans VS Code${rule}${h.resultat ? ` · ${h.resultat}` : ''}`;
+    case 'demande-pour-toi': case 'garde-fou-pour-toi': case 'garde-fou-rendu': return `Laissée à ta fenêtre VS Code${rule}`;
+    case 'refus-classifieur-pour-toi': return 'Laissée à ta fenêtre VS Code (le mode auto de Claude a refusé plusieurs fois)';
+    case 'reponse-perdue': return 'Réponse de Vigie arrivée trop tard : décidée dans VS Code';
+    case 'garde-fou-refuse-app': case 'garde-fou-refuse-vigie': return `Refusée par toi dans Vigie${rule}`;
+    case 'refuse-mode-auto': return `Refusée par le mode auto de Claude${h.reason ? ` : ${short(String(h.reason), 200)}` : ''}`;
+    case 'garde-fou-bloque': case 'garde-fou-delai-vigie': return `${BLOCKED_WHY[h.raison] || BLOCKED_WHY.delai}${rule}`;
+    case 'garde-fou-echec': return `Autorisée, mais elle a échoué${h.extrait ? ` : « ${short(mask(String(h.extrait).replace(/^Exit code \d+\n?/, '')), 200)} »` : ''}`;
+    case 'question-auto': return 'Réponse choisie à ta place (option recommandée)';
+    case 'question-repondue-app': return 'Répondue par toi dans Vigie';
+    case 'question-tu-as-repondu': return 'Répondue par toi dans VS Code';
+    default: return WAIT_EVENTS.has(h.event) || h.event === 'garde-fou-en-attente-vigie' ? `Attend ta décision${rule}` : null;
+  }
+}
+function historyView(url) {
+  const win = Number(url.searchParams.get('window') ?? 1440);
+  if (!HISTORY_WINDOWS.has(win)) return bad('Période : 60, 1440 ou 10080 min.');
+  const status = url.searchParams.get('status') || null;
+  const only = url.searchParams.get('conversation') || null;
+  const q = (url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 200);
+  const ctx = { now: Date.now() };
+  const since = new Date(ctx.now - win * 60_000).toISOString();
+  const sums = new Map([...conv.summaries(), ...safeCodex(() => codex.summaries(), [])].map((s) => [s.id, s]));
+  let open = new Set();
+  try { open = new Set([...pendingWaits(readState(), ctx.now).values()].flat().map((w) => `${w.sessionId}\u0000${w.ts}`)); } catch { /* aucune attente */ }
+  try { for (const a of awaitingApprovals({ history, now: ctx.now })) if (!a.approved) open.add(`${a.sessionId}\u0000${a.ts}`); } catch { /* aucune */ }
+  const counts = {};
+  const items = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (!h?.ts || String(h.ts) < since) break;
+    let st = HISTORY_STATUS[h.event];
+    if (!st) continue;
+    const sid = typeof h.sessionId === 'string' ? h.sessionId : null;
+    // un début d'attente : seulement s'il attend encore (sinon sa fin est déjà dans la liste)
+    if (st === 'waiting' && !open.has(`${sid}\u0000${h.ts}`)) continue;
+    if (st === 'question' && h.event === 'question-pour-toi') continue;
+    if (sid && conv.isThrowaway(sid)) continue;
+    if (only && sid !== only) continue;
+    const s = sid ? sums.get(sid) : null;
+    const item = {
+      id: `${h.ts}|${h.pid ?? ''}|${h.event}`, ts: h.ts, status: st, event: h.event,
+      app: h.app === 'codex' || s?.agent === 'codex' ? 'codex' : 'claude',
+      tool: h.tool ?? null, title: acceptedTitle(h), command: mask(String(h.action ?? '')).slice(0, MAX_COMMAND),
+      rule: h.rule ?? null, ruleId: h.ruleId ?? null, reason: historyReason(h),
+      conversationId: sid, conversationTitle: s?.title ?? indexer.sessions.get(sid)?.title ?? null,
+      project: s?.project ?? (h.cwd ? path.basename(String(h.cwd)) : null), cwd: h.cwd ?? null,
+      agent: sid ? agentName(sid, h.agentId) : null,
+      needsPassword: h.ruleId === 'sudo' || /\bsudo\b/.test(String(h.action ?? '')),
+    };
+    if (q && ![item.title, item.command, item.reason, item.conversationTitle, item.project].some((x) => String(x ?? '').toLowerCase().includes(q))) continue;
+    counts[st] = (counts[st] || 0) + 1;
+    if ((!status || status === st) && items.length < 1000) items.push(item);
+  }
+  return [200, { window: win, since, counts, items }];
 }
 
 // Rubrique MCP d'une conversation : ce qui est branché pour son dossier de LANCEMENT et son compte, ce
@@ -1362,6 +1444,7 @@ const ROUTES = [
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
   ['POST', /^\/api\/v2\/settings$/, (_, b) => postSettings(b)],
   ['GET', /^\/api\/v2\/update$/, () => [200, updater.status()]],
+  ['GET', /^\/api\/v2\/history$/, (_, __, url) => historyView(url)],
   ['POST', /^\/api\/v2\/update$/, async (_, b) => {
     if (b?.action === 'check') return [200, { ok: true, ...(await updater.check({ force: true })) }];
     if (b?.action !== 'install') return bad('Action : check ou install.');

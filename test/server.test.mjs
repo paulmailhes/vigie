@@ -386,7 +386,7 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   assert.equal(a.needsYou, 5);
   assert.equal(b.needsYou, 0, 'limite remise à zéro : plus rien à regarder');
   // depuis une heure (glissante) : les acceptations d'il y a 65 à 80 min n'y sont plus, ni la limite de B
-  assert.deepEqual(o.sinceSummary, { accepted: 0, questionsAuto: 1, blocked: 2, reports: o.sinceSummary.reports, testsFailed: 1, limits: 1 });
+  assert.deepEqual(o.sinceSummary, { accepted: 0, questionsAuto: 1, blocked: 2, refused: 1, failed: 0, reports: o.sinceSummary.reports, testsFailed: 1, limits: 1 });
   assert.equal(o.settings.questionsAuto, false);
   assert.equal(o.settings.guard.rules.length, DEFAULT_GUARDS.length);
   assert.equal(o.engine.wrapperActive, false);
@@ -837,6 +837,31 @@ const Series = {
   accounts: arr({ id: 'string', label: 'string', points: arr({ t: ISO, weekPct: opt('number'), tokens: 'int' }) }),
 };
 const total = (pts, k) => pts.reduce((x, p) => x + (p[k] || 0), 0);
+
+test('historique : une ligne par issue, filtres par statut, conversation et texte ; période invalide refusée', async () => {
+  const STATUSES = new Set(['accepted', 'refused', 'blocked', 'failed', 'question', 'vscode', 'waiting']);
+  const all = (await get('/api/v2/history?window=1440')).body;
+  assert.ok(all.items.length > 0);
+  for (const it of all.items) {
+    assert.ok(STATUSES.has(it.status), it.status);
+    assert.ok(it.reason, `raison pour ${it.event}`);
+    assert.ok(['claude', 'codex'].includes(it.app));
+  }
+  assert.deepEqual(all.items.map((x) => x.ts), [...all.items.map((x) => x.ts)].sort().reverse(), 'la plus récente d\'abord');
+  assert.equal(Object.values(all.counts).reduce((a, b) => a + b, 0), all.items.length);
+  assert.ok(!all.items.some((x) => x.event === 'garde-fou-attente' && x.status !== 'waiting'));
+  noSecret({ text: JSON.stringify(all) });
+  const status = Object.keys(all.counts)[0];
+  const only = (await get(`/api/v2/history?window=1440&status=${status}`)).body;
+  assert.ok(only.items.length > 0 && only.items.every((x) => x.status === status));
+  assert.deepEqual(only.counts, all.counts, 'les compteurs restent ceux de toute la période');
+  const one = all.items.find((x) => x.conversationId);
+  const conv = (await get(`/api/v2/history?window=1440&conversation=${one.conversationId}`)).body;
+  assert.ok(conv.items.every((x) => x.conversationId === one.conversationId));
+  const word = one.title.split(' ')[0];
+  assert.ok((await get(`/api/v2/history?window=1440&q=${encodeURIComponent(word)}`)).body.items.length > 0);
+  assert.equal((await get('/api/v2/history?window=30')).status, 400);
+});
 
 test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris, en % de la semaine du compte)', async () => {
   const o = (await get('/api/v2/overview')).body;

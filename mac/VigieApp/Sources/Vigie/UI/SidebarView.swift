@@ -59,6 +59,9 @@ struct SidebarView: View {
             }
 
             Section("Outils") {
+                SidebarLabel("Historique", symbol: "clock.arrow.circlepath")
+                    .tag(Route.history)
+                    .standInHighlight(standIn && store.route == .history)
                 SidebarLabel("MCP", symbol: "puzzlepiece.extension")
                     .tag(Route.mcp)
                     .standInHighlight(standIn && store.route == .mcp)

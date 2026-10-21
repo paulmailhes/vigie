@@ -56,6 +56,12 @@ final class VigieStore {
     var conversationTab: ConversationTab = .fil
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
+    /// Historique : filtres de la page et dernière page lue.
+    var historyStatus: String?
+    var historyWindow = 1440
+    var historyQuery = ""
+    var historyConversation: String?
+    private(set) var historyPage: HistoryPage?
     /// Mise à jour de Vigie (bandeau, Réglages) ; « Quoi de neuf » après une mise à jour.
     private(set) var updateStatus: UpdateStatus?
     var whatsNew: [ReleaseNote]?
@@ -246,6 +252,25 @@ final class VigieStore {
         update(\.engineInfo, overview.engine)
         if let status = overview.update { setUpdateStatus(status) }
         update(\.loadedOnce, true)
+    }
+
+    func refreshHistory() async {
+        guard !isDemo else { return }
+        var query = "window=\(historyWindow)"
+        if let historyStatus { query += "&status=\(historyStatus)" }
+        if let historyConversation { query += "&conversation=\(encode(historyConversation))" }
+        let q = historyQuery.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty { query += "&q=\(encode(q))" }
+        guard let page = try? await client.get("/api/v2/history?\(query)", as: HistoryPage.self) else { return }
+        update(\.historyPage, page)
+    }
+
+    func openHistory(status: String?, window: Int) {
+        historyStatus = status
+        historyWindow = window
+        historyConversation = nil
+        historyQuery = ""
+        route = .history
     }
 
     func refreshUpdate() async {

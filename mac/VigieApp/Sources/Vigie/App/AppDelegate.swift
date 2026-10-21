@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Visionneuse (--open <id>) : une conversation à l'écran, sans notifications (l'app principale s'en charge).
         if let id = LaunchOptions.current.openConversation {
-            store.route = id == "overview" ? .overview : id == "mcp" ? .mcp : .conversation(id)
+            store.route = id == "overview" ? .overview : id == "mcp" ? .mcp : id == "history" ? .history : .conversation(id)
             store.start()
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1))

@@ -417,7 +417,7 @@ extension VigieStore {
         route = .account(target)
     }
 
-    private func encode(_ value: String) -> String {
+    func encode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
 }

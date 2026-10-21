@@ -217,7 +217,7 @@ function followResult(input, rule, since) {
     // un même appel peut être autorisé deux fois (Codex : PreToolUse puis PermissionRequest) : une seule alerte
     const cle = `${session_id}:${tool_use_id || callHash(session_id, tool_name, tool_input)}`;
     fs.writeFileSync(job, JSON.stringify({ input: { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id }, info: ruleInfo(rule), since, codex: CODEX, cle }), { mode: 0o600 });
-    spawn(process.execPath, [fileURLToPath(import.meta.url), '--suivi', job], { detached: true, stdio: 'ignore' }).unref();
+    spawn(process.execPath, [fileURLToPath(import.meta.url), '--suivi', job, ...(CODEX ? ['--codex'] : [])], { detached: true, stdio: 'ignore' }).unref();
   } catch { /* facultatif : sans suivi, pas d'alerte d'échec */ }
 }
 async function onFollow(job) {
