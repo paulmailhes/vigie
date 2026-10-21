@@ -580,6 +580,11 @@ test('action sensible en attente : autoriser ou refuser depuis l\'app (decisions
   assert.equal(r.status, 200, 'L\'utilisateur change d\'avis avant que le hook ait lu : la dernière décision compte');
   assert.equal(rj(path.join(DATA, 'decisions.json'))[String(HOOK_PUSH)].decision, 'deny');
   assert.equal((await post(`/api/v2/pending/${HOOK_PUSH}`, { decision: 'allow' }, { 'Content-Type': 'application/json' })).status, 403, 'X-Vigie obligatoire');
+  // décidée, pas encore lue par le hook : plus montrée (elle ne réapparaît pas le temps qu'il la prenne)
+  const waiting = async () => (await get('/api/v2/overview')).body.toReview.some((x) => x.pendingId === String(HOOK_PUSH));
+  assert.equal(await waiting(), false);
+  fs.writeFileSync(path.join(DATA, 'decisions.json'), '{}'); // le hook l'a lue (ici : simulée, il attend toujours)
+  assert.equal(await waiting(), true);
 });
 
 test('ouvrir : la conversation dans VS Code (dossier puis onglet), rien d\'autre', async () => {

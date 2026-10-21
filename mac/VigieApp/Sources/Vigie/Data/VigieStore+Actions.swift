@@ -115,11 +115,11 @@ extension VigieStore {
     /// Autorise ou refuse une action sensible en attente (comme un clic dans VS Code).
     func decidePending(_ item: ReviewItem, allow: Bool) async -> Bool {
         guard let pending = item.pendingId else { return false }
+        removeReview(item.id) // tout de suite ; il revient seulement si le moteur refuse
         let result = await write("/api/v2/pending/\(encode(pending))", ["decision": .string(allow ? "allow" : "deny")])
-        if let result {
-            removeReview(item.id)
-            show(info: result.message ?? (allow ? "Autorisée" : "Refusée"))
-        }
+        if result == nil { restoreReview(item) }
+        // Autorisée : rien à dire (seul un échec est signalé ensuite, par une notification).
+        else if !allow { show(info: result?.message ?? "Refusée") }
         await reloadAfterWrite(conversation: item.conversationId)
         return result != nil
     }
@@ -130,11 +130,12 @@ extension VigieStore {
         guard let approval = item.approvalId else { return false }
         var body: [String: JSONValue] = ["approvalId": .string(approval)]
         if !allow { body["decision"] = "deny" }
+        removeReview(item.id)
         guard let result = await write("/api/v2/approvals", .object(body)) else {
+            restoreReview(item)
             await reloadAfterWrite(conversation: item.conversationId)
             return false
         }
-        removeReview(item.id)
         if !allow {
             show(info: "Refusée : rien n'est envoyé")
         } else if result.delivered == true {
@@ -153,8 +154,11 @@ extension VigieStore {
     func answerPending(_ item: ReviewItem, answers: [String: String]) async -> Bool {
         guard let pending = item.pendingId else { return false }
         let body: [String: JSONValue] = ["answers": .object(answers.mapValues { .string($0) })]
-        guard let result = await write("/api/v2/pending/\(encode(pending))", .object(body)) else { return false }
         removeReview(item.id)
+        guard let result = await write("/api/v2/pending/\(encode(pending))", .object(body)) else {
+            restoreReview(item)
+            return false
+        }
         show(info: result.message ?? "Réponse envoyée à Claude")
         await reloadAfterWrite(conversation: item.conversationId)
         return true

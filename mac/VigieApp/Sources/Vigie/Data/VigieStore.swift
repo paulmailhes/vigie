@@ -19,6 +19,9 @@ final class VigieStore {
     private(set) var since: Date?
     private(set) var sinceSummary: SinceSummary?
     private(set) var toReview: [ReviewItem] = []
+    /// Éléments que l'utilisateur vient de traiter : retirés tout de suite, et pas remis par une lecture partie
+    /// avant son clic (l'utilisateur : « faire l'action, revenir en arrière si ça n'a pas marché »).
+    private var settledReview: [String: Date] = [:]
     private(set) var reports: [Row<Report>] = []
     private(set) var accounts: [Account] = []
     private(set) var conversations: [ConversationSummary] = []
@@ -229,7 +232,8 @@ final class VigieStore {
         update(\.settings, overview.settings)
         update(\.since, overview.since)
         update(\.sinceSummary, overview.sinceSummary)
-        update(\.toReview, overview.toReview)
+        settledReview = settledReview.filter { Date.now.timeIntervalSince($0.value) < 15 }
+        update(\.toReview, overview.toReview.filter { settledReview[$0.id] == nil })
         update(\.reports, RowIDs.make(overview.reports) { $0.stableKey })
         update(\.accounts, overview.accounts)
         // Ordre STABLE (L'utilisateur : « les conversations passent les unes devant les autres ») : ouvertes d'abord,
@@ -350,6 +354,14 @@ final class VigieStore {
 
     func removeReview(_ id: String) {
         toReview.removeAll { $0.id == id }
+        settledReview[id] = .now
+    }
+
+    /// L'action n'a pas abouti : l'élément revient à sa place.
+    func restoreReview(_ item: ReviewItem) {
+        settledReview[item.id] = nil
+        guard !toReview.contains(where: { $0.id == item.id }) else { return }
+        toReview.insert(item, at: 0)
     }
 
     func patchSince(_ summary: SinceSummary, since date: Date) {

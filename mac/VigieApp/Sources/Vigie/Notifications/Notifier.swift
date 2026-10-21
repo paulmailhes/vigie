@@ -3,7 +3,7 @@ import UserNotifications
 
 /// Les types de notifications, chacun réglable (Réglages › Notifications).
 enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
-    case waiting, sensitive, question, accountWeek, missionDone, runaway
+    case waiting, sensitive, failed, question, accountWeek, missionDone, runaway
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .waiting: "Une conversation t'attend"
         case .sensitive: "Action sensible à autoriser"
+        case .failed: "Action autorisée qui a échoué"
         case .question: "Question choisie à ta place"
         case .accountWeek: "Compte à 80 % puis 90 % de sa semaine"
         case .missionDone: "Mission terminée"
@@ -22,6 +23,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .waiting: Icon.waiting
         case .sensitive: Icon.guardRule
+        case .failed: "exclamationmark.triangle"
         case .question: Icon.question
         case .accountWeek: Icon.week
         case .missionDone: Icon.mission
@@ -131,6 +133,10 @@ final class Notifier {
                 let command = item.command.map { " : " + String($0.prefix(120)) } ?? ""
                 list.append(Candidate(key: "r:" + item.id, kind: .sensitive, title: "À autoriser · \(conversation)",
                                       body: what + command, conversationId: item.conversationId, reviewId: item.id))
+            case .blocked where item.failed:
+                list.append(Candidate(key: "r:" + item.id, kind: .failed, title: "N'a pas marché · \(conversation)",
+                                      body: item.detail ?? item.rule ?? "L'action autorisée a échoué",
+                                      conversationId: item.conversationId, reviewId: item.id))
             case .question:
                 let chosen = item.question?.items.first?.chosenLabels.joined(separator: ", ")
                 var body = "« \(item.title ?? "Question") »"

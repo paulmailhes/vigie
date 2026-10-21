@@ -15,6 +15,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readState, effective, appendHistory, actionText, matchGuard, readOnlyShell, QUESTIONS_FILE, HISTORY_FILE, DATA } from './lib/state.mjs';
 import { pickRecommended, buildRecord, appendRecord } from './lib/questions.mjs';
 import { clearDecision, takeDecision, takeAnswer, MAX_COMMAND } from './lib/decisions.mjs';
@@ -26,7 +28,7 @@ const CODEX = process.argv.includes('--codex');
 // Outils qui exigent un humain : Claude Code ignore un « allow » sans réponse fournie.
 const HUMAN_ONLY = new Set(['OfferChromeSetup', 'PublishPlugin', 'ShowOnboardingRolePicker']);
 // VIGIE_POLL_MS et VIGIE_HOOK_LIFETIME_MS ne servent qu'aux tests.
-const POLL_MS = Math.max(20, Number(process.env.VIGIE_POLL_MS) || 3000);
+const POLL_MS = Math.max(20, Number(process.env.VIGIE_POLL_MS) || 1000);
 // Le hook s'arrête de lui-même avant son délai dans settings.json (7300 s), sans répondre.
 const HARD_END = Date.now() + (Number(process.env.VIGIE_HOOK_LIFETIME_MS) || 7_250_000);
 
@@ -199,6 +201,32 @@ function transcriptWatcher(input, sinceMs) {
     } catch { /* en cas de doute : on continue d'attendre */ }
     return null;
   };
+}
+
+// Autorisée depuis Vigie : le hook doit rendre la main tout de suite. Un suivi détaché (même script, --suivi) lit la
+// conversation jusqu'au résultat, 15 min au plus, et ne note que l'échec (« garde-fou-echec ») : Vigie ne prévient
+// que dans ce cas. Sans conversation lisible, aucun suivi.
+const FOLLOW_MS = Number(process.env.VIGIE_FOLLOW_MS) || 15 * 60_000;
+function followResult(input, rule, since) {
+  const tp = transcriptFor(input);
+  if (!tp || !fs.existsSync(tp)) return;
+  try {
+    const job = path.join(os.tmpdir(), `vigie-suivi-${process.pid}-${Date.now()}.json`);
+    const { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id } = input;
+    fs.writeFileSync(job, JSON.stringify({ input: { session_id, transcript_path, tool_name, tool_input, tool_use_id, cwd, agent_id }, info: ruleInfo(rule), since }), { mode: 0o600 });
+    spawn(process.execPath, [fileURLToPath(import.meta.url), '--suivi', job], { detached: true, stdio: 'ignore' }).unref();
+  } catch { /* facultatif : sans suivi, pas d'alerte d'échec */ }
+}
+async function onFollow(job) {
+  let j;
+  try { j = JSON.parse(fs.readFileSync(job, 'utf8')); } catch { return; } finally { try { fs.unlinkSync(job); } catch { /* déjà retiré */ } }
+  const result = transcriptWatcher(j.input, j.since);
+  for (const end = Date.now() + FOLLOW_MS; Date.now() < end; await sleep(Math.min(POLL_MS, 2000))) {
+    const r = result();
+    if (!r) continue;
+    if (!r.ok) log(j.input, 'garde-fou-echec', { ...j.info, extrait: r.extrait });
+    return;
+  }
 }
 
 function classifierFallback(input) {
@@ -404,7 +432,10 @@ async function onPermissionRequest(input) {
       minutes = s.guard.waitMin;
       return minutes <= 0 ? 'zero' : true;
     });
-    if (r === 'app-allow') return decide(input, 'garde-fou-autorise-app', ALLOW, ruleInfo(rule));
+    if (r === 'app-allow') {
+      followResult(input, rule, start);
+      return decide(input, 'garde-fou-autorise-app', ALLOW, ruleInfo(rule));
+    }
     if (r === 'app-deny') return decide(input, 'garde-fou-refuse-app', denyOutput(rule, 'L\'utilisateur l\'a refusée depuis Vigie.'), ruleInfo(rule));
     if (r === 'timeout') return decide(input, 'garde-fou-bloque', denyOutput(rule, `L'utilisateur n'a pas répondu en ${minutes} min.`), { ...ruleInfo(rule), raison: 'delai' });
     if (r === 'zero') return decide(input, 'garde-fou-bloque', denyOutput(rule, 'L\'utilisateur a demandé de ne jamais la valider à sa place.'), { ...ruleInfo(rule), raison: 'jamais' });
@@ -514,6 +545,10 @@ function onPermissionDenied(input) {
   log(input, 'refuse-mode-auto', { reason: String(input.reason || '').slice(0, 400) });
 }
 
+if (process.argv.includes('--suivi')) {
+  await onFollow(process.argv[process.argv.indexOf('--suivi') + 1]);
+  process.exit(0);
+}
 const input = readStdin();
 try {
   if (CODEX) await onCodex(input);

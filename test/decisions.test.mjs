@@ -142,7 +142,7 @@ test('décider : vérifie l\'attente, écrit une entrée datée, fait le ménage
   wj(FILE, { 3001: 'allow', 2002: { decision: 'deny', ts: iso(4 * 3_600_000) }, x: 'allow' });
   const r = D.decide('2001', 'allow', opts);
   assert.equal(r.ok, true);
-  assert.match(r.message, /mot de passe/);
+  assert.equal(r.message, 'Autorisée.', 'court : seul un échec est signalé ensuite');
   const m = rj(FILE);
   assert.deepEqual(Object.keys(m), ['2001'], 'hooks disparus, vieilles entrées et clés invalides retirés');
   assert.equal(m['2001'].decision, 'allow');
@@ -150,7 +150,7 @@ test('décider : vérifie l\'attente, écrit une entrée datée, fait le ménage
   assert.ok(Date.now() - Date.parse(m['2001'].ts) < 5000);
   const d = D.decide('2002', 'deny', opts);
   assert.deepEqual([d.ok, d.message], [true, 'Refusée : Claude passe à la suite.']);
-  assert.match(D.decide('2002', 'allow', opts).message, /reprend dans quelques secondes/);
+  assert.equal(D.decide('2002', 'allow', opts).message, 'Autorisée.');
 });
 
 test('actions bloquées depuis le dernier passage : commande complète, raison, refus de l\'utilisateur', () => {

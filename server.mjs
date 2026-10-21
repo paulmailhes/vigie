@@ -14,7 +14,7 @@ import { createConversations } from './lib/conversations.mjs';
 import { createAccounts, MAIN_ID } from './lib/accounts.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
-import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer } from './lib/decisions.mjs';
+import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
 import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints } from './lib/usage.mjs';
@@ -142,6 +142,9 @@ function pidAlive(pid) {
 // - garde-fous : lib/decisions.mjs (pid vivant ET bien un hook.mjs, échéance d'après guard.waitMin actuel),
 //   et pas fermées par une ligne de fin (ancien format sans pid sur la ligne de fin).
 function pendingWaits(state, now = Date.now()) {
+  // Décision ou réponse déjà donnée dans Vigie, que le hook n'a pas encore lue : l'attente n'est plus montrée
+  // (sinon elle réapparaît le temps qu'il la prenne, et on croit que le clic n'a pas marché).
+  const decided = new Set(Object.keys(readDecisions()));
   const open = new Map();
   for (const h of history) {
     if (!h.sessionId) continue;
@@ -163,12 +166,14 @@ function pendingWaits(state, now = Date.now()) {
     const deadline = ask ? Infinity : Date.parse(h.ts) + minutes * 60_000;
     if (!(deadline + 2 * 60_000 > now) || !pidAlive(h.pid)) continue;
     if (ask && !Array.isArray(h.questions)) continue; // ancienne ligne, ou hook qui n'attend pas
+    if (decided.has(String(h.pid))) continue;
     add(h.sessionId, { ...h, question: true, deadline, ask });
   }
   let guards = [];
   try { guards = pendingGuards({ history, state, now }); } catch (e) { console.error('[vigie] attentes des garde-fous :', clean(e)); }
   for (const g of guards) {
     if (!g.sessionId || !indexer.live.has(g.sessionId) || !openGuards.has(`${g.sessionId}\u0000${g.ts}`)) continue;
+    if (decided.has(String(g.pendingId))) continue;
     add(g.sessionId, { ...g, action: g.command, question: false, deadline: Date.parse(g.expiresAt) });
   }
   return bySession;
@@ -420,7 +425,7 @@ function limitResetAt(text, ts) {
 }
 
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
-const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office', 'sous-agent': 'Refusée (demandée par un agent)' };
+const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office', 'sous-agent': 'Refusée (demandée par un agent)', echec: 'Autorisée, mais elle a échoué' };
 
 // « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui s'est passé depuis son dernier passage.
 // Chaque garde-fou porte de quoi décider ou refaire l'action : state, pendingId, expiresAt, rule, command
@@ -490,7 +495,10 @@ function reviewItems(ctx, sums) {
       conversationId: b.sessionId ?? null, conversationTitle: title(b.sessionId), cwd: b.cwd ?? null,
       rule: b.rule || 'Action sensible', ruleId: b.ruleId ?? null, command: mask(b.command).slice(0, MAX_COMMAND),
       byAgent: agentName(b.sessionId, b.agentId), needsPassword: !!b.needsPassword,
-      title: short(b.rule || 'Action sensible', 120), detail: `${BLOCKED_WHY[b.by] || 'Refusée'} : ${what(b)}. À faire toi-même.`, ts: b.ts });
+      title: short(b.rule || 'Action sensible', 120),
+      detail: b.by === 'echec'
+        ? `${BLOCKED_WHY.echec} : ${what(b)}${b.extrait ? ` · « ${short(mask(b.extrait.replace(/^Exit code \d+\n?/, '')), 160)} »` : ''}.`
+        : `${BLOCKED_WHY[b.by] || 'Refusée'} : ${what(b)}. À faire toi-même.`, ts: b.ts });
   }
   // Limite atteinte depuis le dernier passage, tant qu'elle n'est pas remise à zéro.
   for (const s of indexer.sessions.values()) {

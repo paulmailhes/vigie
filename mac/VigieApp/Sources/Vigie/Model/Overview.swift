@@ -95,7 +95,9 @@ struct ReviewItem: Decodable, Equatable, Sendable, Identifiable {
     var byAgent: String?
     var cwd: String?
     var needsPassword: Bool?
-    /// Mode « seulement par Vigie » (state = awaiting) : identifiant pour POST /api/v2/approvals.
+    /// Action refusée ou ratée (state = blocked) : delai, jamais, sous-agent, ou echec (autorisée, mais elle a échoué).
+    var reason: String?
+    /// Codex (state = awaiting) : identifiant pour POST /api/v2/approvals.
     @FlexString var approvalId: String?
 
     var reviewKind: ReviewKind { ReviewKind(raw: kind) }
@@ -110,6 +112,9 @@ struct ReviewItem: Decodable, Equatable, Sendable, Identifiable {
 
     /// Attend ton accord dans Vigie (autoriser une fois, pour cette commande exacte).
     var isAwaitingApproval: Bool { state == "awaiting" && approvalId != nil }
+
+    /// Autorisée dans Vigie, mais elle a échoué (mot de passe demandé, erreur…).
+    var failed: Bool { state == "blocked" && reason == "echec" }
 
     /// Une décision t'attend : dans VS Code (pendingId) ou dans Vigie (approvalId).
     var needsDecision: Bool { isPendingDecision || isAwaitingApproval }

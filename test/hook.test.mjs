@@ -523,6 +523,37 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
     assert.equal(decide(String(h.child.pid), 'deny', appOpts(sb)).status, 404);
   });
 
+  await t.test('garde-fou autorisé depuis l\'app : seul un échec est noté ensuite (suivi détaché)', async () => {
+    for (const ok of [false, true]) {
+      const sb = sandbox(guardState);
+      const tp = path.join(sb.data, 'conversation.jsonl');
+      const command = ok ? 'sudo -n true || true' : 'sudo -n true';
+      fs.writeFileSync(tp, JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
+        message: { content: [{ type: 'tool_use', id: 'toolu_S', name: 'Bash', input: { command } }] } }) + '\n');
+      const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command }, transcript_path: tp },
+        { VIGIE_POLL_MS: '100', VIGIE_FOLLOW_MS: '8000' });
+      await sb.until('garde-fou-attente');
+      assert.equal(decide(String(h.child.pid), 'allow', appOpts(sb)).message, 'Autorisée.', 'pas de long message');
+      const { out, ms } = await h.done;
+      assert.equal(behavior(out), 'allow');
+      assert.ok(ms < 10_000, 'le hook rend la main tout de suite, le suivi continue à part');
+      fs.appendFileSync(tp, JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_S',
+        is_error: !ok, content: ok ? '' : 'Exit code 1\nsudo: a password is required' }] } }) + '\n');
+      if (!ok) {
+        await sb.until('garde-fou-echec');
+        const e = sb.history().find((x) => x.event === 'garde-fou-echec');
+        assert.equal(e.ruleId, 'sudo');
+        assert.match(e.extrait, /password is required/);
+        const { recentBlocked } = await import('../lib/decisions.mjs');
+        const [b] = recentBlocked({ history: sb.history() });
+        assert.deepEqual([b.state, b.by], ['blocked', 'echec']);
+      } else {
+        await new Promise((r) => setTimeout(r, 1500));
+        assert.deepEqual(sb.events(), ['garde-fou-attente', 'garde-fou-autorise-app'], 'réussie : rien de plus');
+      }
+    }
+  });
+
   await t.test('garde-fou : L\'utilisateur refuse depuis l\'app', async () => {
     const sb = sandbox(guardState);
     const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } });
