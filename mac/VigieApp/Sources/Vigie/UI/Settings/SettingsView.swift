@@ -98,7 +98,7 @@ struct NotificationSettingsView: View {
         .task { status = await Self.authorization() }
     }
 
-    private static func authorization() async -> UNAuthorizationStatus? {
+    static func authorization() async -> UNAuthorizationStatus? {
         guard Bundle.main.bundlePath.hasSuffix(".app") else { return nil }
         return await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current().getNotificationSettings { settings in

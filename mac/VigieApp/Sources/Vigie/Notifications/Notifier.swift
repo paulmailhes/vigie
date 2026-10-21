@@ -62,7 +62,8 @@ final class Notifier {
     private var liveKeys: Set<String> = []
     private let relay = NotificationRelay()
 
-    /// Autorisation demandée au premier lancement ; le système ne redemande pas ensuite.
+    /// Autorisation demandée par la dernière étape de l'accueil (ici seulement si l'accueil est déjà fait) ; le
+    /// système ne redemande pas ensuite.
     func start(store: VigieStore) {
         guard !store.isDemo, !LaunchOptions.current.isSnapshot,
               Bundle.main.bundleIdentifier != nil, Bundle.main.bundlePath.hasSuffix(".app") else { return }
@@ -70,7 +71,9 @@ final class Notifier {
         seen = (UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Double]) ?? [:]
         let center = UNUserNotificationCenter.current()
         center.delegate = relay
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if UserDefaults.standard.bool(forKey: OnboardingView.doneKey) {
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     /// Après chaque lecture de la vue d'ensemble : notifie ce qui est nouveau.

@@ -16,7 +16,7 @@ struct RootView: View {
                         SetupBanner(setup: store.setup) { Task { await store.runSetup() } }
                             .padding(.top, 10)
                             .transition(.move(edge: .top).combined(with: .opacity))
-                    } else if showBanner {
+                    } else if showBanner && !store.showOnboarding {
                         EngineBanner(connection: store.connection, restarting: store.restarting) {
                             store.restartEngine()
                         }
@@ -25,7 +25,8 @@ struct RootView: View {
                     }
                 }
                 .overlay(alignment: .bottom) {
-                    if let toast = store.toast {
+                    // derrière l'accueil, rien ne s'affiche : il dit lui-même où en est l'installation
+                    if let toast = store.toast, !store.showOnboarding {
                         ToastView(toast: toast) { store.dismissToast($0) }
                             .padding(.bottom, 16)
                             .padding(.horizontal, 24)

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UserNotifications
 
@@ -63,6 +64,8 @@ struct OnboardingView: View {
         }
         .frame(width: 600, height: 600)
         .task {
+            // première ouverture : le moteur s'installe encore (jusqu'à une minute), on lit dès qu'il répond
+            await store.waitForEngine()
             await store.refreshAccounts()
             await store.refreshTools()
             if !choiceLoaded, let tools = store.tools {
@@ -88,7 +91,7 @@ struct OnboardingView: View {
                 (\ToolsChoice.codexVSCode, "Dans VS Code", "L'extension Codex", store.tools?.detected?.codexVSCode == true),
                 (\ToolsChoice.codexApp, "Dans l'app ChatGPT", "Codex dans l'app de bureau", store.tools?.detected?.codexApp == true),
             ])
-            Text("Tu peux en cocher plusieurs : Vigie suit tes conversations où qu'elles soient.")
+            Text("Tu peux en cocher plusieurs, même les deux pour un outil : Vigie suit tes conversations où qu'elles soient, et « Ouvrir » ramène chacune dans l'app où elle tourne.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -167,6 +170,9 @@ struct OnboardingView: View {
                       "Suppressions, sudo, git push forcé, paiements, e-mails, réglages : ça attend toujours ton accord.")
                 point("square.grid.2x2", "Il te montre où en est chaque conversation",
                       "Ce qu'elle fait, sur quel compte, ce qu'elle consomme, ses MCP, et ce qui t'attend.")
+                point(Icon.mcp, "Il centralise tes MCP",
+                      "Connectés une seule fois, ils marchent sur tous tes comptes Claude.",
+                      note: "(amélioré pour Webflow : plusieurs espaces de travail, tu passes de l'un à l'autre)")
             }
             Text("Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.")
                 .font(.callout)
@@ -217,19 +223,8 @@ struct OnboardingView: View {
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             Button("Ajouter un compte Claude", systemImage: "plus") { showAdd = true }
                 .glassButton()
-            // VS Code seulement : c'est ce lanceur qui choisit le compte de chaque conversation et coupe les MCP du
-            // compte (même avec un seul compte). L'app Claude, elle, utilise le compte connecté dans l'app.
-            if choice.claudeVSCode {
-                Toggle(isOn: wrapperBinding) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Choisir le compte de chaque conversation (VS Code)")
-                        Text("Vigie démarre tes conversations Claude dans VS Code avec le compte que tu choisis pour chacune. Recommandé, même avec un seul compte.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-            }
+            // VS Code : le choix du compte de chaque conversation est toujours actif (le moteur l'active dès que
+            // VS Code est choisi). L'app Claude, elle, utilise le compte connecté dans l'app.
             if choice.claudeApp {
                 Text("Dans l'app Claude, la conversation utilise le compte connecté dans l'app.")
                     .font(.callout)
@@ -237,11 +232,6 @@ struct OnboardingView: View {
             }
         }
         .sheet(isPresented: $showAdd) { OnboardingAddAccountSheet() }
-    }
-
-    private var wrapperActive: Bool { store.accountsState?.wrapper?.active == true }
-    private var wrapperBinding: Binding<Bool> {
-        Binding(get: { wrapperActive }, set: { on in Task { await store.setWrapper(on) } })
     }
 
     // MARK: 4. MCP
@@ -261,33 +251,22 @@ struct OnboardingView: View {
                 mcpFamily("folder", "MCP des projets", mcp.map { _ in Fmt.count(projectCount, "MCP", "MCP") },
                           "Seulement quand Claude travaille dans le dossier du projet (fichier .mcp.json).")
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    mcpFamily("person.crop.circle", "MCP du compte (claude.ai)", mcp.map { Fmt.count($0.connectors.count, "MCP", "MCP") },
-                              "Branchés à ton compte sur claude.ai (Gmail, Drive…), partagés par toutes ses conversations.")
+                mcpFamily("person.crop.circle", "MCP du compte (claude.ai)", mcp.map { Fmt.count($0.connectors.count, "MCP", "MCP") },
+                          "Branchés à ton compte sur claude.ai (Gmail, Drive…).") {
+                    // dans la ligne du compte : c'est bien eux qu'on allume ou qu'on coupe
                     Toggle(isOn: $store.connectorsDefaultOn) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Les activer dans les nouvelles conversations")
-                            Text("Coupés, ils n'encombrent pas Claude ; tu peux les allumer pour une conversation précise.")
+                            Text("Activés dans les nouvelles conversations")
+                            Text("Désactivés de base : ils arrivent dans toutes les conversations du compte, et sur un compte partagé ce sont aussi ceux des autres. Tu peux les allumer pour une conversation précise.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .toggleStyle(.switch)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, wrapperActive || !choice.claudeVSCode ? 10 : 4)
-                    // Sans le lanceur, Claude Code charge toujours les MCP du compte : on le dit, et on propose de l'activer.
-                    if choice.claudeVSCode && !wrapperActive && !store.connectorsDefaultOn {
-                        HStack(spacing: 8) {
-                            Label("Pour les couper, Vigie doit lancer tes conversations.", systemImage: "exclamationmark.triangle")
-                                .font(.callout)
-                                .foregroundStyle(Theme.warn)
-                            Spacer()
-                            Button("L'activer") { wrapperBinding.wrappedValue = true }
-                                .glassButton(.primary)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 10)
-                    }
+                    .padding(10)
+                    .background(.quinary, in: .rect(cornerRadius: 8))
+                    .padding(.top, 8)
                 }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
@@ -304,6 +283,11 @@ struct OnboardingView: View {
     }
 
     private func mcpFamily(_ symbol: String, _ title: String, _ count: String?, _ text: String) -> some View {
+        mcpFamily(symbol, title, count, text) { EmptyView() }
+    }
+
+    private func mcpFamily<Extra: View>(_ symbol: String, _ title: String, _ count: String?, _ text: String,
+                                        @ViewBuilder extra: () -> Extra) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
                 .font(.title3)
@@ -319,6 +303,7 @@ struct OnboardingView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                extra()
             }
         }
         .padding(12)
@@ -326,7 +311,13 @@ struct OnboardingView: View {
 
     // MARK: 5. C'est parti
 
-    @State private var notificationsAsked = false
+    /// État de l'autorisation des notifications : « Commencer » attend qu'elles soient autorisées.
+    @State private var notifications: UNAuthorizationStatus?
+    @State private var defaultsApplied = false
+    private var notificationsAllowed: Bool {
+        notifications == .authorized || notifications == .provisional
+            || !Bundle.main.bundlePath.hasSuffix(".app") // lancée hors de son app (développement) : rien à demander
+    }
 
     private var ready: some View {
         @Bindable var store = store
@@ -352,19 +343,49 @@ struct OnboardingView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(notificationsAsked ? "Demandé" : "Autoriser") {
-                        notificationsAsked = true
-                        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                    switch notifications {
+                    case .authorized, .provisional:
+                        Label("Autorisées", systemImage: "checkmark")
+                            .foregroundStyle(.secondary)
+                    case .denied:
+                        Button("Ouvrir Réglages Système") {
+                            SystemActions.open("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+                        }
+                        .glassButton(.primary)
+                    default:
+                        AsyncButton("Autoriser") {
+                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+                            notifications = await NotificationSettingsView.authorization()
+                        }
+                        .glassButton(.primary)
                     }
-                    .glassButton()
-                    .disabled(notificationsAsked)
                 }
                 .padding(12)
+                if notifications == .denied {
+                    Label("macOS les a refusées pour Vigie : dans Réglages Système › Notifications › Vigie, active « Autoriser les notifications », puis reviens ici.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(Theme.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding([.horizontal, .bottom], 12)
+                }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             Text("Vigie vit dans la barre des menus (les jumelles). Ferme cette fenêtre quand tu veux : il continue de veiller.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+        .task {
+            notifications = await NotificationSettingsView.authorization()
+            // Première fois : l'auto-accept et les réponses en ton absence sont cochés d'office (décochables ici).
+            guard !done, !defaultsApplied, !store.isDemo else { return }
+            defaultsApplied = true
+            if !store.autoAccept { store.autoAccept = true }
+            if !store.questionsAuto { store.questionsAuto = true }
+        }
+        // retour de Réglages Système : l'autorisation a peut-être changé
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { notifications = await NotificationSettingsView.authorization() }
         }
     }
 
@@ -379,6 +400,24 @@ struct OnboardingView: View {
                         .frame(width: 7, height: 7)
                 }
             }
+            // première ouverture : le moteur s'installe pendant qu'on lit l'accueil
+            switch store.setup {
+            case .installing:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Installation de Vigie…")
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 10)
+            case .failed:
+                AsyncButton("Installation non aboutie : réessayer", systemImage: "exclamationmark.triangle") { await store.runSetup() }
+                    .glassButton()
+                    .foregroundStyle(Theme.warn)
+                    .padding(.leading, 10)
+            case .idle:
+                EmptyView()
+            }
             Spacer()
             if step > 0 {
                 Button("Retour") { withAnimation(.smooth) { step -= 1 } }
@@ -392,7 +431,13 @@ struct OnboardingView: View {
                 .help("Codex ne sera pas surveillé tant que ce n'est pas fait")
             }
             Button(step == steps.count - 1 ? "Commencer" : "Continuer") {
-                if current == .tools { Task { await store.saveTools(choice) } }
+                if current == .tools {
+                    let chosen = choice
+                    Task {
+                        await store.waitForEngine()
+                        await store.saveTools(chosen)
+                    }
+                }
                 if step == steps.count - 1 {
                     done = true
                     dismiss()
@@ -402,8 +447,11 @@ struct OnboardingView: View {
             }
             .keyboardShortcut(.defaultAction)
             .glassButton(.primary)
-            // Codex : on n'avance qu'une fois connecté et ses hooks approuvés (ou par « Plus tard »)
-            .disabled((current == .codex && !codexReady) || (current == .tools && !choice.any))
+            // Codex : on n'avance qu'une fois connecté et ses hooks approuvés (ou par « Plus tard ») ;
+            // « Commencer » attend les notifications (sans elles, une action sensible attendrait sans prévenir)
+            .disabled((current == .codex && !codexReady) || (current == .tools && !choice.any)
+                      || (current == .ready && !notificationsAllowed && !store.isDemo))
+            .help(current == .ready && !notificationsAllowed ? "Autorise d'abord les notifications" : "")
         }
         .controlSize(.large)
     }
@@ -422,7 +470,7 @@ struct OnboardingView: View {
         }
     }
 
-    private func point(_ symbol: String, _ title: String, _ text: String) -> some View {
+    private func point(_ symbol: String, _ title: String, _ text: String, note: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol)
                 .font(.title2)
@@ -433,6 +481,12 @@ struct OnboardingView: View {
                 Text(text)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

@@ -34,7 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             EngineBootstrap.askToMoveAndQuit()
             return
         }
-        if EngineBootstrap.needed { Task { await store.runSetup() } }
+        if EngineBootstrap.needed {
+            store.setup = .installing // tout de suite : pas d'alerte « moteur arrêté » avant que l'installation démarre
+            Task { await store.runSetup() }
+        }
         EngineBootstrap.registerLoginItem()
         Notifier.shared.start(store: store)
         store.start()

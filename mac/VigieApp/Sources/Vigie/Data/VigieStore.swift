@@ -60,6 +60,15 @@ final class VigieStore {
     enum Setup: Equatable { case idle, installing, failed(String) }
     var setup: Setup = .idle
 
+    /// Attend que le moteur réponde (première installation en cours), au plus `seconds`.
+    func waitForEngine(seconds: Int = 120) async {
+        guard !isDemo else { return }
+        for _ in 0..<(seconds * 2) {
+            if setup == .idle && connection == .ok { return }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
     func runSetup() async {
         setup = .installing
         if let error = await EngineBootstrap.install() {

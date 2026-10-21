@@ -46,51 +46,6 @@ struct AddAccountSheet: View {
     }
 }
 
-/// Explication courte avant d'activer le lanceur dans VS Code.
-struct WrapperExplainSheet: View {
-    @Environment(VigieStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: "person.2.crop.square.stack")
-                Text("Choisir le compte par conversation").font(.title3.bold())
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                point("chevron.left.forwardslash.chevron.right", "VS Code lance Claude par Vigie.")
-                point("person.crop.circle.badge.checkmark", "Chaque conversation garde son compte.")
-                point("arrow.uturn.backward.circle", "Tes réglages VS Code sont sauvegardés. Tu peux désactiver à tout moment.")
-            }
-            HStack {
-                Spacer()
-                Button("Annuler") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .glassButton()
-                Button("Activer") {
-                    Task { await store.setWrapper(true) }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .glassButton(.primary)
-            }
-            .controlSize(.large)
-        }
-        .padding(24)
-        .frame(width: 460)
-    }
-
-    private func point(_ symbol: String, _ text: String) -> some View {
-        Label {
-            Text(text).fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: symbol)
-                .foregroundStyle(.secondary)
-                .frame(width: 22)
-        }
-    }
-}
-
 /// Grande icône monochrome en tête d'une feuille.
 struct SheetIcon: View {
     let symbol: String

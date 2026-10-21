@@ -6,7 +6,6 @@ struct AccountsView: View {
     let highlight: String?
 
     @State private var showAddAccount = false
-    @State private var showWrapperExplain = false
 
     var body: some View {
         @Bindable var store = store
@@ -33,15 +32,16 @@ struct AccountsView: View {
                             }
                             .pickerStyle(.menu)
 
-                            Toggle(isOn: wrapperToggle) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Un compte par conversation dans VS Code")
-                                    Text(wrapperActive ? "Chaque conversation garde son compte" : "Désactivé : VS Code utilise le compte principal")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            // Toujours actif (le moteur s'en charge) : on ne le montre que s'il n'a pas pu l'être.
+                            if !wrapperActive && store.tools?.chosen?.claudeVSCode != false && store.engineInfo != nil {
+                                HStack {
+                                    Label("VS Code ne choisit pas encore le compte de chaque conversation", systemImage: "exclamationmark.triangle")
+                                        .foregroundStyle(Theme.warn)
+                                    Spacer()
+                                    AsyncButton("Réparer") { await store.setWrapper(true) }
+                                        .glassButton()
                                 }
                             }
-                            .toggleStyle(.switch)
                         }
                     }
                     .pageForm()
@@ -63,7 +63,6 @@ struct AccountsView: View {
             }
         }
         .sheet(isPresented: $showAddAccount) { AddAccountSheet() }
-        .sheet(isPresented: $showWrapperExplain) { WrapperExplainSheet() }
         .task { await store.followAccounts() }
     }
 
@@ -73,19 +72,6 @@ struct AccountsView: View {
 
     private var wrapperActive: Bool {
         store.accountsState?.wrapper?.active ?? store.engineInfo?.wrapperActive ?? false
-    }
-
-    /// Activer passe d'abord par une courte explication ; désactiver est immédiat.
-    private var wrapperToggle: Binding<Bool> {
-        Binding {
-            wrapperActive
-        } set: { enable in
-            if enable {
-                showWrapperExplain = true
-            } else {
-                Task { await store.setWrapper(false) }
-            }
-        }
     }
 
     private var subtitle: String {

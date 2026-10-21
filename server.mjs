@@ -989,6 +989,7 @@ function postSettings(body) {
     const keys = ['claudeVSCode', 'claudeApp', 'codexVSCode', 'codexApp'];
     if (!isObj(t) || !keys.every((k) => typeof t[k] === 'boolean')) return bad('Outils illisibles.');
     s.tools = Object.fromEntries(keys.map((k) => [k, t[k]]));
+    if (s.tools.claudeVSCode) setImmediate(ensureWrapper);
   }
   if ('guard' in body) {
     const g = body.guard;
@@ -1565,8 +1566,20 @@ function updateTick() {
   try { busy = pendingWaits(state).size > 0; } catch { /* prudence : on attend */ }
   updater.tick({ auto: state.autoUpdate, busy }).catch((e) => console.error('[vigie] mise à jour :', clean(e)));
 }
+// Choix du compte de chaque conversation dans VS Code : toujours actif, sans réglage à montrer, dès que VS Code est
+// sur le Mac et que l'utilisateur s'en sert (outils de l'accueil). Le lanceur d'un autre outil n'est jamais remplacé.
+function ensureWrapper() {
+  if (process.env.VIGIE_NO_WRAPPER_AUTO) return;
+  const tools = readState().tools;
+  if (tools && !tools.claudeVSCode) return;
+  if (!fs.existsSync(path.dirname(accounts.paths.vscodeSettingsPath)) || accounts.wrapperActive()) return;
+  const r = accounts.wrapper(true);
+  console.error(r.ok ? '[vigie] choix du compte de chaque conversation activé dans VS Code' : `[vigie] choix du compte dans VS Code : ${r.error}`);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`[vigie] http://${HOST}:${server.address().port}`);
+  ensureWrapper();
   tick();
   setInterval(tick, 4000);
   setTimeout(updateTick, 60_000);
