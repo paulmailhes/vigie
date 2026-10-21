@@ -6,10 +6,11 @@
 // attendre N minutes puis répondre = « je te laisse la main, sinon je décide ».
 // Si l'utilisateur répond lui-même, Claude Code tue le hook (SIGTERM) : on note l'interruption, sans répondre.
 // L'utilisateur peut aussi décider d'une action sensible depuis l'app Vigie (data/decisions.json, lib/decisions.mjs).
-// Mode « seulement par Vigie » (guard.mode = 'vigie', par défaut) : PreToolUse retient l'action sensible AVANT
-// toute fenêtre de validation, le temps que l'utilisateur l'autorise dans Vigie (guard.waitMin minutes) : elle part alors
-// dans sa conversation. Sans réponse : refus, la conversation continue le reste ; une autorisation donnée plus
-// tard vaut pour la relance à l'identique (data/approvals.json, lib/approvals.mjs).
+// Action sensible : PreToolUse fait afficher la fenêtre de validation dans la conversation (même en mode auto), et
+// PermissionRequest attend en parallèle la décision prise dans Vigie : la première réponse gagne, l'autre se ferme.
+// Sans réponse en guard.waitMin minutes : refus, la conversation continue le reste.
+// Codex ne sait pas afficher sa fenêtre à la demande : son action sensible attend dans Vigie (holdForVigie,
+// data/approvals.json, lib/approvals.mjs).
 // Toute erreur => on ne répond rien => la fenêtre normale s'affiche. Jamais l'inverse.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -339,25 +340,10 @@ function denyOutput(rule, why) {
 
 const ALLOW = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
 
-// Mode « seulement par Vigie » : refus immédiat, la conversation continue le reste du travail.
-function vigieDenyOutput(rule) {
-  return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: {
-    behavior: 'deny',
-    message: `Action sensible en attente de l'accord de l'utilisateur dans Vigie (garde-fou : « ${rule.label} »). ` +
-      'Ne la relance pas tant que l\'utilisateur ne te l\'a pas confirmé ; continue le reste du travail. ' +
-      'Quand il l\'aura autorisée, il te le dira : relance-la alors exactement à l\'identique.',
-  } } };
-}
-
-// Autorisation à usage unique de l'utilisateur pour cet appel exact (même conversation, même outil, mêmes paramètres,
-// non expirée) : consommée, l'action passe. Sinon : refus tout de suite et un élément « à autoriser » dans Vigie
-// (approvalId, empreinte de l'appel, action complète). Agents de fond compris.
-async function onVigieGuard(input, rule) {
-  const hash = callHash(input.session_id, input.tool_name, input.tool_input);
-  const ok = takeApproval({ sessionId: input.session_id, tool: input.tool_name, hash });
-  if (ok) return decide(input, 'garde-fou-autorise-vigie', ALLOW, { ...ruleInfo(rule), approvalId: ok.approvalId, hash });
-  return decide(input, 'garde-fou-en-attente-vigie', vigieDenyOutput(rule), { ...ruleInfo(rule), approvalId: newApprovalId(), hash });
-}
+// Refus faute de réponse dans Vigie (Codex) : la conversation continue le reste du travail.
+const vigieWaitMessage = (rule) => `Action sensible en attente de l'accord de l'utilisateur dans Vigie (garde-fou : « ${rule.label} »). ` +
+  'Ne la relance pas tant que l\'utilisateur ne te l\'a pas confirmé ; continue le reste du travail. ' +
+  'Quand il l\'aura autorisée, il te le dira : relance-la alors exactement à l\'identique.';
 
 async function decide(input, event, out, extra = {}) {
   onKill = null;
@@ -389,7 +375,6 @@ async function onPermissionRequest(input) {
     let rule = matchGuard(state, tool, input.tool_input);
     if (!rule) return decide(input, 'auto-accepte', ALLOW, late ? { tardif: true } : {});
     guarded = true;
-    if (state.guard.mode !== 'vscode') return onVigieGuard(input, rule);
 
     let minutes = state.guard.waitMin;
     if (minutes <= 0 || input.agent_id) {
@@ -435,9 +420,8 @@ async function onPermissionRequest(input) {
 const preOutput = (permissionDecision, permissionDecisionReason) =>
   ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason } });
 
-// « Seulement par Vigie », avant toute fenêtre : l'action attend l'accord de l'utilisateur dans l'app (aucune fenêtre
-// VS Code n'est affichée pendant ce temps, rien à cliquer par erreur). Autorisée : elle part dans sa
-// conversation. Refusée, ou sans réponse dans le délai : refus, la conversation continue le reste du travail.
+// Action sensible : Claude Code affiche sa fenêtre (même en mode auto, qui l'aurait validée seul) ;
+// PermissionRequest attend alors en parallèle la décision prise dans Vigie.
 async function onPreToolUseGuard(input) {
   const state = readState();
   const sid = input.session_id;
@@ -445,12 +429,7 @@ async function onPreToolUseGuard(input) {
   const tool = input.tool_name;
   const rule = matchGuard(state, tool, input.tool_input);
   if (!rule || readOnlyShell(tool, input.tool_input)) return;
-  // « Dans la conversation et dans Vigie » : Claude Code affiche sa fenêtre (même en mode auto, qui l'aurait
-  // validée seul) ; PermissionRequest attend alors en parallèle la décision prise dans Vigie.
-  if (state.guard.mode === 'vscode') {
-    return reply(preOutput('ask', `Action sensible (garde-fou Vigie : « ${rule.label} ») : à valider par l'utilisateur, ici ou dans Vigie.`));
-  }
-  return holdForVigie(input, rule, state, 'PreToolUse');
+  return reply(preOutput('ask', `Action sensible (garde-fou Vigie : « ${rule.label} ») : à valider par l'utilisateur, ici ou dans Vigie.`));
 }
 
 // Réponses selon l'événement : PreToolUse (permissionDecision) ou PermissionRequest (decision.behavior).
@@ -475,7 +454,7 @@ async function holdForVigie(input, rule, state, event) {
   if (ok) return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId: ok.approvalId });
   const approvalId = newApprovalId();
   const minutes = state.guard.waitMin;
-  if (minutes <= 0) return decide(input, 'garde-fou-en-attente-vigie', preOutput('deny', vigieDenyOutput(rule).hookSpecificOutput.decision.message), { ...info, approvalId });
+  if (minutes <= 0) return decide(input, 'garde-fou-en-attente-vigie', preOutput('deny', vigieWaitMessage(rule)), { ...info, approvalId });
   const start = Date.now();
   log(input, 'garde-fou-en-attente-vigie', { ...info, approvalId, holdUntil: new Date(start + minutes * 60_000).toISOString() });
   onKill = () => log(input, 'garde-fou-vigie-clos', { ...info, approvalId, raison: 'interrompue' });
@@ -490,7 +469,7 @@ async function holdForVigie(input, rule, state, event) {
     return decide(input, 'garde-fou-refuse-vigie', preOutput('deny', `L'utilisateur a refusé cette action dans Vigie (garde-fou : « ${rule.label} »). ` +
       'Ne la retente pas et ne cherche pas à la contourner : continue le reste du travail et signale-la dans ton compte rendu.'), { ...info, approvalId });
   }
-  if (r === 'timeout') return decide(input, 'garde-fou-delai-vigie', preOutput('deny', vigieDenyOutput(rule).hookSpecificOutput.decision.message), { ...info, approvalId });
+  if (r === 'timeout') return decide(input, 'garde-fou-delai-vigie', preOutput('deny', vigieWaitMessage(rule)), { ...info, approvalId });
   onKill = null;
   // garde-fou coupé pendant l'attente : rien à décider ici, Claude Code suit son cours (PermissionRequest)
   log(input, 'garde-fou-vigie-clos', { ...info, approvalId, raison: r });
@@ -498,7 +477,7 @@ async function holdForVigie(input, rule, state, event) {
 
 // ---------- Codex (OpenAI) : hooks au même format, branchés dans ~/.codex/hooks.json avec --codex ----------
 // Son hook passe AVANT sa fenêtre d'autorisation : une action sensible peut attendre l'accord dans Vigie sans
-// fenêtre en parallèle. Les actions sensibles sont retenues dès PreToolUse, quel que soit le mode : Codex lance
+// fenêtre en parallèle. Les actions sensibles sont retenues dès PreToolUse : Codex lance
 // sans rien demander ce qui tient dans son bac à sable (un sudo, un rm dans le projet…). Une autorisation donnée
 // en PreToolUse vaut aussi pour le PermissionRequest du même appel (lib/approvals.mjs).
 async function onCodex(input) {
@@ -515,13 +494,12 @@ async function onCodex(input) {
   const rule = matchGuard(state, tool, input.tool_input);
   if (ev === 'PreToolUse') {
     if (!rule || readOnlyShell(tool, input.tool_input)) return;
-    // Codex ne sait pas afficher sa fenêtre à la demande : l'action attend dans Vigie, quel que soit le mode
+    // Codex ne sait pas afficher sa fenêtre à la demande : l'action attend dans Vigie
     return holdForVigie(input, rule, state, 'PreToolUse');
   }
   if (ev !== 'PermissionRequest') return;
   if (!rule) return decide(input, 'auto-accepte', ALLOW);
-  guarded = true;
-  if (state.guard.mode === 'vscode') return log(input, 'garde-fou-pour-toi', ruleInfo(rule)); // la fenêtre de Codex s'en charge
+  // déjà autorisée en PreToolUse : acceptée une fois de plus (lib/approvals.mjs) ; sinon elle attend dans Vigie
   return holdForVigie(input, rule, state, 'PermissionRequest');
 }
 

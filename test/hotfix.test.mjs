@@ -103,7 +103,7 @@ test('outils qui exigent un geste humain : laissés à l\'utilisateur', () => {
   assert.equal(perm('OfferChromeSetup', {}), 'prompt');
 });
 
-// ---------- attentes (conversation VS Code simulée, ancien mode guard.mode = 'vscode') ----------
+// ---------- attentes (conversation VS Code simulée) ----------
 function vscodeSession() {
   fs.writeFileSync(path.join(HOME, '.claude', 'sessions', '1.json'), JSON.stringify({ pid: 1, sessionId: 'test-session', entrypoint: 'claude-vscode' }));
 }
@@ -112,7 +112,7 @@ const events = () => fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').ma
 test('garde-fou en attente puis refus à l\'échéance', () => {
   vscodeSession();
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0.05 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0.05 } });
   const out = run({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } }, { HOME });
   assert.equal(behavior(out), 'deny');
   assert.deepEqual(events(), ['garde-fou-attente', 'garde-fou-bloque']);
@@ -144,7 +144,7 @@ test('une ligne de résultat d\'un autre outil ne met pas fin à l\'attente', ()
 test('L\'utilisateur répond lui-même pendant l\'attente : l\'interruption est notée', () => {
   vscodeSession();
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME } });
   p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'Bash', tool_input: { command: 'sudo ls' }, transcript_path: '/nonexistent' }));
   setTimeout(() => p.kill('SIGTERM'), 1500);
@@ -153,12 +153,12 @@ test('L\'utilisateur répond lui-même pendant l\'attente : l\'interruption est 
 
 test('garde-fou coupé pendant l\'attente : accepté tout de suite', () => {
   vscodeSession();
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME } });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
   p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'Bash', tool_input: { command: 'sudo ls' }, transcript_path: '/nonexistent' }));
-  setTimeout(() => setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', enabled: false, waitMin: 5 } }), 1000);
+  setTimeout(() => setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, enabled: false, waitMin: 5 } }), 1000);
   return new Promise((resolve) => p.on('exit', () => { assert.equal(JSON.parse(out).hookSpecificOutput.decision.behavior, 'allow'); resolve(); }));
 });
 
@@ -188,7 +188,7 @@ test('réglages de Claude Code, de Vigie et du shell : jamais validés à ta pla
 test('L\'utilisateur valide dans VS Code pendant l\'attente : noté avec le résultat réel, pas de faux refus', () => {
   vscodeSession();
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const tp = path.join(TMP, 'tr-valide.jsonl');
   const cmd = 'git push -q origin --delete preversion-x';
   fs.writeFileSync(tp, JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_X', name: 'Bash', input: { command: cmd } }] } }) + '\n');
@@ -209,7 +209,7 @@ test('L\'utilisateur valide dans VS Code pendant l\'attente : noté avec le rés
 test('transcript énorme qui grossit vite : la réponse de l\'utilisateur est vue même après 3 Mo écrits entre-temps', () => {
   vscodeSession();
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const tp = path.join(TMP, 'tr-gros.jsonl');
   const cmd = 'git push -q origin --delete preversion-y';
   const filler = (n) => Array.from({ length: n }, (_, i) => JSON.stringify({ type: 'system', i, pad: 'x'.repeat(10_000) })).join('\n') + '\n';
@@ -228,24 +228,30 @@ test('transcript énorme qui grossit vite : la réponse de l\'utilisateur est vu
   }));
 });
 
-// ---------- garde-fous « seulement par Vigie » (guard.mode = 'vigie', par défaut) ----------
+// ---------- garde-fous retenus dans Vigie (Codex : il ne sait pas afficher sa fenêtre à la demande) ----------
 const { approve, awaitingApprovals, APPROVALS_FILE } = await import('../lib/approvals.mjs');
 assert.ok(APPROVALS_FILE.startsWith(TMP));
 const hist = () => fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+const CODEX_ARGS = [HOOK, '--vigie', '--codex'];
+function codexRun(input) {
+  const r = spawnSync(process.execPath, CODEX_ARGS, { input: JSON.stringify({ session_id: 'test-session', cwd: '/tmp', ...input }), encoding: 'utf8', timeout: 20000, env: { ...env, HOME } });
+  return r.stdout ? JSON.parse(r.stdout) : null;
+}
 function vigieRun(command, extra = {}) {
   const t0 = Date.now();
-  const out = run({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command }, ...extra }, { HOME });
+  const out = codexRun({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command }, ...extra });
   return { out, ms: Date.now() - t0, last: hist().at(-1) };
 }
-function freshVigie() {
-  vscodeSession(); // même dans une conversation VS Code : plus de fenêtre pour les actions sensibles
+const setGuard = (waitMin) => setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin } });
+// waitMin 0 : refus tout de suite, à autoriser dans Vigie pour la relance ; 10 : l'action attend la décision
+function freshVigie(waitMin = 0) {
   fs.rmSync(HISTORY_FILE, { force: true });
   fs.rmSync(APPROVALS_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie' } }); // seulement par Vigie, délai de 10 min
+  setGuard(waitMin);
 }
 
-test('mode vigie : action sensible refusée tout de suite, à autoriser dans Vigie (agents compris)', () => {
-  assert.equal(DEFAULT_STATE.guard.mode, 'vscode', 'par défaut : dans la conversation et dans Vigie');
+test('Codex : action sensible sans attente refusée tout de suite, à autoriser dans Vigie (agents compris)', () => {
+  assert.equal('mode' in DEFAULT_STATE.guard, false, 'plus de réglage : toujours dans la conversation et dans Vigie');
   freshVigie();
   const long = `sudo bash -c 'echo ${'x'.repeat(5000)}'`;
   const r = vigieRun(long);
@@ -276,7 +282,7 @@ test('mode vigie : action sensible refusée tout de suite, à autoriser dans Vig
   assert.equal(behavior(vigieRun('sudo ls').out), 'prompt');
 });
 
-test('mode vigie : autorisation à usage unique, consommée une seule fois', () => {
+test('Codex : autorisation à usage unique, consommée une seule fois', () => {
   freshVigie();
   const first = vigieRun('sudo ls /var');
   assert.equal(behavior(first.out), 'deny');
@@ -296,13 +302,13 @@ test('mode vigie : autorisation à usage unique, consommée une seule fois', () 
   assert.equal(third.last.event, 'garde-fou-en-attente-vigie');
 });
 
-test('mode vigie : commande différente, autre conversation ou autorisation expirée : refusées', () => {
+test('Codex : commande différente, autre conversation ou autorisation expirée : refusées', () => {
   freshVigie();
   const first = vigieRun('sudo ls /etc');
   assert.equal(approve(first.last.approvalId, 'allow', { history: hist() }).ok, true);
   assert.equal(behavior(vigieRun('sudo ls /etc ').out), 'deny', 'commande différente');
   assert.equal(behavior(vigieRun('sudo ls /etc', { session_id: 'autre-session' }).out), 'deny', 'autre conversation');
-  assert.equal(behavior(run({ hook_event_name: 'PermissionRequest', tool_name: 'Monitor', tool_input: { command: 'sudo ls /etc' } }, { HOME })), 'deny', 'autre outil');
+  assert.equal(behavior(codexRun({ hook_event_name: 'PermissionRequest', tool_name: 'Monitor', tool_input: { command: 'sudo ls /etc' } })), 'deny', 'autre outil');
   const m = JSON.parse(fs.readFileSync(APPROVALS_FILE, 'utf8'));
   assert.ok(m[first.last.approvalId], 'ces essais n\'ont pas consommé l\'autorisation');
   m[first.last.approvalId].expiresAt = new Date(Date.now() - 1000).toISOString();
@@ -312,7 +318,7 @@ test('mode vigie : commande différente, autre conversation ou autorisation expi
   assert.equal(late.last.event, 'garde-fou-en-attente-vigie');
 });
 
-test('mode vigie : L\'utilisateur refuse, l\'élément sort de la liste et rien ne passe', () => {
+test('Codex : l\'utilisateur refuse, l\'élément sort de la liste et rien ne passe', () => {
   freshVigie();
   const first = vigieRun('git push -f origin main');
   assert.equal(approve(first.last.approvalId, 'peut-être', { history: hist() }).status, 400);
@@ -323,21 +329,31 @@ test('mode vigie : L\'utilisateur refuse, l\'élément sort de la liste et rien 
   assert.equal(behavior(vigieRun('git push -f origin main').out), 'deny');
 });
 
-test('mode vigie : approvals.json ne s\'écrit pas sans l\'utilisateur', () => {
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie' } });
+test('approvals.json ne s\'écrit pas sans l\'utilisateur', () => {
+  setGuard(0);
   assert.equal(perm('Write', { file_path: '/Users/alex/Code/auto-accept/data/approvals.json', content: '{}' }), 'deny');
   assert.equal(bash(`node -e "require('fs').writeFileSync('approvals.json', '{}')"`), 'deny');
   assert.equal(bash('curl -s -X POST -H "X-Vigie: 1" http://127.0.0.1:4777/api/v2/approvals -d \'{"approvalId":"0123456789abcdef"}\''), 'deny');
   assert.equal(bash('cat data/approvals.json'), 'allow');
 });
 
-// « Seulement par Vigie » avant toute fenêtre : PreToolUse retient l'action le temps que l'utilisateur décide dans l'app.
+test('Claude Code : action sensible, la fenêtre s\'affiche dans la conversation (même en mode auto), sans attendre', () => {
+  freshVigie(10);
+  const t0 = Date.now();
+  const o = run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'sudo -n true' }, permission_mode: 'auto' }, { HOME });
+  assert.ok(Date.now() - t0 < 5000);
+  assert.equal(o.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(o.hookSpecificOutput.permissionDecisionReason, /ici ou dans Vigie/);
+  assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' } }, { HOME }), null, 'action ordinaire : rien');
+});
+
+// Codex, avant toute fenêtre : PreToolUse retient l'action le temps que l'utilisateur décide dans l'app.
 function preHold(command, act) {
-  freshVigie();
-  const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME, VIGIE_POLL_MS: '100' } });
+  freshVigie(10);
+  const p = spawn(process.execPath, CODEX_ARGS, { env: { ...env, HOME, VIGIE_POLL_MS: '100' } });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
-  p.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'test-session', cwd: '/tmp', tool_name: 'Bash', tool_input: { command }, transcript_path: '/nonexistent' }));
+  p.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'test-session', cwd: '/tmp', tool_name: 'Bash', tool_input: { command } }));
   let holding = null;
   const t = setInterval(() => {
     let items = [];
@@ -355,34 +371,36 @@ function preHold(command, act) {
   }));
 }
 
-test('seulement par Vigie : l\'action attend, l\'utilisateur l\'autorise dans l\'app, elle part dans sa conversation', async () => {
+test('Codex : l\'action attend, l\'utilisateur l\'autorise dans l\'app, elle part dans sa conversation', async () => {
   const o = await preHold('git push --force origin main', (it) => assert.equal(approve(it.approvalId, 'allow', { history: hist() }).ok, true));
   assert.equal(o.permissionDecision, 'allow');
   assert.equal(hist().at(-1).event, 'garde-fou-autorise-vigie');
   assert.deepEqual(awaitingApprovals({ history: hist() }), [], 'plus rien à autoriser');
 });
 
-test('seulement par Vigie : L\'utilisateur refuse pendant l\'attente', async () => {
+test('Codex : l\'utilisateur refuse pendant l\'attente', async () => {
   const o = await preHold('sudo ls /var', (it) => approve(it.approvalId, 'deny', { history: hist() }));
   assert.equal(o.permissionDecision, 'deny');
   assert.match(o.permissionDecisionReason, /^L'utilisateur a refusé cette action dans Vigie/);
   assert.equal(hist().at(-1).event, 'garde-fou-refuse-vigie');
 });
 
-test('seulement par Vigie : une lecture qui cite un mot sensible n\'est pas retenue', () => {
-  freshVigie();
+test('une lecture qui cite un mot sensible n\'est pas retenue', () => {
+  freshVigie(10);
   for (const c of ['grep -n "sudo" lib/state.mjs', 'git log --oneline | grep force', 'grep -E "sudo|push --force" a b 2>/dev/null']) {
     assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: c } }, { HOME }), null, c);
+    assert.equal(codexRun({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: c } }), null, `Codex : ${c}`);
   }
-  // l'auto-accept coupé : rien n'est retenu, l'utilisateur valide lui-même dans VS Code
+  // l'auto-accept coupé : rien n'est retenu, l'utilisateur valide lui-même
   setState({ autoAccept: false });
   assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'sudo ls' } }, { HOME }), null);
 });
 
-test('seulement par Vigie : autorisée en PreToolUse, Claude Code redemande en PermissionRequest : acceptée une fois de plus, pas deux', async () => {
+test('Codex : autorisée en PreToolUse, Codex redemande en PermissionRequest : acceptée une fois de plus, pas deux', async () => {
   const o = await preHold('sudo -n true', (it) => approve(it.approvalId, 'allow', { history: hist() }));
   assert.equal(o.permissionDecision, 'allow');
-  // le même appel passe ensuite par PermissionRequest (Claude Code demande quand même) : accepté
+  setGuard(0); // la relance d'après ne doit pas attendre 10 min dans le test
+  // le même appel passe ensuite par PermissionRequest (Codex demande l'élévation) : accepté
   const second = vigieRun('sudo -n true');
   assert.equal(behavior(second.out), 'allow', 'même appel, étape suivante');
   assert.equal(second.last.event, 'garde-fou-autorise-vigie');

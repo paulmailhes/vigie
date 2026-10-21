@@ -96,6 +96,8 @@ final class SnapshotRunner {
             }
 
             await captureMenuPanel(theme: theme, appearance: NSAppearance(named: appearanceName))
+            await captureAlone(OnboardingView(start: 1), "14-accueil-actions-sensibles-\(theme)", appearance: NSAppearance(named: appearanceName))
+            await captureAlone(OnboardingView(start: 2), "14-accueil-comptes-\(theme)", appearance: NSAppearance(named: appearanceName))
             await captureAlone(OnboardingView(start: 3), "14-accueil-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
             await captureAlone(MCPLibrarySheet(), "15-bibliotheque-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
         }

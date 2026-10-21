@@ -1,5 +1,5 @@
-# Données locales de Vigie (réglages, historique, comptes) : jamais publiées
-data/
+# Données locales de Vigie (réglages, historique, comptes) : jamais publiées. Ancré à la racine : macOS ignore la casse, « data/ » attraperait aussi le dossier Data/ de l'app.
+/data/
 # Constructions
 dist/
 mac/Vigie.app/

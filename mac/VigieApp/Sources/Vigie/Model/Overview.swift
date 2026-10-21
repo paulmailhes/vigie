@@ -46,14 +46,11 @@ struct EngineSettings: Decodable, Equatable, Sendable {
 struct GuardSettings: Decodable, Equatable, Sendable {
     var enabled: Bool?
     var waitMin: Int?
-    /// vigie : refusée sur le moment, à autoriser une fois dans Vigie | vscode : fenêtre VS Code pendant waitMin.
-    var mode: String?
     @Lossy var rules: [GuardRule]
 
-    init(enabled: Bool? = nil, waitMin: Int? = nil, mode: String? = nil, rules: [GuardRule] = []) {
+    init(enabled: Bool? = nil, waitMin: Int? = nil, rules: [GuardRule] = []) {
         self.enabled = enabled
         self.waitMin = waitMin
-        self.mode = mode
         self.rules = rules
     }
 }

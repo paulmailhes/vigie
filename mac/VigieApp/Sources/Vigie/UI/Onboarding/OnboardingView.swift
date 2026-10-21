@@ -17,24 +17,29 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                switch step {
-                case 0: welcome
-                case 1: guards
-                case 2: accounts
-                case 3: mcps
-                default: ready
+            // Défile quand l'étape est plus haute que la fenêtre (beaucoup de comptes) : les boutons restent visibles.
+            ScrollView {
+                Group {
+                    switch step {
+                    case 0: welcome
+                    case 1: guards
+                    case 2: accounts
+                    case 3: mcps
+                    default: ready
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 36)
+                .padding(.top, 32)
+                .padding(.bottom, 12)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 36)
-            .padding(.top, 32)
+            .scrollBounceBehavior(.basedOnSize)
 
             footer
                 .padding(.horizontal, 36)
                 .padding(.vertical, 20)
         }
-        .frame(width: 600, height: 560)
+        .frame(width: 600, height: 600)
         .task { await store.refreshAccounts() }
     }
 
@@ -68,20 +73,19 @@ struct OnboardingView: View {
     // MARK: 2. Actions sensibles
 
     private var guards: some View {
-        @Bindable var store = store
-        return VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 20) {
             header("hand.raised.fill", "Les actions sensibles restent à toi",
                    "Même avec l'auto-accept, Vigie ne valide jamais ces actions à ta place.")
             FlowChips(items: ["Commande sudo", "Suppression de dossiers importants", "git push forcé", "Effacement de disque",
                               "Paiements et achats", "Envoi d'e-mails", "Publication sur les réseaux", "Réglages de Claude Code et du shell"])
             VStack(alignment: .leading, spacing: 10) {
-                Text("Où veux-tu les autoriser ?").font(.headline)
-                Picker("Où autoriser", selection: $store.guardMode) {
-                    Text("Dans Vigie (recommandé) : l'action attend, tu reçois une notification, un clic suffit").tag("vigie")
-                    Text("Dans VS Code : la fenêtre habituelle de Claude Code").tag("vscode")
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
+                Text("Tu les autorises où tu veux").font(.headline)
+                Label("Dans ta conversation : la fenêtre habituelle de Claude Code", systemImage: "bubble.left.and.text.bubble.right")
+                Label("Dans Vigie, avec une notification : un clic suffit", systemImage: "binoculars")
+                Text("Les deux restent d'accord : réponds d'un côté, l'autre se ferme. Avec Codex, c'est dans Vigie (Codex ne sait pas afficher sa fenêtre à la demande).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("Tu peux ajuster la liste plus tard dans Réglages (⌘,).")
                 .font(.callout)
@@ -95,8 +99,8 @@ struct OnboardingView: View {
 
     private var accounts: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header("person.2.crop.square.stack", "Tes comptes Claude",
-                   "Plusieurs abonnements ? Ajoute-les : ils restent connectés, et tu choisis le compte de chaque conversation.")
+            header("person.2.crop.square.stack", "Tes comptes IA",
+                   "Claude et Codex. Plusieurs abonnements Claude ? Ajoute-les : ils restent connectés, et tu choisis le compte de chaque conversation.")
             VStack(spacing: 0) {
                 ForEach(store.accounts) { account in
                     OnboardingAccountRow(account: account)

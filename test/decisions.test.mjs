@@ -21,7 +21,7 @@ const FILE = path.join(DATA, 'decisions.json');
 const rj = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const wj = (p, o) => fs.writeFileSync(p, JSON.stringify(o));
 const iso = (msAgo = 0) => new Date(Date.now() - msAgo).toISOString();
-const STATE = (waitMin = 10) => ({ ...structuredClone(DEFAULT_STATE), autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin } });
+const STATE = (waitMin = 10) => ({ ...structuredClone(DEFAULT_STATE), autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin } });
 const yes = () => true;
 
 test('lecture d\'une décision par le hook : forme longue ou courte, date, conversation, effacée une fois lue', () => {

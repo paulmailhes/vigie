@@ -39,8 +39,7 @@
           "label": "Déploiement en production",
           "disabled": false
         }
-      ],
-      "mode": "vigie"
+      ]
     }
   },
   "since": "2026-10-19T15:40:00.000Z",

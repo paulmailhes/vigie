@@ -15,7 +15,7 @@ import { createAccounts, MAIN_ID } from './lib/accounts.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer } from './lib/decisions.mjs';
-import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES, GUARD_MODES } from './lib/state.mjs';
+import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints } from './lib/usage.mjs';
 
@@ -356,7 +356,6 @@ function settingsView(state) {
     connectorsDefault: state.connectorsDefault,
     guard: {
       enabled: state.guard.enabled,
-      mode: state.guard.mode,
       waitMin: Math.round(state.guard.waitMin),
       rules: state.guard.rules.map((r) => ({ id: String(r.id || r.label), label: r.label, disabled: !!r.disabled })),
     },
@@ -837,7 +836,6 @@ function postSettings(body) {
     const g = body.guard;
     if (!isObj(g)) return bad('Garde-fous illisibles.');
     if ('enabled' in g) { if (typeof g.enabled !== 'boolean') return bad('Garde-fous : oui ou non.'); s.guard.enabled = g.enabled; }
-    if ('mode' in g) { if (!GUARD_MODES.includes(g.mode)) return bad('Garde-fous : mode vigie ou vscode.'); s.guard.mode = g.mode; }
     if ('waitMin' in g) {
       const n = minutesIn(g.waitMin, 0, 120);
       if (n === null) return bad('Indique un délai entre 0 et 120 min.');

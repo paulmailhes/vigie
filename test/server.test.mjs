@@ -277,7 +277,7 @@ const ConversationSummary = {
 const Overview = {
   now: ISO,
   settings: { autoAccept: 'bool', questionsAuto: 'bool', questionWaitMin: 'int', connectorsDefault: oneOf('on', 'off'),
-    guard: { enabled: 'bool', mode: opt(oneOf('vigie', 'vscode')), waitMin: 'int', rules: arr({ id: 'string', label: 'string', disabled: 'bool' }) } },
+    guard: { enabled: 'bool', waitMin: 'int', rules: arr({ id: 'string', label: 'string', disabled: 'bool' }) } },
   since: ISO,
   sinceSummary: { accepted: 'int', questionsAuto: 'int', blocked: 'int', reports: 'int', testsFailed: 'int', limits: 'int' },
   toReview: arr({
@@ -859,13 +859,11 @@ test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris,
   for (const bad of ['30', 'abc', '60.5']) assert.equal((await get(`/api/v2/usage/series?window=${bad}`)).status, 400, bad);
 });
 
-test('garde-fous « seulement par Vigie » : réglage, élément à autoriser, autoriser (message, lien) ou refuser', async () => {
-  let r = await post('/api/v2/settings', { guard: { mode: 'vscode' } });
-  assert.equal(r.body.settings.guard.mode, 'vscode');
-  assert.equal((await post('/api/v2/settings', { guard: { mode: 'autre' } })).status, 400);
-  r = await post('/api/v2/settings', { guard: { mode: 'vigie' } });
-  assert.equal(r.body.settings.guard.mode, 'vigie');
-  assert.equal(rj(path.join(DATA, 'state.json')).guard.mode, 'vigie');
+test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à autoriser, autoriser (message, lien) ou refuser', async () => {
+  let r = await post('/api/v2/settings', { guard: { mode: 'vigie' } });
+  assert.equal(r.status, 200, 'ancien réglage ignoré, sans erreur');
+  assert.equal('mode' in r.body.settings.guard, false);
+  assert.equal('mode' in rj(path.join(DATA, 'state.json')).guard, false);
   const A_ID = 'aaaaaaaaaaaaaaaa', B_ID = 'bbbbbbbbbbbbbbbb';
   const line = (id, action, extra = {}) => JSON.stringify({ ts: new Date().toISOString(), event: 'garde-fou-en-attente-vigie', sessionId: SID_A, cwd: CWD, tool: 'Bash',
     action, rule: 'Commande administrateur (sudo)', ruleId: 'sudo', approvalId: id, hash: id.repeat(4), pid: deadPid, ...extra });

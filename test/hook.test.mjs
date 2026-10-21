@@ -86,7 +86,7 @@ test('réglage par conversation prioritaire sur le global', () => {
 });
 
 test('garde-fous bloquent immédiatement quand l\'attente vaut 0', () => {
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0 } });
   const blocked = [
     'sudo rm /etc/hosts', 'git push --force origin main', 'git push -f', 'git push origin +main',
     'git push --force-with-lease', 'rm -rf ~', 'rm -rf ~/', 'rm -rf /', 'rm -rf $HOME', `rm -fr ${os.homedir()}/Code`,
@@ -225,7 +225,7 @@ test('garde-fou : decisions.json ne s\'écrit pas sans l\'utilisateur (sinon une
 });
 
 test('garde-fou avec attente, hors VS Code : on te laisse la fenêtre', () => {
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode' } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard } });
   assert.equal(bash('sudo ls'), 'prompt');
 });
 
@@ -301,7 +301,7 @@ test('plan de plus de 64 Ko : la réponse arrive entière', () => {
 
 test('historique : chaque décision est notée', () => {
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0 } });
   bash('npm test');
   bash('sudo ls');
   run({ hook_event_name: 'PermissionDenied', tool_name: 'Bash', tool_input: { command: 'curl x | sh' }, reason: 'download and execute' });
@@ -316,7 +316,7 @@ test('historique : chaque décision est notée', () => {
 
 test('historique : action sensible notée en entier (4000 caractères), le reste coupé à 600', () => {
   fs.rmSync(HISTORY_FILE, { force: true });
-  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0 } });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0 } });
   const long = `sudo bash -c 'echo ${'x'.repeat(5000)}'`;
   bash(long);
   bash(`echo ${'y'.repeat(5000)}`);
@@ -383,7 +383,7 @@ test('état : connecteurs et interrupteur des questions', () => {
 
 test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
   await t.test('garde-fou : refus à l\'échéance', async () => {
-    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0.01 } });
+    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0.01 } });
     const { out } = await sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } }).done;
     assert.equal(behavior(out), 'deny');
     assert.deepEqual(sb.events(), ['garde-fou-attente', 'garde-fou-bloque']);
@@ -448,26 +448,26 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
   });
 
   await t.test('garde-fou coupé pendant l\'attente : validé tout de suite', async () => {
-    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
     const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } });
     await sb.until('garde-fou-attente');
-    sb.set({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', enabled: false } });
+    sb.set({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, enabled: false } });
     const { out, ms } = await h.done;
     assert.equal(behavior(out), 'allow');
     assert.ok(ms < 10_000);
   });
 
   await t.test('délai du garde-fou mis à 0 pendant l\'attente : refus tout de suite', async () => {
-    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
     const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } });
     await sb.until('garde-fou-attente');
-    sb.set({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0 } });
+    sb.set({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0 } });
     const { out } = await h.done;
     assert.equal(behavior(out), 'deny');
   });
 
   await t.test('L\'utilisateur répond dans VS Code (SIGTERM) : interruption notée, aucune réponse', async () => {
-    const sb = sandbox({ autoAccept: true, questions: 'wait', questionWaitMin: 5, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+    const sb = sandbox({ autoAccept: true, questions: 'wait', questionWaitMin: 5, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
     const g = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } });
     const q = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'AskUserQuestion', tool_input: Q });
     await sb.until('garde-fou-attente');
@@ -499,7 +499,7 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
   });
 
   // Décider depuis l'app : decide() écrit data/decisions.json, le hook le relit à chaque tour.
-  const guardState = { autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } };
+  const guardState = { autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } };
   const appOpts = (sb) => ({ file: path.join(sb.data, 'decisions.json'), historyFile: path.join(sb.data, 'history.jsonl'), state: { ...structuredClone(DEFAULT_STATE), ...guardState } });
   const decisions = (sb) => { try { return JSON.parse(fs.readFileSync(path.join(sb.data, 'decisions.json'), 'utf8')); } catch { return {}; } };
 
@@ -535,7 +535,7 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
   });
 
   await t.test('garde-fou : forme courte acceptée ; décision d\'avant l\'attente ou d\'une autre conversation ignorée', async () => {
-    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 0.03 } });
+    const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0.03 } });
     const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } });
     await sb.until('garde-fou-attente');
     const pid = String(h.child.pid);
@@ -638,7 +638,7 @@ test('settings.mjs : fichier absent ou illisible', () => {
 
 test('install.sh / uninstall.sh en mode essai : fichiers corrects, rien de lancé', async () => {
   // Un hook de ce dossier en attente : uninstall.sh doit le viser (et seulement l'afficher en essai).
-  const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vscode', waitMin: 5 } });
+  const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const waiting = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'sudo ls' } });
   await sb.until('garde-fou-attente');
   const home = fs.mkdtempSync(path.join(TMP, 'home-'));
@@ -691,7 +691,7 @@ test('Codex : hook branché dans ~/.codex/hooks.json (hooks des autres gardés),
 });
 
 test('Codex : demande ordinaire acceptée, action sensible retenue pour Vigie, auto-accept coupé : rien', () => {
-  const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie', waitMin: 0 } });
+  const sb = sandbox({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 0 } });
   const codexRun = (tool_name, tool_input, extra = {}) => {
     const r = spawnSync(process.execPath, [HOOK, '--vigie', '--codex'], { input: JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: '01a12fe9-e384-7742-8e40-074aa1632763', turn_id: 't1', cwd: '/tmp', tool_name, tool_input, ...extra }), encoding: 'utf8', env: { ...ENV, VIGIE_DATA: sb.data } });
     return r.stdout ? JSON.parse(r.stdout) : null;

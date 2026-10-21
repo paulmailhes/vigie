@@ -11,7 +11,7 @@ Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fen�
 ## Ce que fait Vigie
 
 - **Il valide pour toi** les demandes d'autorisation de Claude Code (commandes, fichiers, outils, MCP), dans toutes tes conversations, y compris celles déjà ouvertes.
-- **Il garde pour toi les actions sensibles** : `sudo`, suppression de dossiers importants, `git push --force`, effacement de disque, paiements, envoi d'e-mails, publications, réglages de Claude Code ou du shell. L'action attend ton accord dans Vigie, et un clic suffit.
+- **Il garde pour toi les actions sensibles** : `sudo`, suppression de dossiers importants, `git push --force`, effacement de disque, paiements, envoi d'e-mails, publications, réglages de Claude Code ou du shell. Elle s'affiche à la fois dans ta conversation (la fenêtre habituelle de Claude Code) et dans Vigie : tu réponds où tu veux, l'autre se ferme.
 - **Il répond aux questions quand tu n'es pas là**, si tu le veux. Après un délai, Claude prend l'option recommandée, et tu relis son choix ensuite (« Ça me va » ou « Changer »).
 - **Il te montre où en est chaque conversation** : ta demande, son message en direct, sa feuille de route, le fil de ce qu'elle a fait (commits, déploiements, tests, agents).
 - **Il suit ta consommation** par compte et par conversation : session de 5 h, semaine, et l'heure exacte de remise à zéro.
@@ -37,9 +37,10 @@ curl -fsSL https://raw.githubusercontent.com/paulmailhes/vigie/main/install.sh |
 L'app s'ouvre sur un court accueil :
 
 1. ce que fait Vigie ;
-2. où autoriser les actions sensibles ;
-3. tes comptes Claude, à ajouter et connecter en un clic ;
-4. l'auto-accept et les notifications.
+2. les actions sensibles, qui restent à toi ;
+3. tes comptes IA : Claude (à ajouter et connecter en un clic) et Codex ;
+4. tes MCP ;
+5. l'auto-accept et les notifications.
 
 Ensuite, Vigie vit dans la barre des menus (les jumelles).
 

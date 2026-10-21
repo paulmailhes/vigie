@@ -75,6 +75,6 @@ struct GuardsButton: View {
                 Text("Garde-fous")
             }
         }
-        .help(store.guardMode == "vscode" ? "Actions sensibles : aussi par la fenêtre VS Code" : "Actions sensibles : seulement par Vigie")
+        .help("Actions sensibles : à valider dans ta conversation ou dans Vigie")
     }
 }

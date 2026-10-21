@@ -164,6 +164,12 @@ test('créer un compte : dossier, liens vers ~/.claude, .claude.json sans connex
       assert.equal(fs.readlinkSync(p), path.join(HOME, '.claude', e.name));
     }
   }
+  // Claude Code efface un dossier partagé de ~/.claude (ménage) : le lien est réparé en le recréant vide, sans alerte
+  fs.rmSync(path.join(HOME, '.claude', 'shell-snapshots'), { recursive: true });
+  const h = A.health();
+  assert.deepEqual(h.notices, []);
+  assert.equal(h.accounts.find((a) => a.id === 'travail2').links.find((l) => l.name === 'shell-snapshots').state, 'created');
+  assert.ok(fs.statSync(path.join(dir, 'shell-snapshots')).isDirectory(), 'le lien mène de nouveau à un dossier');
   // CLAUDE.md absent de ~/.claude : lien de fichier quand même (écrire à travers le crée dans ~/.claude)
   assert.equal(fs.existsSync(path.join(dir, 'CLAUDE.md')), false);
   const cjPath = path.join(dir, '.claude.json');
