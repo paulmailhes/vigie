@@ -149,10 +149,19 @@ function transcriptFor(input) {
 // Suivi du transcript pendant une attente : au premier passage, ses 2 derniers Mo (l'appel d'outil vient d'y
 // être écrit) ; ensuite, seulement ce qui s'y ajoute. Un transcript peut dépasser 200 Mo et grossir de plusieurs
 // Mo par minute : relire chaque fois les 2 derniers Mo laissait passer la réponse de l'utilisateur (2026-10-20).
+// Même appel d'outil : son identifiant si Claude Code le donne, sinon les mêmes paramètres (ordre des champs
+// ignoré), sinon, pour une question, le même texte (Claude Code 2.1.304 ajoute parfois des champs à l'entrée).
+const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));
 function transcriptWatcher(input, sinceMs) {
   const tp = transcriptFor(input);
-  const want = JSON.stringify(input.tool_input ?? null);
+  const want = canon(input.tool_input ?? null);
+  const firstQuestion = (i) => (Array.isArray(i?.questions) ? i.questions[0]?.question : null) ?? null;
+  const question = QUESTION_TOOLS.has(input.tool_name) ? firstQuestion(input.tool_input) || (input.tool_input?.plan ? String(input.tool_input.plan).slice(0, 200) : null) : null;
+  const same = (b) => b.name === input.tool_name && (canon(b.input ?? null) === want
+    || (question && (firstQuestion(b.input) === question || (b.input?.plan && String(b.input.plan).slice(0, 200) === question))));
   const ids = new Set();
+  if (typeof input.tool_use_id === 'string' && input.tool_use_id) ids.add(input.tool_use_id);
   let offset = null, carry = '';
   const scan = (line) => {
     if (!line.includes(input.tool_name) && !(ids.size && line.includes('tool_result'))) return null;
@@ -160,7 +169,7 @@ function transcriptWatcher(input, sinceMs) {
     const content = r?.message?.content;
     if (!Array.isArray(content)) return null;
     if (r.type === 'assistant' && Date.parse(r.timestamp || 0) >= sinceMs - 120_000) {
-      for (const b of content) if (b?.type === 'tool_use' && b.name === input.tool_name && JSON.stringify(b.input ?? null) === want) ids.add(b.id);
+      for (const b of content) if (b?.type === 'tool_use' && same(b)) ids.add(b.id);
     } else if (r.type === 'user') {
       for (const b of content) {
         if (b?.type === 'tool_result' && ids.has(b.tool_use_id)) {

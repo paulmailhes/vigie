@@ -390,3 +390,25 @@ test('seulement par Vigie : autorisée en PreToolUse, Claude Code redemande en P
   const third = vigieRun('sudo -n true');
   assert.equal(behavior(third.out), 'deny');
 });
+
+test('question en attente, réponse donnée dans VS Code : vue même si l’entrée diffère un peu (champ ajouté, ordre)', () => {
+  vscodeSession();
+  fs.rmSync(HISTORY_FILE, { force: true });
+  setState({ autoAccept: true, questions: 'wait', questionWaitMin: 5 });
+  const tp = path.join(TMP, 'tr-question.jsonl');
+  const q = { question: 'Quel nom pour la version ?', header: 'Test', multiSelect: false, options: [{ label: 'A (Recommandé)' }, { label: 'B' }] };
+  // dans le transcript : champs dans un autre ordre, et un champ en plus
+  fs.writeFileSync(tp, JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_Q', name: 'AskUserQuestion',
+    input: { metadata: { source: 'x' }, questions: [{ options: q.options, multiSelect: false, header: 'Test', question: q.question }] } }] } }) + '\n');
+  const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME, VIGIE_POLL_MS: '200' } });
+  p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, transcript_path: tp }));
+  setTimeout(() => fs.appendFileSync(tp, JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_Q', content: 'answered' }] } }) + '\n'), 800);
+  const guardTimer = setTimeout(() => p.kill('SIGKILL'), 15_000);
+  return new Promise((resolve) => p.on('exit', () => {
+    clearTimeout(guardTimer);
+    const ev = fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').map((l) => JSON.parse(l).event);
+    assert.ok(ev.includes('question-tu-as-repondu') || ev.includes('question-repondue'), ev.join(','));
+    assert.ok(!ev.includes('question-auto'), 'aucun choix à la place de l’utilisateur');
+    resolve();
+  }));
+});

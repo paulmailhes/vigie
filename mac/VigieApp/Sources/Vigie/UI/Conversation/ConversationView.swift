@@ -19,6 +19,21 @@ struct ConversationView: View {
                         ConversationHeader(summary: summary, model: model,
                                            contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
 
+                        // Ce qu'elle attend de toi (question, action sensible), avec ses boutons, en premier
+                        let waiting = store.toReview.filter { $0.conversationId == conversationID }
+                        if !waiting.isEmpty {
+                            CardSection {
+                                ForEach(waiting) { item in
+                                    ReviewRow(item: item, inConversation: true)
+                                }
+                            } header: {
+                                HStack(spacing: 6) {
+                                    Text("Elle t'attend")
+                                    CountBadge(count: waiting.count, urgent: true)
+                                }
+                            }
+                        }
+
                         CardSection {
                             NowSection(summary: summary, model: model)
                         } header: {

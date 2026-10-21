@@ -4,6 +4,8 @@ import SwiftUI
 struct ReviewRow: View {
     @Environment(VigieStore.self) private var store
     let item: ReviewItem
+    /// Affichée dans la page de sa conversation : « Voir » ouvrirait la même page, on propose VS Code.
+    var inConversation = false
 
     var body: some View {
         let alert = Theme.isAlert(item.reviewKind)
@@ -84,11 +86,19 @@ struct ReviewRow: View {
             .glassButton(item.isPendingDecision ? .primary : .secondary)
             .help(item.isPendingDecision ? "Autoriser ou refuser" : "La commande et quoi faire")
         case .waiting, .other:
-            Button("Voir") {
-                if let id = item.conversationId { store.route = .conversation(id) }
+            if inConversation {
+                Button("Répondre dans VS Code") {
+                    Task { await store.openConversationInVSCode(item.conversationId, cwd: item.cwd) }
+                }
+                .glassButton(.primary)
+                .help("Ouvre cette conversation dans VS Code")
+            } else {
+                Button("Voir") {
+                    if let id = item.conversationId { store.route = .conversation(id) }
+                }
+                .glassButton()
+                .disabled(item.conversationId == nil)
             }
-            .glassButton()
-            .disabled(item.conversationId == nil)
         }
     }
 }
