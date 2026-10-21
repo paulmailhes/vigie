@@ -1,0 +1,79 @@
+{
+  "accounts": [
+    {
+      "id": "travail1",
+      "label": "Travail 1",
+      "email": "alex@studio-exemple.fr",
+      "expectedEmail": "alex@studio-exemple.fr",
+      "wrongAccount": false,
+      "connected": true,
+      "isDefault": true,
+      "usage": {
+        "session": {
+          "pct": 100,
+          "resetsAt": "2026-10-20T01:40:00.000Z"
+        },
+        "week": {
+          "pct": 39,
+          "resetsAt": "2026-10-26T19:00:00.000Z"
+        },
+        "weekModel": {
+          "label": "Fable",
+          "pct": 55,
+          "resetsAt": "2026-10-26T18:59:00.000Z"
+        },
+        "observedAt": "2026-10-19T23:08:00.000Z",
+        "source": "session"
+      },
+      "configDir": null,
+      "keychainItem": "Claude Code-credentials",
+      "dirReady": true
+    },
+    {
+      "id": "travail2",
+      "label": "Travail 2",
+      "email": null,
+      "expectedEmail": "contact@studio-exemple.fr",
+      "wrongAccount": false,
+      "connected": false,
+      "isDefault": false,
+      "usage": {
+        "session": null,
+        "week": null,
+        "weekModel": null,
+        "observedAt": null,
+        "source": null
+      },
+      "configDir": "/Users/alex/.claude-comptes/travail2",
+      "keychainItem": "Claude Code-credentials-3b1f9a2c",
+      "dirReady": true
+    },
+    {
+      "id": "perso",
+      "label": "Perso",
+      "email": "alex.durand@gmail.com",
+      "expectedEmail": "alex.durand@gmail.com",
+      "wrongAccount": true,
+      "connected": true,
+      "isDefault": false,
+      "usage": {
+        "session": null,
+        "week": {
+          "pct": 8,
+          "resetsAt": "2026-10-23T17:59:00.000Z"
+        },
+        "weekModel": null,
+        "observedAt": "2026-10-19T20:05:00.000Z",
+        "source": "ping"
+      },
+      "configDir": "/Users/alex/.claude-comptes/perso",
+      "keychainItem": "Claude Code-credentials-9e04c7d1",
+      "dirReady": true
+    }
+  ],
+  "defaultForNew": "travail1",
+  "wrapper": {
+    "path": "/Users/alex/Code/vigie/bin/claude-account-wrapper",
+    "active": false
+  }
+}

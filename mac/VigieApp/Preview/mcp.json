@@ -1,0 +1,421 @@
+{
+  "user": [
+    {
+      "name": "figma-perso",
+      "type": "http",
+      "target": "https://mcp.figma.com/mcp",
+      "service": "figma",
+      "accounts": [
+        "travail1",
+        "travail2",
+        "perso"
+      ],
+      "uses7d": 3657,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "perso",
+          "status": "needs-auth",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "figma-pro",
+      "type": "http",
+      "target": "https://mcp.figma.com/mcp",
+      "service": "figma",
+      "accounts": [
+        "travail1",
+        "travail2"
+      ],
+      "uses7d": 412,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "needs-auth",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "webflow-perso",
+      "type": "sse",
+      "target": "https://mcp.webflow.com/sse",
+      "service": "webflow",
+      "accounts": [
+        "travail1",
+        "travail2",
+        "perso"
+      ],
+      "uses7d": 96,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "perso",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "webflow-pro",
+      "type": "sse",
+      "target": "https://mcp.webflow.com/sse",
+      "service": "webflow",
+      "accounts": [
+        "travail1"
+      ],
+      "uses7d": 0,
+      "needsAuth": true,
+      "disabledIn": [
+        "/Users/alex/Code/boutique",
+        "/Users/alex/Code/atelier"
+      ],
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "obsidian",
+      "type": "stdio",
+      "target": "node /Users/alex/Code/notes-mcp/server.mjs",
+      "service": "obsidian",
+      "accounts": [
+        "travail1",
+        "travail2",
+        "perso"
+      ],
+      "uses7d": 88,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "perso",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "artlist",
+      "type": "http",
+      "target": "https://mcp.artlist.io/mcp?key=••••",
+      "service": "artlist",
+      "accounts": [
+        "travail1",
+        "travail2",
+        "perso"
+      ],
+      "uses7d": 23,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "failed",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "perso",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "anarlog",
+      "type": "stdio",
+      "target": "/Applications/Anarlog.app/Contents/MacOS/anarlog-mcp --token ••••",
+      "service": "anarlog",
+      "accounts": [
+        "travail1",
+        "travail2",
+        "perso"
+      ],
+      "uses7d": 41,
+      "needsAuth": false,
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "travail2",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        },
+        {
+          "accountId": "perso",
+          "status": "pending-approval",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "path": "/Users/alex/Code/atelier",
+      "name": "atelier",
+      "file": "/Users/alex/Code/atelier/.mcp.json",
+      "servers": [
+        {
+          "name": "supabase",
+          "type": "stdio",
+          "target": "npx -y @supabase/mcp-server-supabase --project-ref ••••",
+          "service": "supabase",
+          "uses7d": 1428,
+          "disabled": false,
+          "health": [
+            {
+              "accountId": "travail1",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            },
+            {
+              "accountId": "perso",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            }
+          ]
+        },
+        {
+          "name": "netlify",
+          "type": "stdio",
+          "target": "npx -y @netlify/mcp",
+          "service": "netlify",
+          "uses7d": 212,
+          "disabled": false,
+          "health": [
+            {
+              "accountId": "travail1",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            },
+            {
+              "accountId": "perso",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            }
+          ]
+        },
+        {
+          "name": "resend",
+          "type": "stdio",
+          "target": "npx -y resend-mcp (RESEND_API_KEY=••••)",
+          "service": "resend",
+          "uses7d": 0,
+          "disabled": true,
+          "health": [
+            {
+              "accountId": "travail1",
+              "status": "disabled",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/alex/Code/portail/back",
+      "name": "back",
+      "file": "/Users/alex/Code/portail/back/.mcp.json",
+      "servers": [
+        {
+          "name": "postgres",
+          "type": "stdio",
+          "target": "npx -y @modelcontextprotocol/server-postgres postgresql://••••",
+          "service": "postgres",
+          "uses7d": 77,
+          "disabled": false,
+          "health": [
+            {
+              "accountId": "travail1",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            },
+            {
+              "accountId": "perso",
+              "status": "connected",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "local": [
+    {
+      "path": "/Users/alex/Code/outil-design",
+      "name": "outil-design",
+      "servers": [
+        {
+          "name": "paddle-live",
+          "type": "http",
+          "target": "https://mcp.paddle.com/mcp",
+          "service": "paddle",
+          "uses7d": 0,
+          "disabled": true,
+          "health": [
+            {
+              "accountId": "travail1",
+              "status": "disabled",
+              "checkedAt": "2026-10-19T23:12:00.000Z"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "connectors": [
+    {
+      "name": "Gmail",
+      "accountId": "travail1",
+      "uses7d": 192,
+      "service": "gmail",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Notion",
+      "accountId": "travail1",
+      "uses7d": 12,
+      "service": "notion",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Google Calendar",
+      "accountId": "travail1",
+      "uses7d": 8,
+      "service": "google-calendar",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Google Drive",
+      "accountId": "travail1",
+      "uses7d": 3,
+      "service": "google-drive",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Qonto",
+      "accountId": "travail1",
+      "uses7d": 0,
+      "service": "qonto",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "GoCardless",
+      "accountId": "travail1",
+      "uses7d": 0,
+      "service": "gocardless",
+      "health": [
+        {
+          "accountId": "travail1",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Pennylane",
+      "accountId": "travail2",
+      "uses7d": 0,
+      "service": "pennylane",
+      "health": [
+        {
+          "accountId": "travail2",
+          "status": "needs-auth",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "Gmail",
+      "accountId": "travail2",
+      "uses7d": 2,
+      "service": "gmail",
+      "health": [
+        {
+          "accountId": "travail2",
+          "status": "connected",
+          "checkedAt": "2026-10-19T23:12:00.000Z"
+        }
+      ]
+    }
+  ],
+  "connectorsDefault": "off"
+}

@@ -1,0 +1,912 @@
+// Tests du serveur (API v2 et v1 gardée) : node --test test/
+// Le vrai server.mjs est lancé dans un processus à part, sur un faux ~ (dossier temporaire) : faux ~/.claude,
+// faux ~/.claude.json, faux ~/Code, données de Vigie, dossiers de comptes et réglages VS Code temporaires,
+// faux binaire « claude » (mcp seulement), faux open / osascript / pbcopy (ils notent ce qu'on leur demande),
+// faux hooks en attente (processus « hook.mjs » qui dorment). Rien de réel n'est lu, écrit ni ouvert, et aucun
+// secret n'est vrai.
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_GUARDS } from '../lib/state.mjs';
+import { HEALTH_STATUSES } from '../lib/mcp.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie serveur-'));
+const HOME = path.join(TMP, 'maison');
+const CLAUDE = path.join(HOME, '.claude');
+const PROJECTS = path.join(CLAUDE, 'projects');
+const SESSIONS = path.join(CLAUDE, 'sessions');
+const DATA = path.join(TMP, 'données vigie');
+const CODE = path.join(HOME, 'Code');
+const CWD = path.join(CODE, 'atelier');
+const OTHER = path.join(CODE, 'autre');
+const ACCOUNTS_ROOT = path.join(TMP, 'comptes');
+const VSC = path.join(TMP, 'vscode', 'settings.json');
+const FAKE = path.join(TMP, 'faux-claude.mjs');
+const FAKE_LOG = path.join(TMP, 'faux-claude.log');   // appels « mcp login » du faux claude
+const MAC_LOG = path.join(TMP, 'faux-mac.log');       // appels de open, osascript, pbcopy
+const FAKE_HOOK = path.join(TMP, 'faux-hook', 'hook.mjs');
+
+const SID_A = 'b1b9b451-c53c-439e-b804-3689257268e3'; // ouverte (registre), garde-fou en attente
+const SID_B = '9ca55731-9c56-4174-ad2a-c63bef5f7c11'; // fermée
+const ORG = '11111111-2222-4333-8444-555555555555';
+const ACC_UUID = '66666666-7777-4888-8999-000000000000';
+// Faux secrets : aucun ne doit ressortir du serveur.
+const SECRETS = ['demo_hdr_Q1w2E3r4T5y6U7i8O9p0', 'demo_tok_A1s2D3f4G5h6J7k8L9z0', 'demo_env_Z9x8C7v6B5n4M3q2W1e0', 'demo_cmd_P0o9I8u7Y6t5R4e3W2q1',
+  'demo_sud_K8j7H6g5F4d3S2a1Q0w9', 'demo_lst_M1n2B3v4C5x6Z7l8K9j0'];
+
+const NOW = Date.now();
+const iso = (min) => new Date(NOW + min * 60_000).toISOString();
+const w = (p, s, mode) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s, mode ? { mode } : undefined); };
+const wj = (p, o) => w(p, JSON.stringify(o, null, 2));
+const rj = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+const deadPid = spawnSync('/usr/bin/true').pid;
+// Heure locale à la façon de Claude Code (« resets 11:40pm »).
+const clock = (ms) => { const d = new Date(ms); const h = d.getHours(); return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`; };
+// Faux hooks en attente : de vrais processus dont la ligne de commande contient « hook.mjs ».
+w(FAKE_HOOK, 'setInterval(() => {}, 60_000); setTimeout(() => process.exit(0), 10 * 60_000); // jamais orphelin longtemps\n');
+const hooks = [0, 1, 2].map(() => spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' }));
+const [HOOK_PUSH, HOOK_WHOAMI, HOOK_OLD] = hooks.map((c) => c.pid);
+const macCalls = () => { try { return fs.readFileSync(MAC_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+
+// ---------- transcripts (même forme que les vrais, comme dans conversations.test.mjs) ----------
+let n = 0;
+const uid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+const U = (i = 100, o = 50) => ({ input_tokens: i, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: o });
+function mk(sid, cwd) {
+  const meta = { cwd, sessionId: sid, version: '2.1.301', gitBranch: 'main' };
+  const user = (content, ts, more = {}) => ({ parentUuid: null, isSidechain: false, promptId: uid(), type: 'user', message: { role: 'user', content }, uuid: uid(), timestamp: ts, ...more, userType: 'external', entrypoint: 'claude-vscode', ...meta });
+  let msg = 0, tool = 0;
+  const asst = (blocks, ts, { stop = 'tool_use', usage = U(), more = {} } = {}) =>
+    ({ parentUuid: null, isSidechain: false, message: { model: 'claude-opus-5-5', id: `msg_${sid.slice(0, 4)}_${++msg}`, type: 'message', role: 'assistant', content: blocks, stop_reason: stop, stop_sequence: null, usage },
+      requestId: 'req_1', type: 'assistant', uuid: uid(), timestamp: ts, userType: 'external', entrypoint: 'claude-vscode', ...meta, ...more });
+  const call = (name, input, ts, content = 'ok') => {
+    const id = `toolu_${sid.slice(0, 4)}${++tool}`;
+    return [asst([{ type: 'tool_use', id, name, input }], ts), user([{ tool_use_id: id, type: 'tool_result', content, is_error: false }], ts, { toolUseResult: { stdout: content, stderr: '' } })];
+  };
+  const human = (text, ts) => user(text, ts, { origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' });
+  const say = (text, ts, usage) => asst([{ type: 'text', text }], ts, { stop: 'end_turn', usage });
+  const att = (attachment, ts) => ({ parentUuid: null, isSidechain: false, attachment, type: 'attachment', uuid: uid(), timestamp: ts, ...meta });
+  return { asst, call, human, say, att };
+}
+const writeLines = (p, lines) => w(p, lines.flat().map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+function seed() {
+  const A = mk(SID_A, CWD);
+  const limit = (M, text, ts) => M.asst([{ type: 'text', text }], ts, { stop: 'stop_sequence', usage: U(0, 0), more: { isApiErrorMessage: true, error: 'rate_limit' } });
+  writeLines(path.join(PROJECTS, '-maison-Code-atelier', `${SID_A}.jsonl`), [
+    A.att({ type: 'credential_org', organizationUuid: ORG }, iso(-60)),
+    A.human('refais la page d\'accueil', iso(-60)),
+    A.call('TodoWrite', { todos: [{ content: 'Refaire l\'accueil', status: 'completed', activeForm: 'Refait l\'accueil' }, { content: 'Tester la page', status: 'in_progress', activeForm: 'Teste la page' }] }, iso(-59)),
+    A.call('Bash', { command: 'npx tsc -b', description: 'Vérifier les types' }, iso(-56), 'src/accueil.tsx(3,1): error TS2322: Type \'string\' is not assignable to type \'number\'.\nFound 1 error.'),
+    A.call('Bash', { command: 'npx vitest run', description: 'Lancer les tests' }, iso(-55), 'Tests 3 passed'),
+    A.call('mcp__figma-perso__get_screenshot', { nodeId: '1:2' }, iso(-50)),
+    A.call('mcp__claude_ai_Gmail__search_threads', { query: 'facture' }, iso(-45)),
+    limit(A, `You've hit your session limit · resets ${clock(NOW + 120 * 60_000)}`, iso(-40)),
+    A.say('La page d\'accueil est refaite et testée.', iso(-30), U(400, 200)),
+  ]);
+  const B = mk(SID_B, OTHER);
+  writeLines(path.join(PROJECTS, '-maison-Code-autre', `${SID_B}.jsonl`), [
+    B.att({ type: 'credential_org', organizationUuid: ORG }, iso(-120)),
+    B.human('range les fichiers', iso(-120)),
+    B.say('C\'est rangé.', iso(-115), U(100, 20)),
+    // limite déjà remise à zéro : plus « à regarder »
+    limit(B, `You've hit your session limit · resets ${clock(NOW - 10 * 60_000)}`, iso(-80)),
+  ]);
+  // Registre de Claude Code : A est ouverte (pid = ce processus de test, bien vivant).
+  wj(path.join(SESSIONS, `${process.pid}.json`), { pid: process.pid, sessionId: SID_A, cwd: CWD, startedAt: NOW - 3600_000, status: 'busy', entrypoint: 'claude-vscode', name: 'atelier' });
+  w(path.join(CLAUDE, '.credentials.json'), '{}', 0o600); // connecté sans interroger le trousseau
+  wj(path.join(HOME, '.claude.json'), {
+    oauthAccount: { accountUuid: ACC_UUID, emailAddress: 'alex@example.com', organizationUuid: ORG },
+    cachedUsageUtilization: { fetchedAtMs: NOW - 60_000, accountUuid: ACC_UUID, utilization: { limits: [
+      { kind: 'session', percent: 12, resets_at: iso(120) },
+      { kind: 'weekly_all', percent: 40, resets_at: iso(3 * 24 * 60) },
+    ] } },
+    mcpServers: { 'figma-perso': { type: 'http', url: 'https://mcp.figma.com/mcp', headers: { Authorization: `Bearer ${SECRETS[0]}` } } },
+    projects: { [CWD]: { mcpServers: { 'figma-desktop': { type: 'http', url: `http://127.0.0.1:3845/mcp?token=${SECRETS[1]}` } }, disabledMcpServers: [] } },
+  });
+  wj(path.join(CWD, '.mcp.json'), { mcpServers: { supabase: { type: 'stdio', command: 'npx', args: ['-y', '@supabase/mcp-server-supabase'], env: { SUPABASE_ACCESS_TOKEN: SECRETS[2] } } } });
+  fs.mkdirSync(OTHER, { recursive: true });
+  w(VSC, '{\n  // réglages de test\n  "editor.fontSize": 13,\n}\n');
+  wj(path.join(DATA, 'state.json'), { version: 1, autoAccept: true, questions: 'ask', questionWaitMin: 20, guard: { enabled: true, waitMin: 10 }, sessions: {} });
+  wj(path.join(DATA, 'ui.json'), { lastSeen: iso(-90) });
+  const h = (min, event, extra) => ({ ts: iso(min), event, sessionId: SID_A, cwd: CWD, ...extra });
+  const sudo = { rule: 'Commande administrateur (sudo)', ruleId: 'sudo' };
+  // ancienne forme d'une question dans le journal : l'entrée brute de l'outil, en JSON coupé à 600 caractères
+  const oldQuestion = JSON.stringify({ questions: [{ question: 'Quelle couleur ?', header: 'Couleur', options: [{ label: 'Bleu', description: 'b' }, { label: 'Vert', description: 'v' }], multiSelect: false }] }).slice(0, -20);
+  const history = [
+    h(-80, 'auto-accepte', { tool: 'Bash', action: 'npx vitest run', description: 'Lancer les tests' }),
+    h(-70, 'auto-accepte', { tool: 'Bash', action: `curl -H "Authorization: Bearer ${SECRETS[3]}" https://api.example.com/x` }),
+    h(-65, 'auto-accepte', { tool: 'Edit', action: path.join(CWD, 'src', 'accueil.tsx') }),
+    h(-60, 'garde-fou-bloque', { tool: 'Bash', action: 'sudo rm -rf /tmp/x', rule: 'Commande administrateur (sudo)' }),
+    // refusée faute de réponse, demandée par un agent, avec une clé dans la commande
+    h(-58, 'garde-fou-bloque', { tool: 'Bash', action: `sudo curl -H "Authorization: Bearer ${SECRETS[4]}" https://api.example.com/y`, ...sudo, raison: 'delai', agentId: 'agent-verif', pid: deadPid }),
+    // refusée par l'utilisateur depuis l'app : pas « à faire toi-même »
+    h(-57, 'garde-fou-refuse-app', { tool: 'Bash', action: 'sudo reboot', ...sudo, pid: deadPid }),
+    h(-50, 'question-auto', { tool: 'AskUserQuestion', action: 'Quel fond ? [Fond B (recommandé) / Fond A]', answers: { 'Quel fond ?': 'Fond B (recommandé) — choisi automatiquement par Vigie (utilisateur absent)' }, questionId: 'q1' }),
+    h(-48, 'question-pour-toi', { tool: 'AskUserQuestion', action: oldQuestion }),
+    h(-45, 'refuse-mode-auto', { tool: 'Bash', action: 'curl https://x.example/install.sh | sh', reason: 'download and execute' }),
+    // attentes : une fantôme (hook vivant, délai passé), une au processus mort, une close par la réponse de l'utilisateur
+    // (ligne de fin à l'ancienne, sans pid), une en cours
+    h(-40, 'garde-fou-attente', { tool: 'Bash', action: 'sudo ls', ...sudo, minutes: 10, pid: HOOK_OLD }),
+    h(-3, 'garde-fou-attente', { tool: 'Bash', action: 'sudo id', ...sudo, minutes: 10, pid: deadPid }),
+    h(-4, 'garde-fou-attente', { tool: 'Bash', action: 'sudo whoami', ...sudo, minutes: 10, pid: HOOK_WHOAMI }),
+    h(-3, 'garde-fou-tu-as-repondu', { tool: 'Bash', action: 'sudo whoami', rule: 'Commande administrateur (sudo)' }),
+    h(-2, 'garde-fou-attente', { tool: 'Bash', action: 'git push --force origin main', description: 'Pousser en force', rule: 'git push forcé ou suppression de branche distante', ruleId: 'force-push', minutes: 10, pid: HOOK_PUSH }),
+  ];
+  w(path.join(DATA, 'history.jsonl'), history.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  w(path.join(DATA, 'questions.jsonl'), JSON.stringify({ id: 'q1', ts: iso(-50), sessionId: SID_A, cwd: CWD, tool: 'AskUserQuestion',
+    items: [{ question: 'Quel fond ?', header: 'Fond', multiSelect: false, options: [{ label: 'Fond B (recommandé)', description: 'chaud' }, { label: 'Fond A', description: 'froid' }], chosen: 'Fond B (recommandé)' }] }) + '\n');
+  // Faux « claude » : sous-commandes mcp seulement (jamais -p : code 2). add-json / remove écrivent mcpServers
+  // comme la vraie CLI (HOME ou CLAUDE_CONFIG_DIR) ; list imprime des états (avec un secret dans une cible,
+  // qui ne doit jamais ressortir) ; login --help et login <nom> (noté dans FAKE_LOG, rien d'autre).
+  w(FAKE, `#!${process.execPath}
+import fs from 'node:fs'; import path from 'node:path';
+const [top, sub, name, json] = process.argv.slice(2);
+if (top !== 'mcp') process.exit(2);
+if (sub === 'list') {
+  console.log('Checking MCP server health…\\n');
+  console.log('claude.ai Gmail: https://gmail.mcp.claude.com/mcp - ! Needs authentication');
+  console.log('figma-perso: https://mcp.figma.com/mcp (HTTP) - ✔ Connected');
+  console.log('figma-desktop: http://127.0.0.1:3845/mcp?token=${SECRETS[5]} (HTTP) - ✘ Failed to connect');
+  console.log('supabase: npx -y @supabase/mcp-server-supabase - ✔ Connected');
+  process.exit(0);
+}
+if (sub === 'login') {
+  if (name === '--help') { console.log('Usage: claude mcp login [options] <name>\\n\\nAuthenticate with an MCP server'); process.exit(0); }
+  fs.appendFileSync(${JSON.stringify(FAKE_LOG)}, JSON.stringify({ name, cwd: process.cwd(), configDir: process.env.CLAUDE_CONFIG_DIR || null }) + '\\n');
+  console.log('Opening browser…'); process.exit(0);
+}
+const file = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(process.env.HOME, '.claude.json');
+let j = {}; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+j.mcpServers ||= {};
+if (sub === 'add-json') { if (j.mcpServers[name]) { console.error('MCP server ' + name + ' already exists'); process.exit(1); } j.mcpServers[name] = JSON.parse(json); }
+else if (sub === 'remove') { if (!j.mcpServers[name]) { console.error('No MCP server named ' + name); process.exit(1); } delete j.mcpServers[name]; }
+else process.exit(2);
+fs.writeFileSync(file, JSON.stringify(j, null, 2));
+`, 0o755);
+  // Faux open, osascript, pbcopy : notent leurs arguments (et ce qu'on leur donne à lire) dans MAC_LOG.
+  for (const name of ['open', 'osascript', 'pbcopy']) {
+    w(path.join(TMP, 'faux-mac', name), `#!${process.execPath}
+import fs from 'node:fs';
+let input = '';
+if (${JSON.stringify(name)} === 'pbcopy') { try { input = fs.readFileSync(0, 'utf8'); } catch {} }
+fs.appendFileSync(${JSON.stringify(MAC_LOG)}, JSON.stringify({ bin: ${JSON.stringify(name)}, args: process.argv.slice(2), input }) + '\\n');
+`, 0o755);
+  }
+}
+
+// ---------- serveur ----------
+let child, PORT, logs = '';
+before(async () => {
+  seed();
+  const mac = (name) => path.join(TMP, 'faux-mac', name);
+  const env = {
+    PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_HOME: HOME, VIGIE_CLAUDE_DIR: CLAUDE, VIGIE_DATA: DATA, VIGIE_PORT: '0',
+    VIGIE_ACCOUNTS_ROOT: ACCOUNTS_ROOT, VIGIE_VSCODE_SETTINGS: VSC, VIGIE_RUNCAT_STATE: path.join(TMP, 'runcat.json'),
+    VIGIE_QUOTA_FILE: path.join(TMP, 'quota.json'), VIGIE_CLAUDE_BIN: FAKE,
+    VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même
+    VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
+  };
+  child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stderr.on('data', (d) => { logs += d; });
+  PORT = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`serveur muet : ${logs}`)), 10_000);
+    child.stdout.on('data', (d) => { logs += d; const m = /127\.0\.0\.1:(\d+)/.exec(logs); if (m) { clearTimeout(t); resolve(Number(m[1])); } });
+    child.on('exit', (c) => reject(new Error(`serveur arrêté (${c}) : ${logs}`)));
+  });
+  for (let i = 0; i < 100; i++) {
+    const r = await get('/api/v2/health');
+    if (r.body?.indexing?.done && (await get('/api/v2/overview')).body.conversations.length === 2) return;
+    await new Promise((r2) => setTimeout(r2, 100));
+  }
+  throw new Error('indexation trop longue');
+});
+after(() => {
+  child?.kill('SIGTERM');
+  for (const hk of hooks) hk.kill('SIGKILL');
+  fs.rmSync(TMP, { recursive: true, force: true });
+});
+
+function raw(method, p, { body, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, method, path: p, headers }, (res) => {
+      let d = '';
+      res.on('data', (c) => { d += c; });
+      res.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { /* texte */ } resolve({ status: res.statusCode, headers: res.headers, text: d, body: j }); });
+    });
+    req.on('error', reject);
+    if (body !== undefined) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+const get = (p) => raw('GET', p);
+const post = (p, body, headers = { 'Content-Type': 'application/json', 'X-Vigie': '1' }) => raw('POST', p, { body, headers });
+const noSecret = (r) => { for (const s of SECRETS) assert.ok(!r.text.includes(s), 'un secret est sorti du serveur'); };
+
+// ---------- contrat (docs/api-v2.md) ----------
+const opt = (s) => ({ $opt: s });
+const oneOf = (...v) => ({ $enum: v });
+const arr = (s) => ({ $arr: s });
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+function check(v, s, at = '$', errs = []) {
+  if (isObj(s) && '$opt' in s) { if (v === null || v === undefined) return errs; return check(v, s.$opt, at, errs); }
+  if (v === undefined || v === null) { errs.push(`${at} : absent`); return errs; }
+  if (s === 'string') { if (typeof v !== 'string') errs.push(`${at} : texte attendu`); return errs; }
+  if (s === 'int') { if (!Number.isInteger(v)) errs.push(`${at} : entier attendu`); return errs; } // l'app décode des Int
+  if (s === 'number') { if (typeof v !== 'number' || !Number.isFinite(v)) errs.push(`${at} : nombre attendu`); return errs; }
+  if (s === 'bool') { if (typeof v !== 'boolean') errs.push(`${at} : booléen attendu`); return errs; }
+  if (s === 'service') { if (typeof v !== 'string' || !/^[a-z0-9-]+$/.test(v) || v === 'other') errs.push(`${at} : service inattendu ${JSON.stringify(v)}`); return errs; }
+  if (s === 'iso') { if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(v)) errs.push(`${at} : date ISO UTC attendue`); return errs; }
+  if (s.$enum) { if (!s.$enum.includes(v)) errs.push(`${at} : valeur inattendue ${JSON.stringify(v)}`); return errs; }
+  if (s.$arr) { if (!Array.isArray(v)) errs.push(`${at} : liste attendue`); else v.forEach((x, i) => check(x, s.$arr, `${at}[${i}]`, errs)); return errs; }
+  if (!isObj(v)) { errs.push(`${at} : objet attendu`); return errs; }
+  for (const [k, sub] of Object.entries(s)) check(v[k], sub, `${at}.${k}`, errs);
+  return errs;
+}
+const ISO = 'iso';
+const Window = { pct: 'number', resetsAt: opt(ISO) };
+const AccountSummary = {
+  id: 'string', label: 'string', email: opt('string'), connected: 'bool', isDefault: 'bool',
+  usage: { session: opt(Window), week: opt(Window), weekModel: opt({ label: 'string', pct: 'number', resetsAt: opt(ISO) }), observedAt: opt(ISO) },
+};
+const DECISION = oneOf('auto', 'you', 'blocked', 'waiting', 'denied');
+const ITEM_KIND = oneOf('command', 'commit', 'push', 'file', 'web', 'mcp', 'agent', 'question', 'other');
+// Identifiant de service (icône) : minuscules, jamais l'ancien « other » (remplacé par « autre »).
+const SERVICE = 'service';
+const ConversationSummary = {
+  id: 'string', title: 'string', project: 'string', cwd: opt('string'),
+  status: oneOf('working', 'idle', 'waiting', 'blocked', 'closed'), running: 'bool', accountId: opt('string'),
+  autoAccept: 'bool', autoAcceptOverride: opt('bool'), connectors: oneOf('on', 'off'),
+  agentsRunning: 'int', workflowsRunning: 'int', weekPct: opt('number'), lastActivity: opt(ISO), needsYou: 'int', headline: opt('string'),
+  // carte de la vue d'ensemble (tour 2)
+  progress: opt({ done: 'int', total: 'int', label: 'string', current: opt('string') }),
+  // consommation en direct et alerte (tour 3)
+  rate: opt({ weekPctPerHour: opt('number'), tokensPerMin: 'int', spark: arr('number'), trend: oneOf('up', 'flat', 'down') }),
+  alert: opt({ kind: oneOf('emballe'), since: ISO, reason: 'string' }),
+  tests: { failedRecent: 'int', running: 'int', lastOk: opt('bool'), lastTs: opt(ISO), lastTitle: opt('string'),
+    failures: opt(arr({ title: 'string', line: opt('string'), kind: oneOf('tests', 'e2e', 'types', 'lint', 'build'), ts: ISO, by: opt('string') })) },
+  accepted: { today: 'int', sinceSeen: 'int' },
+  artifacts: { count: 'int', last: opt({ title: 'string', url: opt('string'), ts: opt(ISO) }) },
+};
+const Overview = {
+  now: ISO,
+  settings: { autoAccept: 'bool', questionsAuto: 'bool', questionWaitMin: 'int', connectorsDefault: oneOf('on', 'off'),
+    guard: { enabled: 'bool', mode: opt(oneOf('vigie', 'vscode')), waitMin: 'int', rules: arr({ id: 'string', label: 'string', disabled: 'bool' }) } },
+  since: ISO,
+  sinceSummary: { accepted: 'int', questionsAuto: 'int', blocked: 'int', reports: 'int', testsFailed: 'int', limits: 'int' },
+  toReview: arr({
+    id: 'string', kind: oneOf('question', 'blocked', 'waiting', 'limit'), conversationId: opt('string'), conversationTitle: opt('string'),
+    title: 'string', detail: opt('string'), ts: ISO,
+    question: opt({ id: 'string', items: arr({ question: 'string', header: opt('string'), multiSelect: 'bool', options: arr({ label: 'string', description: opt('string') }), chosen: opt('string') }) }),
+    // garde-fou (kind = blocked)
+    state: opt(oneOf('waiting', 'blocked', 'awaiting')), approvalId: opt('string'), approved: opt('bool'), pendingId: opt('string'), expiresAt: opt(ISO), rule: opt('string'), command: opt('string'),
+    byAgent: opt('string'), cwd: opt('string'), needsPassword: opt('bool'),
+  }),
+  reports: arr({ kind: oneOf('artifact', 'missionDone', 'workflowDone'), conversationId: 'string', conversationTitle: 'string', title: 'string', detail: opt('string'), url: opt('string'), ts: ISO }),
+  accounts: arr(AccountSummary), conversations: arr(ConversationSummary),
+  recentAccepted: arr({ ts: ISO, conversationId: opt('string'), conversationTitle: opt('string'), project: opt('string'), kind: ITEM_KIND,
+    title: 'string', detail: opt('string'), decision: DECISION, agent: opt('string'), service: opt(SERVICE) }),
+  engine: { indexing: 'bool', wrapperActive: 'bool' },
+};
+const Agent = {
+  id: 'string', title: 'string', type: opt('string'), workflow: opt('string'), phase: opt('string'), startedAt: opt(ISO), lastAt: opt(ISO),
+  durationMs: opt('number'), actions: opt('int'), files: opt('int'), tests: opt('int'), status: oneOf('running', 'done', 'failed', 'killed', 'idle'), lastAction: opt('string'),
+};
+const Tokens = { input: 'int', output: 'int', cacheRead: 'int', cacheWrite: 'int' };
+const Detail = {
+  summary: { ...ConversationSummary, branch: opt('string'), startedAt: opt(ISO) },
+  now: { text: opt('string'), ts: opt(ISO), tasks: arr({ text: 'string', status: oneOf('done', 'doing', 'todo') }), tasksTs: opt(ISO),
+    plan: opt({ title: 'string', file: 'string', updatedAt: opt(ISO), steps: arr({ id: opt('string'), text: 'string', status: oneOf('done', 'doing', 'todo'), group: opt('string') }),
+      done: 'int', total: 'int', current: opt('string') }) },
+  chapters: arr({ id: 'string', prompt: 'string', start: ISO, end: ISO, durationMs: 'number',
+    stats: { workflows: 'int', agents: 'int', artifacts: 'int', files: 'int', tests: 'int', testsFailed: 'int', commits: 'int' }, outcome: opt('string') }),
+  accepted: arr({ ts: ISO, kind: ITEM_KIND, title: 'string', detail: opt('string'), decision: DECISION }),
+  activity: arr({ ts: ISO, kind: 'string', title: 'string', detail: opt('string'), agent: opt('string'), ok: opt('bool') }),
+  agents: { running: arr(Agent), done: arr(Agent) },
+  workflows: arr({ id: 'string', name: 'string', summary: opt('string'), status: oneOf('running', 'done', 'failed', 'killed', 'idle'), startedAt: opt(ISO),
+    durationMs: opt('number'), agents: opt('int'), tokens: opt('int'), phases: opt(arr('string')) }),
+  artifacts: arr({ title: 'string', url: opt('string'), description: opt('string'), ts: opt(ISO), publishes: opt('int') }),
+  files: arr({ path: 'string', name: 'string', ext: opt('string'), kind: oneOf('code', 'style', 'page', 'doc', 'data', 'image', 'media', 'config', 'other'),
+    created: 'bool', writes: 'int', ts: opt(ISO), by: opt('string'), location: oneOf('project', 'elsewhere', 'scratch') }),
+  tests: arr({ ts: ISO, kind: oneOf('tests', 'e2e', 'types', 'lint', 'build'), ok: opt('bool'), passed: opt('int'), failed: opt('int'), title: 'string', command: opt('string'), by: opt('string') }),
+  mcp: arr({ name: 'string', scope: oneOf('project', 'user', 'local', 'connector', 'plugin', 'unknown'), uses: 'int', enabled: opt('bool'),
+    service: SERVICE, status: oneOf(...HEALTH_STATUSES) }),
+  tokens: { today: Tokens, total: Tokens },
+  limits: arr({ ts: ISO, text: 'string' }),
+};
+const Health = arr({ accountId: 'string', status: oneOf(...HEALTH_STATUSES), checkedAt: opt(ISO) });
+const Server = { name: 'string', type: oneOf('stdio', 'http', 'sse', 'ws', 'sdk'), target: 'string', service: SERVICE, uses7d: 'int', health: Health };
+const Mcp = {
+  user: arr({ ...Server, accounts: arr('string'), needsAuth: 'bool', needsAuthIn: arr('string') }),
+  projects: arr({ path: 'string', name: 'string', file: 'string', servers: arr({ ...Server, disabled: 'bool' }), readOnly: opt('string') }),
+  local: arr({ path: 'string', name: 'string', servers: arr({ ...Server, disabled: 'bool' }) }),
+  connectors: arr({ name: 'string', accountId: opt('string'), uses7d: 'int', service: SERVICE, health: Health }),
+  connectorsDefault: oneOf('on', 'off'),
+  healthCheck: { running: 'bool', startedAt: opt(ISO), checkedAt: opt(ISO) },
+};
+const Accounts = {
+  accounts: arr({ ...AccountSummary, configDir: opt('string'), keychainItem: 'string', dirReady: 'bool' }),
+  defaultForNew: 'string',
+  wrapper: { path: 'string', active: 'bool' },
+};
+const conforms = (v, s) => assert.deepEqual(check(v, s), [], 'réponse hors contrat');
+
+// ---------- lecture ----------
+
+test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attentes fantômes écartées', async () => {
+  const r = await get('/api/v2/overview');
+  assert.equal(r.status, 200);
+  conforms(r.body, Overview);
+  noSecret(r);
+  const o = r.body;
+  const a = o.conversations.find((c) => c.id === SID_A);
+  const b = o.conversations.find((c) => c.id === SID_B);
+  assert.equal(o.conversations[0].id, SID_A, 'ouvertes d\'abord');
+  assert.equal(a.status, 'blocked');
+  assert.equal(a.running, true);
+  assert.equal(b.status, 'closed');
+  assert.equal(a.accountId, 'travail1');
+  assert.equal(a.autoAccept, true);
+  assert.equal(a.autoAcceptOverride, null);
+  assert.equal(a.connectors, 'on', 'sans le lanceur, rien ne coupe les connecteurs : ils sont chargés');
+  // une seule attente en cours : la fantôme (délai passé), celle au processus mort et celle où l'utilisateur a répondu sont écartées
+  const pending = o.toReview.filter((x) => x.id.startsWith('g:'));
+  assert.equal(pending.length, 1);
+  assert.equal(o.toReview[0], pending[0], 'ce qui attend maintenant passe en premier');
+  const g = pending[0];
+  assert.equal(g.kind, 'blocked');
+  assert.equal(g.title, 'git push forcé ou suppression de branche distante');
+  assert.match(g.detail, /^Pousser en force · décide ici ou dans VS Code, sinon refusée dans (8|9) min\.$/);
+  assert.deepEqual([g.state, g.pendingId, g.command, g.rule, g.cwd, g.byAgent, g.needsPassword],
+    ['waiting', String(HOOK_PUSH), 'git push --force origin main', 'git push forcé ou suppression de branche distante', CWD, null, false]);
+  assert.ok(Math.abs(Date.parse(g.expiresAt) - (NOW + 8 * 60_000)) < 5000, 'échéance : début de l\'attente + guard.waitMin');
+  const q = o.toReview.find((x) => x.kind === 'question');
+  assert.equal(q.id, 'q:q1');
+  assert.equal(q.conversationTitle, a.title);
+  assert.equal(q.question.items[0].chosen, 'Fond B (recommandé)');
+  // actions refusées depuis le dernier passage : à faire soi-même, avec la commande (masquée) et le dossier
+  const blocked = o.toReview.filter((x) => x.id.startsWith('b:'));
+  assert.equal(blocked.length, 2, 'le refus de l\'utilisateur depuis l\'app n\'est pas « à faire toi-même »');
+  assert.ok(blocked.every((x) => x.kind === 'blocked' && x.state === 'blocked' && /^Refusée/.test(x.detail) && x.cwd === CWD && x.needsPassword === true));
+  const withKey = blocked.find((x) => x.ts === iso(-58));
+  assert.equal(withKey.command, 'sudo curl -H "Authorization: Bearer ••••" https://api.example.com/y');
+  assert.equal(withKey.byAgent, 'agent-verif');
+  assert.match(withKey.detail, /^Refusée faute de réponse : /);
+  // limites : celle de A court encore, celle de B est déjà remise à zéro
+  const limits = o.toReview.filter((x) => x.kind === 'limit');
+  assert.deepEqual(limits.map((x) => x.conversationId), [SID_A]);
+  assert.match(limits[0].detail, /session limit/);
+  assert.equal(a.needsYou, o.toReview.filter((x) => x.conversationId === SID_A).length);
+  assert.equal(a.needsYou, 5);
+  assert.equal(b.needsYou, 0, 'limite remise à zéro : plus rien à regarder');
+  assert.deepEqual(o.sinceSummary, { accepted: 3, questionsAuto: 1, blocked: 2, reports: o.sinceSummary.reports, testsFailed: 1, limits: 2 });
+  assert.equal(o.settings.questionsAuto, false);
+  assert.equal(o.settings.guard.rules.length, DEFAULT_GUARDS.length);
+  assert.equal(o.engine.wrapperActive, false);
+  assert.equal(o.accounts[0].email, 'alex@example.com');
+  assert.equal(o.accounts[0].usage.week.pct, 40);
+});
+
+test('cartes : progression, tests, acceptations du jour et depuis le dernier passage, artefacts ; fil des décisions', async () => {
+  const o = (await get('/api/v2/overview')).body;
+  const a = o.conversations.find((c) => c.id === SID_A);
+  const b = o.conversations.find((c) => c.id === SID_B);
+  assert.deepEqual(a.progress, { done: 1, total: 2, label: 'Tâches', current: 'Tester la page' });
+  assert.deepEqual([a.tests.failedRecent, a.tests.running, a.tests.lastOk, a.tests.lastTitle], [1, 0, true, 'Lancer les tests']);
+  assert.equal(a.tests.failures.length, 1);
+  assert.deepEqual([a.tests.failures[0].kind, a.tests.failures[0].title], ['types', 'Vérifier les types']);
+  assert.match(a.tests.failures[0].line, /error TS2322/);
+  // acceptations de Vigie (auto-accepte, question-auto) : depuis minuit (heure locale) et depuis le dernier passage
+  const midnight = new Date(NOW); midnight.setHours(0, 0, 0, 0);
+  const today = [-80, -70, -65, -50].filter((m) => NOW + m * 60_000 >= midnight.getTime()).length;
+  assert.deepEqual(a.accepted, { today, sinceSeen: 4 });
+  assert.deepEqual(b.accepted, { today: 0, sinceSeen: 0 });
+  assert.deepEqual(a.artifacts, { count: 0, last: null });
+  assert.equal(b.progress, null);
+  // fil : décisions de Vigie toutes conversations confondues, plus récent d'abord
+  const f = o.recentAccepted;
+  assert.ok(f.length >= 10 && f.length <= 30);
+  assert.deepEqual([f[0].decision, f[0].kind, f[0].conversationId, f[0].conversationTitle, f[0].project], ['waiting', 'push', SID_A, a.title, 'atelier']);
+  assert.equal(f.filter((x) => x.decision === 'waiting').length, 1, 'les attentes finies n\'y sont pas');
+  const old = f.find((x) => x.ts === iso(-48));
+  assert.deepEqual([old.kind, old.title, old.detail, old.decision], ['question', 'Quelle couleur ?', 'Quelle couleur ? [Bleu / Vert]', 'you'], 'ancienne ligne en JSON : la question, lisible');
+  assert.equal(f.find((x) => x.ts === iso(-57)).decision, 'denied');
+  assert.equal(f.find((x) => x.ts === iso(-58)).agent, 'agent-verif');
+});
+
+test('part de la semaine : poids de la conversation / poids du compte × pourcentage du compte', async () => {
+  const o = (await get('/api/v2/overview')).body;
+  const a = o.conversations.find((c) => c.id === SID_A).weekPct;
+  const b = o.conversations.find((c) => c.id === SID_B).weekPct;
+  assert.ok(a > b && b > 0, `${a} > ${b} > 0`);
+  assert.ok(Math.abs(a + b - 40) <= 0.11, 'les conversations du compte se partagent ses 40 %');
+});
+
+test('détail : acceptées avec type et décision, MCP par étage, secrets masqués', async () => {
+  const r = await get(`/api/v2/conversation/${SID_A}`);
+  assert.equal(r.status, 200);
+  conforms(r.body, Detail);
+  noSecret(r);
+  const d = r.body;
+  assert.equal(d.summary.status, 'blocked');
+  assert.equal(d.summary.branch, 'main');
+  assert.equal(d.summary.accepted.sinceSeen, 4);
+  assert.equal(d.now.plan, null);
+  assert.equal(d.now.tasksTs, iso(-59));
+  const acc = d.accepted;
+  assert.equal(acc[0].decision, 'waiting', 'l\'attente en cours, en tête');
+  assert.equal(acc[0].kind, 'push');
+  assert.equal(acc.filter((x) => x.decision === 'waiting').length, 1, 'les attentes finies ne sont pas listées');
+  const by = (t) => acc.find((x) => x.title === t);
+  assert.equal(by('Lancer les tests').kind, 'command');
+  assert.equal(by('Lancer les tests').decision, 'auto');
+  assert.equal(by('Modifie accueil.tsx').kind, 'file');
+  assert.equal(by('Quel fond ?').kind, 'question');
+  assert.equal(by('Quel fond ?').detail, 'Choisi : Fond B (recommandé)');
+  assert.equal(by('Quelle couleur ?').detail, 'Quelle couleur ? [Bleu / Vert]', 'ancienne ligne en JSON : la question, lisible');
+  assert.ok(acc.some((x) => x.decision === 'blocked' && x.detail.startsWith('Commande administrateur (sudo) · ')));
+  assert.ok(acc.some((x) => x.decision === 'denied'));
+  assert.ok(acc.some((x) => x.decision === 'you'), 'L\'utilisateur a répondu lui-même');
+  assert.ok(acc.some((x) => x.detail?.includes('Authorization: Bearer ••••')), 'commande masquée');
+  const mcp = Object.fromEntries(d.mcp.map((m) => [m.name, m]));
+  assert.deepEqual([mcp['figma-perso'].scope, mcp['figma-perso'].uses, mcp['figma-perso'].enabled], ['user', 1, true]);
+  assert.deepEqual([mcp['figma-desktop'].scope, mcp['figma-desktop'].uses], ['local', 0]);
+  assert.deepEqual([mcp.supabase.scope, mcp.supabase.enabled], ['project', true]);
+  assert.deepEqual([mcp.Gmail.scope, mcp.Gmail.uses, mcp.Gmail.enabled, mcp.Gmail.service], ['connector', 1, true, 'gmail']);
+  assert.ok(d.mcp.every((m) => m.status === 'unknown'), 'pas encore de relevé');
+  assert.equal((await get('/api/v2/conversation/00000000-0000-4000-8000-000000000000')).status, 404);
+  assert.equal((await get('/api/v2/conversation/pas-un-identifiant')).status, 404);
+});
+
+test('MCP et comptes : contrat, connecteur rattaché au compte, rien de secret', async () => {
+  const m = await get('/api/v2/mcp');
+  assert.equal(m.status, 200);
+  conforms(m.body, Mcp);
+  noSecret(m);
+  assert.deepEqual(m.body.connectors.map((c) => [c.name, c.accountId]), [['Gmail', 'travail1']]);
+  assert.equal(m.body.projects.find((p) => p.path === CWD).servers[0].name, 'supabase');
+  assert.deepEqual(m.body.healthCheck, { running: false, startedAt: null, checkedAt: null });
+  const a = await get('/api/v2/accounts');
+  assert.equal(a.status, 200);
+  conforms(a.body, Accounts);
+  assert.equal(a.body.defaultForNew, 'travail1');
+  assert.equal(a.body.wrapper.active, false);
+});
+
+test('état réel des MCP : relevé à la demande (faux claude mcp list), par compte et par dossier, sans secret', async () => {
+  let r = await post('/api/v2/mcp/check', {});
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.ok, true);
+  assert.match(r.body.startedAt, /^\d{4}-/);
+  let inv;
+  for (let i = 0; i < 100; i++) {
+    inv = await get('/api/v2/mcp');
+    if (inv.body.healthCheck.checkedAt && !inv.body.healthCheck.running) break;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  conforms(inv.body, Mcp);
+  noSecret(inv);
+  const st = (list) => list.map((h) => [h.accountId, h.status]);
+  const user = inv.body.user.find((s) => s.name === 'figma-perso');
+  assert.deepEqual(st(user.health), [['travail1', 'connected']]);
+  assert.equal(user.needsAuth, false);
+  assert.deepEqual(st(inv.body.connectors.find((c) => c.name === 'Gmail').health), [['travail1', 'needs-auth']]);
+  assert.deepEqual(st(inv.body.projects.find((p) => p.path === CWD).servers.find((s) => s.name === 'supabase').health), [['travail1', 'connected']]);
+  assert.deepEqual(st(inv.body.local.find((p) => p.path === CWD).servers.find((s) => s.name === 'figma-desktop').health), [['travail1', 'failed']]);
+  const d = await get(`/api/v2/conversation/${SID_A}`);
+  noSecret(d);
+  const status = Object.fromEntries(d.body.mcp.map((m) => [m.name, m.status]));
+  assert.deepEqual(status, { 'figma-perso': 'connected', Gmail: 'needs-auth', supabase: 'connected', 'figma-desktop': 'failed' });
+  r = await post('/api/v2/mcp/check', { accountId: 'inconnu' });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error, 'Compte inconnu');
+  assert.equal((await post('/api/v2/mcp/check', { path: 'relatif' })).status, 400);
+});
+
+// ---------- écritures ----------
+
+test('réglages généraux : valeurs vérifiées, saisie vide refusée, en-tête obligatoire', async () => {
+  let r = await post('/api/v2/settings', { questionsAuto: true, questionWaitMin: 30, connectorsDefault: 'on', guard: { waitMin: 5, rules: [{ id: 'sudo', disabled: true }] } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.settings.questionsAuto, true);
+  let s = rj(path.join(DATA, 'state.json'));
+  assert.deepEqual([s.questions, s.questionWaitMin, s.connectorsDefault, s.guard.waitMin], ['wait', 30, 'on', 5]);
+  assert.equal(s.guard.rules.find((x) => x.id === 'sudo').disabled, true);
+  for (const body of [{ questionWaitMin: '' }, { questionWaitMin: null }, { questionWaitMin: 0 }, { guard: { waitMin: '' } }, { guard: { rules: [{ id: 'inconnu', disabled: true }] } },
+    { autoAccept: 'oui' }, { connectorsDefault: 'peut-être' }]) {
+    r = await post('/api/v2/settings', body);
+    assert.equal(r.status, 400, JSON.stringify(body));
+    assert.equal(r.body.ok, false);
+    assert.equal(typeof r.body.error, 'string');
+  }
+  s = rj(path.join(DATA, 'state.json'));
+  assert.deepEqual([s.questionWaitMin, s.guard.waitMin], [30, 5], 'rien n\'a bougé');
+  assert.equal((await post('/api/v2/settings', { autoAccept: false }, { 'Content-Type': 'application/json' })).status, 403);
+  assert.equal((await post('/api/v2/settings', { autoAccept: false }, { 'X-Vigie': '1', Origin: 'https://evil.example' })).status, 403);
+  assert.equal(rj(path.join(DATA, 'state.json')).autoAccept, true);
+  r = await post('/api/v2/settings', { questionsAuto: false, questionWaitMin: 20, connectorsDefault: 'off', guard: { waitMin: 10, rules: [{ id: 'sudo', disabled: false }] } });
+  assert.equal(r.status, 200);
+});
+
+test('réglages d\'une conversation, et bascule de compte', async () => {
+  let r = await post(`/api/v2/conversation/${SID_A}/settings`, { autoAccept: false, connectors: 'on' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(rj(path.join(DATA, 'state.json')).sessions[SID_A], { autoAccept: false, connectors: 'on' });
+  let a = (await get('/api/v2/overview')).body.conversations.find((c) => c.id === SID_A);
+  assert.deepEqual([a.autoAccept, a.autoAcceptOverride, a.connectors], [false, false, 'on']);
+  assert.equal((await get(`/api/v2/conversation/${SID_A}`)).body.mcp.find((m) => m.name === 'Gmail').enabled, true);
+  r = await post(`/api/v2/conversation/${SID_A}/settings`, { autoAccept: null, connectors: null });
+  assert.equal(r.status, 200);
+  assert.equal(rj(path.join(DATA, 'state.json')).sessions[SID_A], undefined);
+  assert.equal(r.body.conversation.connectors, 'on', 'sans le lanceur, les connecteurs restent chargés');
+  a = (await get('/api/v2/overview')).body.conversations.find((c) => c.id === SID_A);
+  assert.deepEqual([a.autoAccept, a.autoAcceptOverride, a.connectors], [true, null, 'on']);
+
+  r = await post(`/api/v2/conversation/${SID_B}/settings`, { accountId: 'travail1' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.switch.state, 'done');
+  assert.equal(typeof r.body.switch.message, 'string');
+  assert.equal(rj(path.join(DATA, 'accounts.json')).sessions[SID_B], 'travail1');
+  r = await post(`/api/v2/conversation/${SID_B}/settings`, { accountId: 'inconnu', autoAccept: false });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error, 'Compte inconnu.');
+  assert.equal(rj(path.join(DATA, 'state.json')).sessions[SID_B], undefined, 'bascule refusée : rien d\'autre n\'est changé');
+  assert.equal((await post(`/api/v2/conversation/${SID_B}/settings`, {})).status, 400);
+  assert.equal((await post(`/api/v2/conversation/${SID_B}/settings`, { connectors: 'peut-être' })).status, 400);
+  assert.equal((await post('/api/v2/conversation/__proto__/settings', { autoAccept: true })).status, 404);
+});
+
+test('action sensible en attente : autoriser ou refuser depuis l\'app (decisions.json), attente finie = 404', async () => {
+  let r = await post(`/api/v2/pending/${HOOK_PUSH}`, { decision: 'peut-être' });
+  assert.equal(r.status, 400);
+  r = await post(`/api/v2/pending/${deadPid}`, { decision: 'deny' });
+  assert.deepEqual([r.status, r.body.ok], [404, false], 'hook mort : l\'attente est finie');
+  assert.equal((await post(`/api/v2/pending/${HOOK_OLD}`, { decision: 'allow' })).status, 404, 'délai passé');
+  assert.equal((await post('/api/v2/pending/abc', { decision: 'allow' })).status, 404);
+  r = await post(`/api/v2/pending/${HOOK_PUSH}`, { decision: 'allow' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.ok, true);
+  assert.match(r.body.message, /^Autorisée/);
+  const d = rj(path.join(DATA, 'decisions.json'))[String(HOOK_PUSH)];
+  assert.deepEqual([d.decision, d.sessionId], ['allow', SID_A]);
+  assert.ok(Math.abs(Date.parse(d.ts) - Date.now()) < 60_000);
+  r = await post(`/api/v2/pending/${HOOK_PUSH}`, { decision: 'deny' });
+  assert.equal(r.status, 200, 'L\'utilisateur change d\'avis avant que le hook ait lu : la dernière décision compte');
+  assert.equal(rj(path.join(DATA, 'decisions.json'))[String(HOOK_PUSH)].decision, 'deny');
+  assert.equal((await post(`/api/v2/pending/${HOOK_PUSH}`, { decision: 'allow' }, { 'Content-Type': 'application/json' })).status, 403, 'X-Vigie obligatoire');
+});
+
+test('ouvrir : la conversation dans VS Code (dossier puis onglet), rien d\'autre', async () => {
+  fs.rmSync(MAC_LOG, { force: true });
+  let r = await post('/api/v2/open', { kind: 'conversation', id: SID_A });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.openUrl, `vscode://anthropic.claude-code/open?session=${SID_A}`);
+  assert.deepEqual(macCalls().map((c) => [c.bin, c.args]), [['open', ['-a', 'Visual Studio Code', CWD]], ['open', [`vscode://anthropic.claude-code/open?session=${SID_A}`]]]);
+  assert.equal((await post('/api/v2/open', { kind: 'conversation', id: '00000000-0000-4000-8000-000000000000' })).status, 404);
+  assert.equal((await post('/api/v2/open', { kind: 'conversation', id: '../..' })).status, 404);
+  assert.equal((await post('/api/v2/open', { kind: 'fenêtre' })).status, 400);
+});
+
+test('ouvrir : Terminal avec la commande exacte tapée mais pas lancée, retrouvée à partir du texte masqué', async () => {
+  const o = (await get('/api/v2/overview')).body;
+  const item = o.toReview.find((x) => x.ts === iso(-58) && x.id.startsWith('b:'));
+  assert.ok(item.command.includes('••••'));
+  fs.rmSync(MAC_LOG, { force: true });
+  let r = await post('/api/v2/open', { kind: 'terminal', command: item.command, cwd: item.cwd });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.mode, 'typed');
+  noSecret(r);
+  const calls = macCalls();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].bin, 'osascript');
+  const script = calls[0].args.join(' ');
+  for (const s of SECRETS) assert.ok(!script.includes(s), 'jamais la commande dans le texte de la fenêtre');
+  assert.match(script, /do script "clear; cd '[^']*atelier' && print -rz -- \\"\$\(<'[^']+\.txt'\)\\"; rm -f '[^']+\.txt'"/);
+  const file = /\$\(<'([^']+)'\)/.exec(script)[1];
+  assert.ok(file.startsWith(path.join(DATA, 'terminal')));
+  assert.equal(fs.readFileSync(file, 'utf8'), `sudo curl -H "Authorization: Bearer ${SECRETS[4]}" https://api.example.com/y`, 'la vraie commande, pas le texte masqué');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  // par l'élément de « À regarder », et par l'attente en cours
+  r = await post('/api/v2/open', { kind: 'terminal', id: item.id });
+  assert.equal(r.status, 200);
+  r = await post('/api/v2/open', { kind: 'terminal', pendingId: String(HOOK_PUSH) });
+  assert.equal(r.status, 200);
+  const last = macCalls().at(-1).args.join(' ');
+  assert.equal(fs.readFileSync(/\$\(<'([^']+)'\)/.exec(last)[1], 'utf8'), 'git push --force origin main');
+  // texte masqué inconnu : rien n'est ouvert
+  const before = macCalls().length;
+  r = await post('/api/v2/open', { kind: 'terminal', command: 'sudo rm ••••' });
+  assert.equal(r.status, 400);
+  assert.equal((await post('/api/v2/open', { kind: 'terminal', command: '' })).status, 400);
+  assert.equal(macCalls().length, before);
+});
+
+test('« À regarder » : écarter un élément le retire de la liste et du compteur de la conversation', async () => {
+  let o = (await get('/api/v2/overview')).body;
+  const item = o.toReview.find((x) => x.ts === iso(-60) && x.id.startsWith('b:'));
+  const needs = o.conversations.find((c) => c.id === SID_A).needsYou;
+  const r = await post(`/api/v2/review/${encodeURIComponent(item.id)}/dismiss`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  o = (await get('/api/v2/overview')).body;
+  assert.ok(!o.toReview.some((x) => x.id === item.id));
+  assert.equal(o.conversations.find((c) => c.id === SID_A).needsYou, needs - 1);
+  assert.ok(rj(path.join(DATA, 'ui.json')).dismissed[item.id], 'noté dans data/ui.json');
+  assert.ok(rj(path.join(DATA, 'ui.json')).lastSeen, 'le dernier passage est gardé');
+  assert.equal((await post('/api/v2/review/n%27importe%20quoi/dismiss', {})).status, 404);
+});
+
+test('connecter un MCP : connecteur par le navigateur, MCP OAuth dans un pseudo-terminal (sans Terminal), refus sans appel', async () => {
+  fs.rmSync(MAC_LOG, { force: true });
+  let r = await post('/api/v2/mcp/connect', { name: 'Gmail' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.mode, 'browser');
+  const logins = fs.readFileSync(FAKE_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(logins.map((x) => [x.name, x.configDir]), [['claude.ai Gmail', null]], 'le connecteur sous son nom de CLI, compte principal');
+  r = await post('/api/v2/mcp/connect', { name: 'figma-desktop', path: CWD });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.mode, 'browser', 'MCP OAuth : le navigateur s\'ouvre, plus de Terminal');
+  let mac = [];
+  try { mac = macCalls(); } catch { /* aucun appel */ }
+  assert.ok(!mac.some((c) => c.bin === 'osascript'), 'Terminal ne s\'ouvre pas');
+  const lines = () => fs.readFileSync(FAKE_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  for (let i = 0; i < 100 && !lines().some((x) => x.name === 'figma-desktop'); i++) await new Promise((res) => setTimeout(res, 50));
+  assert.ok(lines().some((x) => x.name === 'figma-desktop'), 'claude mcp login lancé pour figma-desktop');
+  r = await post('/api/v2/mcp/connect', { name: 'figma-perso' });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /^Déjà connecté/, 'relevé « connected » : reconnecter effacerait ses jetons');
+  r = await post('/api/v2/mcp/connect', { name: 'figma-perso', force: true });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /rien à autoriser/);
+  assert.equal((await post('/api/v2/mcp/connect', { name: '' })).status, 400);
+  assert.equal((await post('/api/v2/mcp/connect', { name: 'Gmail', accountId: 'inconnu' })).status, 400);
+  assert.equal(fs.readFileSync(FAKE_LOG, 'utf8').trim().split('\n').length, 2, 'aucun autre appel à la CLI');
+  const journal = fs.readFileSync(path.join(DATA, 'mcp-connect.log'), 'utf8');
+  for (const s of SECRETS) assert.ok(!journal.includes(s), 'journal des connexions sans secret');
+});
+
+test('questions à relire : changer prépare le texte de correction, puis la question sort de la liste', async () => {
+  let r = await post('/api/v2/questions/q1/review', { action: 'change', answers: { 'Quel fond ?': 'Fond Z' } });
+  assert.equal(r.status, 400);
+  r = await post('/api/v2/questions/q%3Aq1/review', { action: 'change', answers: { 'Quel fond ?': 'Fond A' } });
+  assert.equal(r.status, 200);
+  assert.match(r.body.correction, /« Fond A » au lieu de « Fond B \(recommandé\) »/);
+  assert.equal(r.body.delivered, false);
+  assert.equal(r.body.openUrl, `vscode://anthropic.claude-code/open?session=${SID_A}`, 'conversation ouverte : pas de texte pré-rempli');
+  const o = (await get('/api/v2/overview')).body;
+  assert.ok(!o.toReview.some((x) => x.kind === 'question'));
+  assert.equal((await post('/api/v2/questions/inconnue/review', { action: 'ok' })).status, 404);
+});
+
+test('dernier passage : « j\'ai tout vu » remet les compteurs à zéro', async () => {
+  const r = await post('/api/v2/seen', {});
+  assert.equal(r.status, 200);
+  const o = (await get('/api/v2/overview')).body;
+  assert.equal(o.since, r.body.since);
+  assert.equal(o.sinceSummary.accepted, 0);
+  assert.ok(!o.toReview.some((x) => x.id.startsWith('b:') || x.kind === 'limit'));
+  assert.ok(o.toReview.some((x) => x.id.startsWith('g:')), 'ce qui attend maintenant reste');
+});
+
+test('MCP : projet, coupure pour un projet, Mac via la CLI (fichiers temporaires)', async () => {
+  const cfg = { type: 'stdio', command: 'npx', args: ['-y', 'netlify-mcp'] };
+  let r = await post('/api/v2/mcp/project', { action: 'add', path: CWD, name: 'netlify', config: cfg });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(rj(path.join(CWD, '.mcp.json')).mcpServers.netlify, cfg);
+  assert.ok(r.body.backup.startsWith(path.join(DATA, 'backups', 'mcp')));
+  r = await post('/api/v2/mcp/project', { action: 'add', path: CWD, name: 'netlify', config: cfg });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error, 'Déjà présent dans ce projet');
+  r = await post('/api/v2/mcp/project', { action: 'remove', path: CWD, name: 'netlify' });
+  assert.equal(r.status, 200);
+  assert.equal(rj(path.join(CWD, '.mcp.json')).mcpServers.netlify, undefined);
+  assert.equal(rj(path.join(CWD, '.mcp.json')).mcpServers.supabase.env.SUPABASE_ACCESS_TOKEN, SECRETS[2], 'les autres serveurs gardent leurs valeurs');
+  assert.equal((await post('/api/v2/mcp/project', { action: 'add', path: TMP, name: 'x', config: cfg })).status, 400);
+  assert.equal((await post('/api/v2/mcp/project', { action: 'renommer' })).status, 400);
+
+  r = await post('/api/v2/mcp/disable', { path: CWD, name: 'figma-perso', disabled: true });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(rj(path.join(HOME, '.claude.json')).projects[CWD].disabledMcpServers, ['figma-perso']);
+  assert.equal((await get(`/api/v2/conversation/${SID_A}`)).body.mcp.find((m) => m.name === 'figma-perso').enabled, false);
+  assert.equal((await post('/api/v2/mcp/disable', { path: CWD, name: 'figma-perso', disabled: false })).status, 200);
+  assert.deepEqual(rj(path.join(HOME, '.claude.json')).projects[CWD].disabledMcpServers, []);
+  assert.equal((await post('/api/v2/mcp/disable', { path: CWD, name: 'figma-perso', disabled: 'oui' })).status, 400);
+
+  const art = { type: 'http', url: 'https://mcp.artlist.io/mcp' };
+  r = await post('/api/v2/mcp/user', { action: 'add', name: 'artlist', config: art });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(rj(path.join(HOME, '.claude.json')).mcpServers.artlist, art);
+  r = await post('/api/v2/mcp/user', { action: 'add', name: 'artlist', config: art });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, / : Déjà présent dans ce compte$/, 'erreur compte par compte, avec le nom du compte');
+  assert.equal((await post('/api/v2/mcp/user', { action: 'remove', name: 'artlist' })).status, 200);
+  assert.equal(rj(path.join(HOME, '.claude.json')).mcpServers.artlist, undefined);
+  assert.equal(rj(path.join(HOME, '.claude.json')).mcpServers['figma-perso'].headers.Authorization, `Bearer ${SECRETS[0]}`);
+  r = await post('/api/v2/mcp/user', { action: 'add', name: 'nom invalide!', config: art });
+  assert.equal(r.status, 400);
+  const inv = await get('/api/v2/mcp');
+  noSecret(inv);
+});
+
+test('comptes : création d\'un dossier de compte et lanceur VS Code (fichiers temporaires)', async () => {
+  let r = await post('/api/v2/accounts', { action: 'create', label: 'Perso test' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.ok(r.body.account.configDir.startsWith(ACCOUNTS_ROOT));
+  const view = (await get('/api/v2/accounts')).body;
+  conforms(view, Accounts);
+  assert.equal(view.accounts.length, 2);
+  // compte pas encore connecté : une conversation ne peut pas y passer
+  r = await post(`/api/v2/conversation/${SID_B}/settings`, { accountId: view.accounts[1].id });
+  assert.equal(r.status, 400);
+  r = await post('/api/v2/accounts', { action: 'wrapper', enable: true });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.match(fs.readFileSync(VSC, 'utf8'), /"claudeCode\.claudeProcessWrapper": /);
+  const o = (await get('/api/v2/overview')).body;
+  assert.equal(o.engine.wrapperActive, true);
+  assert.equal(o.conversations.find((c) => c.id === SID_A).connectors, 'off', 'lanceur actif : le réglage (coupés par défaut) s\'applique');
+  assert.equal((await get(`/api/v2/conversation/${SID_A}`)).body.mcp.find((m) => m.name === 'Gmail').enabled, false);
+  r = await post('/api/v2/accounts', { action: 'wrapper', enable: false });
+  assert.equal(r.status, 200);
+  assert.doesNotMatch(fs.readFileSync(VSC, 'utf8'), /claudeProcessWrapper/);
+  r = await post('/api/v2/accounts', { action: 'inventer' });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error, 'Action inconnue.');
+});
+
+// ---------- HTTP ----------
+
+test('HTTP : adresses invalides, hôte, JSON, taille, méthode, en-têtes de sécurité', async () => {
+  let r = await raw('GET', '//');
+  assert.equal(r.status, 400, 'une adresse « // » ne fait plus tomber le serveur');
+  r = await raw('GET', '/api/v2/overview', { headers: { Host: 'evil.example:4777' } });
+  assert.equal(r.status, 403);
+  r = await post('/api/v2/settings', 'pas du json');
+  assert.deepEqual([r.status, r.body.error], [400, 'JSON illisible.']);
+  r = await post('/api/v2/settings', '[1,2]');
+  assert.equal(r.status, 400);
+  r = await post('/api/v2/settings', JSON.stringify({ x: 'a'.repeat(1_100_000) }));
+  assert.equal(r.status, 413);
+  assert.equal((await raw('PUT', '/api/v2/settings')).status, 405);
+  assert.equal((await get('/api/v2/settings')).status, 405);
+  assert.equal((await get('/api/v2/inconnu')).status, 404);
+  assert.equal((await get('/public/../server.mjs')).status, 404);
+  r = await get('/');
+  assert.equal(r.status, 200);
+  assert.match(r.text, /Ouvre l’app <strong>Vigie<\/strong>/);
+  assert.match(r.text, /href="\/api\/v2\/overview"/);
+  for (const x of [r, await get('/api/v2/overview')]) {
+    assert.equal(x.headers['x-frame-options'], 'DENY');
+    assert.match(x.headers['content-security-policy'], /frame-ancestors 'none'/);
+    assert.equal(x.headers['access-control-allow-origin'], undefined);
+  }
+  assert.equal((await get('/api/v2/health')).status, 200, 'toujours en vie');
+  assert.doesNotMatch(logs, /Error|erreur/i, 'aucune erreur dans le journal du serveur');
+});
+
+test('v1 gardée pour l\'ancienne app : vues, saisie vide ignorée, attentes fantômes écartées', async () => {
+  const o = (await get('/api/overview')).body;
+  const hook = o.sessions.find((s) => s.id === SID_A).hook;
+  assert.deepEqual([hook.waitingForYou, hook.guardsWaiting, hook.questionsWaiting], [1, 1, 0]);
+  assert.equal((await get(`/api/session/${SID_A}`)).status, 200);
+  assert.equal((await get('/api/health')).body.ok, true);
+  assert.equal((await get('/api/history?limit=2')).body.length, 2);
+  let r = await post('/api/settings', { questionWaitMin: '', guard: { waitMin: '' } });
+  assert.equal(r.status, 200);
+  const s = rj(path.join(DATA, 'state.json'));
+  assert.deepEqual([s.questionWaitMin, s.guard.waitMin], [20, 10]);
+  r = await post('/api/settings', { questions: 'auto' });
+  assert.equal((await get('/api/v2/overview')).body.settings.questionsAuto, true, 'l\'ancien « tout de suite » est montré activé');
+  r = await post('/api/v2/settings', { questionsAuto: true });
+  assert.equal(rj(path.join(DATA, 'state.json')).questions, 'auto', 'déjà activé : le mode n\'est pas changé');
+  await post('/api/settings', { questions: 'ask' });
+  assert.equal((await post('/api/settings', { guard: { rules: [{ label: 'x', match: '(' }] } })).status, 400);
+});
+
+// ---------- fixtures de l'app ----------
+
+test('fixtures de l\'app Mac conformes au contrat', () => {
+  const dir = path.join(ROOT, 'mac', 'VigieApp', 'Fixtures');
+  if (!fs.existsSync(dir)) return;
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  assert.ok(files.includes('overview.json'));
+  for (const f of files) {
+    const j = rj(path.join(dir, f));
+    const schema = f === 'overview.json' ? Overview : f === 'mcp.json' ? Mcp : f === 'accounts.json' ? Accounts : f.startsWith('conversation-') ? Detail : null;
+    assert.ok(schema, `fixture inattendue : ${f}`);
+    assert.deepEqual(check(j, schema), [], f);
+  }
+});
+
+// ---------- tour 3 : consommation, graphique, garde-fous « seulement par Vigie » ----------
+const Series = {
+  from: ISO, to: ISO, stepMin: 'int', unit: oneOf('weekPct'),
+  conversations: arr({ id: 'string', title: opt('string'), project: opt('string'), accountId: 'string', running: 'bool',
+    points: arr({ t: ISO, weekPct: opt('number'), tokens: 'int' }) }),
+  accounts: arr({ id: 'string', label: 'string', points: arr({ t: ISO, weekPct: opt('number'), tokens: 'int' }) }),
+};
+const total = (pts, k) => pts.reduce((x, p) => x + (p[k] || 0), 0);
+
+test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris, en % de la semaine du compte)', async () => {
+  const o = (await get('/api/v2/overview')).body;
+  assert.deepEqual(check(o, Overview), []);
+  const a = o.conversations.find((c) => c.id === SID_A);
+  assert.equal(a.rate.spark.length, 30);
+  assert.deepEqual([a.rate.weekPctPerHour, a.rate.tokensPerMin, a.rate.trend], [0, 0, 'flat'], 'rien depuis 30 min');
+  assert.equal(a.alert, null);
+  for (const [win, step] of [[60, 1], [600, 10], [1200, 20]]) {
+    const r = await get(`/api/v2/usage/series?window=${win}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(check(r.body, Series), [], `window=${win}`);
+    assert.equal(r.body.stepMin, step);
+    for (const c of [...r.body.conversations, ...r.body.accounts]) assert.equal(c.points.length, 60);
+    assert.ok(Date.parse(r.body.to) - Date.parse(r.body.from) >= (win - step) * 60_000);
+  }
+  const s60 = (await get('/api/v2/usage/series?window=60')).body;
+  const pa = s60.conversations.find((c) => c.id === SID_A);
+  assert.equal(pa.running, true);
+  assert.equal(total(pa.points, 'tokens'), 5 * 150 + 600, 'tokens bruts de la dernière heure');
+  assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct) <= 0.06, 'même conversion que weekPct');
+  assert.equal(total(s60.conversations.find((c) => c.id === SID_B).points, 'tokens'), 0, 'B a travaillé il y a 2 h');
+  const s600 = (await get('/api/v2/usage/series?window=600')).body;
+  assert.ok(total(s600.conversations.find((c) => c.id === SID_B).points, 'tokens') > 0);
+  const acc = s600.accounts.find((x) => total(x.points, 'weekPct') > 0);
+  assert.ok(acc && Math.abs(total(acc.points, 'weekPct') - 40) < 0.01, 'tout l\'usage de la semaine du compte tient dans ces 10 h : 40 %');
+  for (const bad of ['30', 'abc', '60.5']) assert.equal((await get(`/api/v2/usage/series?window=${bad}`)).status, 400, bad);
+});
+
+test('garde-fous « seulement par Vigie » : réglage, élément à autoriser, autoriser (message, lien) ou refuser', async () => {
+  let r = await post('/api/v2/settings', { guard: { mode: 'vscode' } });
+  assert.equal(r.body.settings.guard.mode, 'vscode');
+  assert.equal((await post('/api/v2/settings', { guard: { mode: 'autre' } })).status, 400);
+  r = await post('/api/v2/settings', { guard: { mode: 'vigie' } });
+  assert.equal(r.body.settings.guard.mode, 'vigie');
+  assert.equal(rj(path.join(DATA, 'state.json')).guard.mode, 'vigie');
+  const A_ID = 'aaaaaaaaaaaaaaaa', B_ID = 'bbbbbbbbbbbbbbbb';
+  const line = (id, action, extra = {}) => JSON.stringify({ ts: new Date().toISOString(), event: 'garde-fou-en-attente-vigie', sessionId: SID_A, cwd: CWD, tool: 'Bash',
+    action, rule: 'Commande administrateur (sudo)', ruleId: 'sudo', approvalId: id, hash: id.repeat(4), pid: deadPid, ...extra });
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), `${line(A_ID, 'sudo ls /var')}\n${line(B_ID, 'git push --force origin main',
+    { rule: 'git push forcé ou suppression de branche distante', ruleId: 'force-push', agentId: 'agent-verif' })}\n`);
+  const items = async () => (await get('/api/v2/overview')).body.toReview.filter((x) => x.id.startsWith('v:'));
+  let v = [];
+  for (let i = 0; i < 80 && v.length < 2; i++) { await new Promise((res) => setTimeout(res, 100)); v = await items(); }
+  assert.equal(v.length, 2, 'les deux refus sont à autoriser');
+  const o = (await get('/api/v2/overview')).body;
+  assert.deepEqual(check(o, Overview), []);
+  const va = v.find((x) => x.approvalId === A_ID);
+  assert.deepEqual([va.kind, va.state, va.command, va.rule, va.conversationId, va.needsPassword, va.approved],
+    ['blocked', 'awaiting', 'sudo ls /var', 'Commande administrateur (sudo)', SID_A, true, false]);
+  assert.equal(v.find((x) => x.approvalId === B_ID).byAgent, 'agent-verif');
+  assert.ok(o.conversations.find((c) => c.id === SID_A).needsYou >= 2);
+  // erreurs
+  assert.equal((await post('/api/v2/approvals', { approvalId: A_ID, decision: 'peut-être' })).status, 400);
+  assert.equal((await post('/api/v2/approvals', {})).status, 400);
+  assert.equal((await post('/api/v2/approvals', { approvalId: 'cccccccccccccccc' })).status, 404);
+  assert.equal((await post('/api/v2/approvals', { approvalId: A_ID }, { 'Content-Type': 'application/json' })).status, 403, 'X-Vigie obligatoire');
+  // autoriser : autorisation à usage unique, message à copier et lien qui ouvre la conversation avec le message
+  r = await post('/api/v2/approvals', { approvalId: A_ID });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.message, 'L\'utilisateur a autorisé : sudo ls /var. Relance-la exactement à l\'identique.');
+  assert.equal(r.body.delivered, false);
+  // jamais de lien vscode:// direct : il s'ouvrirait dans la fenêtre au premier plan, pas celle de la conversation
+  assert.equal(r.body.openUrl, null);
+  assert.equal(r.body.delivered, false, 'elle avait continué sans : message à coller');
+  const ap = rj(path.join(DATA, 'approvals.json'))[A_ID];
+  assert.deepEqual([ap.decision, ap.sessionId, ap.tool, ap.hash], ['allow', SID_A, 'Bash', A_ID.repeat(4)]);
+  assert.ok(Math.abs(Date.parse(ap.expiresAt) - Date.now() - 2 * 3600_000) < 60_000);
+  assert.equal((await items()).find((x) => x.approvalId === A_ID).approved, true, 'reste listée jusqu\'à la relance');
+  // refuser : l'élément sort de la liste
+  r = await post('/api/v2/approvals', { approvalId: B_ID, decision: 'deny' });
+  assert.equal(r.body.ok, true);
+  assert.deepEqual((await items()).map((x) => x.approvalId), [A_ID]);
+  // la relance consomme l'autorisation (ligne du hook) : l'élément sort aussi
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'garde-fou-autorise-vigie', sessionId: SID_A,
+    tool: 'Bash', action: 'sudo ls /var', approvalId: A_ID, hash: A_ID.repeat(4), pid: deadPid }) + '\n');
+  for (let i = 0; i < 80 && (await items()).length; i++) await new Promise((res) => setTimeout(res, 100));
+  assert.deepEqual(await items(), []);
+  assert.equal((await post('/api/v2/approvals', { approvalId: A_ID })).status, 404, 'déjà utilisée');
+});

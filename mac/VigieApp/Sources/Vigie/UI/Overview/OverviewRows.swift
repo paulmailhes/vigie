@@ -1,0 +1,131 @@
+import SwiftUI
+
+/// Un élément « À regarder » : question choisie pour toi, action bloquée, conversation qui attend, limite.
+struct ReviewRow: View {
+    @Environment(VigieStore.self) private var store
+    let item: ReviewItem
+
+    var body: some View {
+        let alert = Theme.isAlert(item.reviewKind)
+        HStack(spacing: 10) {
+            RowIcon(symbol: Theme.symbol(for: item.reviewKind), alert: alert)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headline)
+                    .foregroundStyle(alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
+                    .lineLimit(2)
+                Text(detailLine)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if item.isAwaitingApproval, let command = item.command, !command.isEmpty {
+                    Text(command)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(command)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            actions
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var headline: String {
+        let title = item.title ?? ""
+        return item.reviewKind == .question ? "« \(title) »" : title
+    }
+
+    private var detailLine: String {
+        [item.conversationTitle, item.detail, item.ts.map { Fmt.when($0, now: store.now) }]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+            .joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        switch item.reviewKind {
+        case .question:
+            HStack(spacing: 6) {
+                Button("Ça me va") {
+                    Task { await store.acceptReview(item) }
+                }
+                Button("Changer") {
+                    store.changeRequest = item
+                }
+            }
+            .glassButton()
+        case .limit:
+            Button("Comptes") {
+                store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
+            }
+            .glassButton()
+        case .blocked where item.isAwaitingApproval:
+            HStack(spacing: 6) {
+                Button("Voir") { store.blockedRequest = item }
+                    .glassButton()
+                    .help("La commande exacte")
+                Button("Refuser") {
+                    Task { _ = await store.decideApproval(item, allow: false) }
+                }
+                .glassButton()
+                Button("Autoriser une fois") {
+                    Task { _ = await store.decideApproval(item, allow: true) }
+                }
+                .glassButton(.primary)
+                .help("Valable une seule fois, pour cette commande : \(item.command ?? item.title ?? "")")
+            }
+        case .blocked:
+            Button("Voir") {
+                store.blockedRequest = item
+            }
+            .glassButton(item.isPendingDecision ? .primary : .secondary)
+            .help(item.isPendingDecision ? "Autoriser ou refuser" : "La commande et quoi faire")
+        case .waiting, .other:
+            Button("Voir") {
+                if let id = item.conversationId { store.route = .conversation(id) }
+            }
+            .glassButton()
+            .disabled(item.conversationId == nil)
+        }
+    }
+}
+
+/// Un rapport ou une fin de mission (artefact publié, mission terminée, workflow fini).
+struct ReportRow: View {
+    @Environment(VigieStore.self) private var store
+    let report: Report
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RowIcon(symbol: Theme.symbol(for: report.reportKind))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(report.title ?? "Mise à jour")
+                    .lineLimit(1)
+                Text(detailLine)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            if let url = report.url, !url.isEmpty {
+                Button("Ouvrir") { SystemActions.open(url) }
+                    .glassButton()
+                    .help("Ouvrir sur claude.ai")
+            } else if let id = report.conversationId {
+                Button("Voir") { store.route = .conversation(id) }
+                    .glassButton()
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var detailLine: String {
+        [report.conversationTitle, report.detail, report.ts.map { Fmt.when($0, now: store.now) }]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+            .joined(separator: " · ")
+    }
+}

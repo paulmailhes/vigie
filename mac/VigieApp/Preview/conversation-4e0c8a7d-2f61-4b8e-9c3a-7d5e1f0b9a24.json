@@ -1,0 +1,232 @@
+{
+  "summary": {
+    "id": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+    "title": "Refonte site Camille Martinn",
+    "project": "boutique",
+    "cwd": "/Users/alex/Code/boutique",
+    "status": "working",
+    "running": true,
+    "accountId": "perso",
+    "autoAccept": true,
+    "autoAcceptOverride": null,
+    "connectors": "off",
+    "agentsRunning": 1,
+    "workflowsRunning": 0,
+    "weekPct": 2.4,
+    "lastActivity": "2026-10-19T23:11:00.000Z",
+    "needsYou": 0,
+    "headline": "Lot 6 · C7 sur C10",
+    "branch": "main",
+    "startedAt": "2026-10-19T13:02:00.000Z"
+  },
+  "now": {
+    "text": "Le lot 6 a fini ses étapes C1 à C6 et C9. C7 tourne : poser les 37 doubles pages sur /songeries, avec ton Designer ouvert sur le site. C10 préparera la publication et le contrôle.",
+    "ts": "2026-10-19T23:11:00.000Z",
+    "tasks": [
+      {
+        "text": "Ouvrir la page /songeries dans le Designer",
+        "status": "done"
+      },
+      {
+        "text": "Poser les doubles pages 1 à 20",
+        "status": "done"
+      },
+      {
+        "text": "Poser les doubles pages 21 à 37",
+        "status": "doing"
+      },
+      {
+        "text": "Vérifier les liens du sommaire",
+        "status": "todo"
+      }
+    ],
+    "tasksTs": "2026-10-19T23:09:00.000Z",
+    "plan": {
+      "title": "Livre, lot 6",
+      "file": "/Users/alex/Code/boutique/.superpowers/sdd/C-page-webflow/lot-6.md",
+      "updatedAt": "2026-10-19T22:52:00.000Z",
+      "steps": [
+        {
+          "id": "C1",
+          "text": "Gabarit de double page",
+          "group": "Les pages du livre",
+          "status": "done"
+        },
+        {
+          "id": "C2",
+          "text": "Couverture et quatrième",
+          "group": "Les pages du livre",
+          "status": "done"
+        },
+        {
+          "id": "C3",
+          "text": "Sommaire cliquable",
+          "group": "Les pages du livre",
+          "status": "done"
+        },
+        {
+          "id": "C4",
+          "text": "Textes des 37 doubles pages",
+          "group": "Les pages du livre",
+          "status": "done"
+        },
+        {
+          "id": "C5",
+          "text": "Images en haute définition",
+          "group": "Les pages du livre",
+          "status": "done"
+        },
+        {
+          "id": "C6",
+          "text": "Embeds du lecteur",
+          "group": "Sur Webflow",
+          "status": "done"
+        },
+        {
+          "id": "C7",
+          "text": "Poser les 37 doubles pages sur /songeries",
+          "group": "Sur Webflow",
+          "status": "doing"
+        },
+        {
+          "id": "C8",
+          "text": "Menu clic droit et galerie",
+          "group": "Sur Webflow",
+          "status": "todo"
+        },
+        {
+          "id": "C9",
+          "text": "Retour à la ligne des embeds (révisée)",
+          "group": "Sur Webflow",
+          "status": "done"
+        },
+        {
+          "id": "C10",
+          "text": "Préparer la publication et le contrôle",
+          "group": "Publication",
+          "status": "todo"
+        }
+      ],
+      "done": 7,
+      "total": 10,
+      "current": "C7"
+    }
+  },
+  "chapters": [
+    {
+      "id": "p-2",
+      "prompt": "lance le lot 6 du livre : les doubles pages sur /songeries, puis prépare la publication",
+      "start": "2026-10-19T20:30:00.000Z",
+      "end": null,
+      "durationMs": 9660000,
+      "stats": {
+        "workflows": 1,
+        "agents": 6,
+        "artifacts": 0,
+        "files": 41,
+        "tests": 0,
+        "testsFailed": 0,
+        "commits": 3
+      },
+      "outcome": "C1 à C6 et C9 faites. C7 en cours : les 37 doubles pages."
+    },
+    {
+      "id": "p-1",
+      "prompt": "refais la page songeries du site de Camille dans Webflow",
+      "start": "2026-10-19T13:02:00.000Z",
+      "end": "2026-10-19T19:48:00.000Z",
+      "durationMs": 24360000,
+      "stats": {
+        "workflows": 0,
+        "agents": 4,
+        "artifacts": 1,
+        "files": 3,
+        "tests": 0,
+        "testsFailed": 0,
+        "commits": 0
+      },
+      "outcome": "Page en brouillon. Restent à toi : le mot de passe, puis publier."
+    }
+  ],
+  "accepted": [
+    {
+      "ts": "2026-10-19T23:10:00.000Z",
+      "kind": "mcp",
+      "title": "Webflow · element_builder",
+      "detail": "Poser la double page 24 sur /songeries",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T23:02:00.000Z",
+      "kind": "mcp",
+      "title": "Webflow · element_builder",
+      "detail": "Poser la double page 21 sur /songeries",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:40:00.000Z",
+      "kind": "commit",
+      "title": "Commit « Lot 6 : embeds révisés »",
+      "detail": "git commit · branche main",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T19:40:00.000Z",
+      "kind": "mcp",
+      "title": "Webflow · data_pages_tool",
+      "detail": "Créer la page /songeries en brouillon",
+      "decision": "you"
+    }
+  ],
+  "agents": {
+    "running": [
+      {
+        "id": "pl-7",
+        "title": "faire:C7",
+        "type": "workflow-subagent",
+        "workflow": "livre-lot-6",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T22:44:00.000Z",
+        "lastAt": "2026-10-19T23:10:00.000Z",
+        "durationMs": 1560000,
+        "actions": 96,
+        "files": 0,
+        "tests": 0,
+        "status": "running",
+        "lastAction": "Pose la double page 24"
+      }
+    ],
+    "done": []
+  },
+  "artifacts": [
+    {
+      "title": "Songeries : maquette",
+      "url": "https://claude.ai/artifact/aa41c9d0-songeries",
+      "description": "La page en grand format",
+      "ts": "2026-10-19T16:20:00.000Z",
+      "publishes": 3
+    }
+  ],
+  "files": [],
+  "tests": [],
+  "mcp": [
+    {
+      "name": "webflow-perso",
+      "scope": "user",
+      "uses": 412,
+      "enabled": true
+    },
+    {
+      "name": "obsidian",
+      "scope": "user",
+      "uses": 3,
+      "enabled": true
+    },
+    {
+      "name": "Gmail",
+      "scope": "connector",
+      "uses": 2,
+      "enabled": false
+    }
+  ]
+}

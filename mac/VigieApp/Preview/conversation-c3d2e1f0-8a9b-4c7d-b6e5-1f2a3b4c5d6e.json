@@ -1,0 +1,31 @@
+{
+  "summary": {
+    "id": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e", "title": "Écran de paiement", "project": "front",
+    "cwd": "/Users/alex/Code/portail/front", "status": "waiting", "running": true, "accountId": "travail1",
+    "autoAccept": true, "autoAcceptOverride": null, "connectors": "off", "agentsRunning": 0, "workflowsRunning": 0,
+    "weekPct": 5.0, "lastActivity": "2026-10-19T21:12:00.000Z", "needsYou": 2,
+    "headline": "T'attend : pousser la branche paiement ?", "branch": "paiement", "startedAt": "2026-10-19T19:30:00.000Z"
+  },
+  "now": {
+    "text": "L'écran de paiement est fait et testé. Claude te demande s'il peut pousser la branche paiement (un git push --force a été bloqué).",
+    "ts": "2026-10-19T21:12:00.000Z",
+    "tasks": [
+      { "text": "Formulaire de carte", "status": "done" },
+      { "text": "Messages d'erreur", "status": "done" },
+      { "text": "Pousser la branche", "status": "doing" }
+    ]
+  },
+  "chapters": [
+    { "id": "f-1", "prompt": "fais l'écran de paiement avec le nouveau formulaire de carte", "start": "2026-10-19T19:30:00.000Z", "end": "2026-10-19T21:12:00.000Z", "durationMs": 6120000,
+      "stats": { "workflows": 0, "agents": 2, "artifacts": 0, "files": 8, "tests": 3, "testsFailed": 0, "commits": 2 },
+      "outcome": "Écran fait, 31 tests réussis. Je peux pousser la branche paiement ?" }
+  ],
+  "accepted": [
+    { "ts": "2026-10-19T21:10:00.000Z", "kind": "push", "title": "Forcer l'envoi sur main", "detail": "git push --force origin main", "decision": "blocked" },
+    { "ts": "2026-10-19T21:02:00.000Z", "kind": "command", "title": "Lancer les tests", "detail": "npx vitest run", "decision": "auto" }
+  ],
+  "agents": { "running": [], "done": [] },
+  "files": [],
+  "tests": [ { "ts": "2026-10-19T21:02:00.000Z", "kind": "tests", "ok": true, "passed": 31, "failed": 0, "title": "Lancer les tests", "command": "npx vitest run", "by": null } ],
+  "mcp": [ { "name": "figma-pro", "scope": "user", "uses": 22, "enabled": true } ]
+}

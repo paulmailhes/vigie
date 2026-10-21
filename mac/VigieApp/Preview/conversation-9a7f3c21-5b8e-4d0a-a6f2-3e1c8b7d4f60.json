@@ -1,0 +1,194 @@
+{
+  "summary": {
+    "id": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+    "title": "Lot 10 : adresse de livraison",
+    "project": "back",
+    "cwd": "/Users/alex/Code/portail/back",
+    "status": "working",
+    "running": true,
+    "accountId": "perso",
+    "autoAccept": true,
+    "autoAcceptOverride": null,
+    "connectors": "off",
+    "agentsRunning": 3,
+    "workflowsRunning": 1,
+    "weekPct": 3.1,
+    "lastActivity": "2026-10-19T23:14:02.000Z",
+    "needsYou": 0,
+    "headline": "Contrat d'API corrigé, types en cours",
+    "branch": "lot-10",
+    "startedAt": "2026-10-19T17:05:00.000Z"
+  },
+  "contextTokens": 96000,
+  "now": {
+    "text": "Le contrat de l'API d'adresse est corrigé et validé par 48 tests. Trois agents finissent les types côté serveur.",
+    "ts": "2026-10-19T22:02:00.000Z",
+    "tasks": [
+      {
+        "text": "Champs de l'adresse dans le contrat",
+        "status": "done"
+      },
+      {
+        "text": "Validation du code postal",
+        "status": "done"
+      },
+      {
+        "text": "Types partagés serveur et client",
+        "status": "doing"
+      },
+      {
+        "text": "Migration de la base",
+        "status": "todo"
+      }
+    ]
+  },
+  "chapters": [
+    {
+      "id": "b-1",
+      "prompt": "fais le lot 10 : l'adresse de livraison de bout en bout, avec un workflow",
+      "start": "2026-10-19T17:05:00.000Z",
+      "end": null,
+      "durationMs": 22200000,
+      "stats": {
+        "workflows": 1,
+        "agents": 11,
+        "artifacts": 0,
+        "files": 17,
+        "tests": 48,
+        "testsFailed": 0,
+        "commits": 3
+      },
+      "outcome": "Contrat corrigé, 48 tests réussis. Types partagés en cours."
+    }
+  ],
+  "accepted": [
+    {
+      "ts": "2026-10-19T23:14:00.000Z",
+      "kind": "command",
+      "title": "Vérifier les types",
+      "detail": "npx tsc --noEmit",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:40:00.000Z",
+      "kind": "commit",
+      "title": "Commit « Adresse : contrat v2 »",
+      "detail": "git commit · branche lot-10",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T21:20:00.000Z",
+      "kind": "mcp",
+      "title": "postgres · query",
+      "detail": "Lire la table addresses",
+      "decision": "auto"
+    }
+  ],
+  "agents": {
+    "running": [
+      {
+        "id": "pb-1",
+        "title": "types:serveur",
+        "type": "workflow-subagent",
+        "workflow": "contrat-adresse",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T22:30:00.000Z",
+        "lastAt": "2026-10-19T23:14:00.000Z",
+        "durationMs": 2640000,
+        "actions": 38,
+        "files": 4,
+        "tests": 1,
+        "status": "running",
+        "lastAction": "Vérifie les types"
+      },
+      {
+        "id": "pb-2",
+        "title": "types:client",
+        "type": "workflow-subagent",
+        "workflow": "contrat-adresse",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T22:31:00.000Z",
+        "lastAt": "2026-10-19T23:12:00.000Z",
+        "durationMs": 2460000,
+        "actions": 31,
+        "files": 3,
+        "tests": 1,
+        "status": "running",
+        "lastAction": "Modifie address.ts"
+      },
+      {
+        "id": "pb-3",
+        "title": "relecture",
+        "type": "workflow-subagent",
+        "workflow": "contrat-adresse",
+        "phase": "Réfuter",
+        "startedAt": "2026-10-19T22:50:00.000Z",
+        "lastAt": "2026-10-19T23:13:00.000Z",
+        "durationMs": 1380000,
+        "actions": 12,
+        "files": 0,
+        "tests": 2,
+        "status": "running",
+        "lastAction": "Relit le contrat"
+      }
+    ],
+    "done": []
+  },
+  "workflows": [
+    {
+      "id": "wf_adresse",
+      "name": "contrat-adresse",
+      "summary": "Adresse de livraison de bout en bout",
+      "status": "running",
+      "startedAt": "2026-10-19T17:10:00.000Z",
+      "durationMs": 22000000,
+      "agents": 11,
+      "tokens": 211044,
+      "phases": [
+        "Faire",
+        "Réfuter"
+      ]
+    }
+  ],
+  "artifacts": [],
+  "files": [
+    {
+      "path": "/Users/alex/Code/portail/back/src/address/contract.ts",
+      "name": "contract.ts",
+      "ext": "ts",
+      "kind": "code",
+      "created": false,
+      "writes": 5,
+      "ts": "2026-10-19T22:38:00.000Z",
+      "by": "types:serveur",
+      "location": "project"
+    }
+  ],
+  "tests": [
+    {
+      "ts": "2026-10-19T22:02:00.000Z",
+      "kind": "tests",
+      "ok": true,
+      "passed": 48,
+      "failed": 0,
+      "title": "Tests du contrat",
+      "command": "npx vitest run address",
+      "by": "relecture"
+    }
+  ],
+  "mcp": [
+    {
+      "name": "postgres",
+      "scope": "project",
+      "uses": 77,
+      "enabled": true
+    },
+    {
+      "name": "obsidian",
+      "scope": "user",
+      "uses": 1,
+      "enabled": true
+    }
+  ],
+  "limits": []
+}

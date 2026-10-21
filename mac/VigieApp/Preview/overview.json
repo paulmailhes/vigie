@@ -1,0 +1,792 @@
+{
+  "now": "2026-10-19T23:20:00.000Z",
+  "settings": {
+    "autoAccept": true,
+    "questionsAuto": true,
+    "questionWaitMin": 20,
+    "connectorsDefault": "off",
+    "guard": {
+      "enabled": true,
+      "waitMin": 10,
+      "rules": [
+        {
+          "id": "sudo",
+          "label": "Commande administrateur (sudo)",
+          "disabled": false
+        },
+        {
+          "id": "push-force",
+          "label": "git push --force",
+          "disabled": false
+        },
+        {
+          "id": "payments",
+          "label": "Paiements et virements",
+          "disabled": false
+        },
+        {
+          "id": "emails",
+          "label": "Envoi d'e-mails",
+          "disabled": false
+        },
+        {
+          "id": "rm-root",
+          "label": "Effacer un dossier racine",
+          "disabled": false
+        },
+        {
+          "id": "deploy-prod",
+          "label": "Déploiement en production",
+          "disabled": false
+        }
+      ],
+      "mode": "vigie"
+    }
+  },
+  "since": "2026-10-19T15:40:00.000Z",
+  "sinceSummary": {
+    "accepted": 1284,
+    "questionsAuto": 2,
+    "blocked": 2,
+    "reports": 2,
+    "testsFailed": 3,
+    "limits": 1
+  },
+  "toReview": [
+    {
+      "id": "g:9a7f3c21:1760915640000",
+      "kind": "blocked",
+      "state": "waiting",
+      "pendingId": "91234",
+      "expiresAt": "2026-10-19T23:28:00.000Z",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "title": "Envoyer la facture F-2026-118 par e-mail",
+      "rule": "Envoi d'e-mails",
+      "detail": "Envoi d'e-mails · sinon refusée dans 8 min",
+      "command": "node scripts/send-invoice.mjs --to compta@client-exemple.fr --facture F-2026-118 --pdf factures/F-2026-118.pdf",
+      "byAgent": "verifier:contrat",
+      "cwd": "/Users/alex/Code/portail/back",
+      "needsPassword": false,
+      "ts": "2026-10-19T23:18:00.000Z"
+    },
+    {
+      "id": "a:b1b9b451:1760915700000",
+      "kind": "blocked",
+      "state": "awaiting",
+      "approvalId": "ap-7c21e9",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "title": "Publier sur la production",
+      "rule": "Déploiement en production",
+      "detail": "Déploiement en production · refusée sur le moment, attend ton accord",
+      "command": "npx vercel deploy --prod --yes --scope atelier",
+      "byAgent": null,
+      "cwd": "/Users/alex/Code/atelier",
+      "ts": "2026-10-19T23:17:00.000Z",
+      "needsPassword": false
+    },
+    {
+      "id": "q:7f3a2c91",
+      "kind": "question",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "title": "Quel fond pour la charte ?",
+      "detail": "Claude a pris « Fond B (recommandé) »",
+      "ts": "2026-10-19T18:14:00.000Z",
+      "question": {
+        "id": "7f3a2c91",
+        "items": [
+          {
+            "question": "Quel fond pour la charte ?",
+            "header": "Fond",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Fond B (recommandé)",
+                "description": "Nuit profonde avec un grain léger : le plus lisible sur mobile."
+              },
+              {
+                "label": "Fond A",
+                "description": "Le dégradé violet de la version 1.3."
+              },
+              {
+                "label": "Fond C",
+                "description": "Photo floutée du plateau de jeu."
+              }
+            ],
+            "chosen": "Fond B (recommandé)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "q:91be04d7",
+      "kind": "question",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "title": "Publier la 1.4 tout de suite ?",
+      "detail": "Claude a pris « Attendre ta relecture (recommandé) »",
+      "ts": "2026-10-19T20:02:00.000Z",
+      "question": {
+        "id": "91be04d7",
+        "items": [
+          {
+            "question": "Publier la 1.4 tout de suite ?",
+            "header": "Publication",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Attendre ta relecture (recommandé)",
+                "description": "La planche reste en brouillon jusqu'à ton feu vert."
+              },
+              {
+                "label": "Publier maintenant",
+                "description": "Mise en ligne immédiate sur le site."
+              },
+              {
+                "label": "Publier en version de test",
+                "description": "En ligne sur l'adresse de test seulement."
+              }
+            ],
+            "chosen": "Attendre ta relecture (recommandé)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b:5521",
+      "kind": "blocked",
+      "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
+      "conversationTitle": "Portail · front",
+      "title": "git push --force sur main",
+      "detail": "Garde-fou : Claude a continué le reste",
+      "ts": "2026-10-19T21:10:00.000Z",
+      "state": "blocked",
+      "rule": "git push --force",
+      "command": "git push --force origin main",
+      "byAgent": null,
+      "cwd": "/Users/alex/Code/portail/front",
+      "needsPassword": false
+    },
+    {
+      "id": "w:c3d2e1f0",
+      "kind": "waiting",
+      "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
+      "conversationTitle": "Portail · front",
+      "title": "T'attend depuis 23:12",
+      "detail": "« Je peux pousser la branche paiement ? »",
+      "ts": "2026-10-19T21:12:00.000Z"
+    },
+    {
+      "id": "l:travail1:2141",
+      "kind": "limit",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "title": "Limite de session atteinte · Travail 1",
+      "detail": "Reprise à 03:40",
+      "ts": "2026-10-19T21:41:00.000Z"
+    },
+    {
+      "id": "b:4e0c8a7d:1760906400000",
+      "kind": "blocked",
+      "state": "blocked",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "title": "Réparer les droits de node_modules",
+      "rule": "Commande administrateur (sudo)",
+      "detail": "Commande administrateur (sudo) · à lancer toi-même",
+      "command": "sudo chown -R alex /usr/local/lib/node_modules",
+      "byAgent": null,
+      "cwd": "/Users/alex/Code/boutique",
+      "needsPassword": true,
+      "ts": "2026-10-19T20:40:00.000Z"
+    }
+  ],
+  "reports": [
+    {
+      "kind": "workflowDone",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "title": "Workflow « contrat-adresse » terminé",
+      "detail": "11 agents, 48 tests réussis, contrat d'API corrigé",
+      "ts": "2026-10-19T22:02:00.000Z"
+    },
+    {
+      "kind": "missionDone",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "title": "Lot 5 terminé",
+      "detail": "La page /songeries est en brouillon. Restent à toi : le mot de passe, puis publier.",
+      "ts": "2026-10-19T19:48:00.000Z"
+    },
+    {
+      "kind": "artifact",
+      "conversationId": "e5f6a7b8-c9d0-4e1f-a2b3-c4d5e6f7a8b9",
+      "conversationTitle": "Atelier",
+      "title": "Analyse finale atelier",
+      "detail": "Pourquoi atelier perd des joueurs : 73 propositions classées",
+      "url": "https://claude.ai/artifact/3f9c2a10-6b1e-4c55-9d0a-atelier-analyse",
+      "ts": "2026-10-19T16:11:00.000Z"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "travail1",
+      "label": "Travail 1",
+      "email": "alex@studio-exemple.fr",
+      "expectedEmail": "alex@studio-exemple.fr",
+      "wrongAccount": false,
+      "connected": true,
+      "isDefault": true,
+      "usage": {
+        "session": {
+          "pct": 100,
+          "resetsAt": "2026-10-20T01:40:00.000Z"
+        },
+        "week": {
+          "pct": 39,
+          "resetsAt": "2026-10-26T19:00:00.000Z"
+        },
+        "weekModel": {
+          "label": "Fable",
+          "pct": 55,
+          "resetsAt": "2026-10-26T18:59:00.000Z"
+        },
+        "observedAt": "2026-10-19T23:08:00.000Z",
+        "source": "session"
+      }
+    },
+    {
+      "id": "travail2",
+      "label": "Travail 2",
+      "email": null,
+      "expectedEmail": "contact@studio-exemple.fr",
+      "wrongAccount": false,
+      "connected": false,
+      "isDefault": false,
+      "usage": {
+        "session": null,
+        "week": null,
+        "weekModel": null,
+        "observedAt": null,
+        "source": null
+      }
+    },
+    {
+      "id": "perso",
+      "label": "Perso",
+      "email": "alex.durand@gmail.com",
+      "expectedEmail": "alex.durand@gmail.com",
+      "wrongAccount": true,
+      "connected": true,
+      "isDefault": false,
+      "usage": {
+        "session": null,
+        "week": {
+          "pct": 8,
+          "resetsAt": "2026-10-23T17:59:00.000Z"
+        },
+        "weekModel": null,
+        "observedAt": "2026-10-19T20:05:00.000Z",
+        "source": "ping"
+      }
+    }
+  ],
+  "conversations": [
+    {
+      "id": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "title": "Refaire le site Horizon complet",
+      "project": "atelier",
+      "cwd": "/Users/alex/Code/atelier",
+      "status": "working",
+      "running": true,
+      "accountId": "travail1",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 2,
+      "workflowsRunning": 1,
+      "weekPct": 14.2,
+      "lastActivity": "2026-10-19T23:15:31.000Z",
+      "needsYou": 3,
+      "headline": "Étape L2.24 sur L2.29",
+      "progress": {
+        "done": 23,
+        "total": 31,
+        "label": "Plan d'exécution 1.4",
+        "current": "L2.24 Icônes de fin de partie"
+      },
+      "tests": {
+        "failedRecent": 2,
+        "running": 1,
+        "lastOk": false,
+        "lastTs": "2026-10-19T23:09:00.000Z",
+        "lastTitle": "vitest + tsc",
+        "failures": [
+          {
+            "title": "Pastille.test.tsx",
+            "line": "expected 'violet' to be 'nuit' (Pastille.test.tsx:42)",
+            "kind": "tests",
+            "ts": "2026-10-19T23:09:00.000Z",
+            "by": "refuter:L2.23"
+          },
+          {
+            "title": "tsc",
+            "line": "src/ecrans/Fin.tsx(18,7): Property 'icone' is missing",
+            "kind": "types",
+            "ts": "2026-10-19T23:07:00.000Z",
+            "by": "faire:L2.24"
+          }
+        ]
+      },
+      "accepted": {
+        "today": 412,
+        "sinceSeen": 128
+      },
+      "artifacts": {
+        "count": 14,
+        "last": {
+          "title": "Charte atelier 1.4",
+          "url": "https://claude.ai/artifact/8b2d61f4-charte-atelier-14",
+          "ts": "2026-10-19T22:31:00.000Z"
+        }
+      },
+      "rate": {
+        "weekPctPerHour": 1.2,
+        "tokensPerMin": 48000,
+        "spark": [
+          0.3,
+          0.4,
+          0.4,
+          0.5,
+          0.6,
+          0.5,
+          0.7,
+          0.8,
+          0.9,
+          0.8,
+          1.0,
+          1.1,
+          1.0,
+          1.2,
+          1.3,
+          1.1,
+          1.2,
+          1.4,
+          1.3,
+          1.5,
+          1.4,
+          1.6,
+          1.5,
+          1.7,
+          1.6,
+          1.8,
+          1.7,
+          1.9,
+          2.0,
+          2.1
+        ],
+        "trend": "up"
+      },
+      "alert": null
+    },
+    {
+      "id": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "title": "Lot 10 : adresse de livraison",
+      "project": "back",
+      "cwd": "/Users/alex/Code/portail/back",
+      "status": "working",
+      "running": true,
+      "accountId": "perso",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 3,
+      "workflowsRunning": 1,
+      "weekPct": 3.1,
+      "lastActivity": "2026-10-19T23:14:02.000Z",
+      "needsYou": 1,
+      "headline": "Contrat d'API corrigé, types en cours",
+      "progress": {
+        "done": 7,
+        "total": 12,
+        "label": "Lot 10",
+        "current": "Types du contrat d'adresse"
+      },
+      "tests": {
+        "failedRecent": 0,
+        "running": 2,
+        "lastOk": true,
+        "lastTs": "2026-10-19T23:02:00.000Z",
+        "lastTitle": "48 tests d'API"
+      },
+      "accepted": {
+        "today": 236,
+        "sinceSeen": 91
+      },
+      "artifacts": {
+        "count": 0
+      },
+      "rate": {
+        "weekPctPerHour": 0.4,
+        "tokensPerMin": 15500,
+        "spark": [
+          0.5,
+          0.4,
+          0.6,
+          0.5,
+          0.4,
+          0.5,
+          0.6,
+          0.5,
+          0.4,
+          0.5,
+          0.5,
+          0.4,
+          0.6,
+          0.5,
+          0.5,
+          0.4,
+          0.5,
+          0.6,
+          0.5,
+          0.4,
+          0.5,
+          0.5,
+          0.6,
+          0.4,
+          0.5,
+          0.5,
+          0.4,
+          0.5,
+          0.6,
+          0.5
+        ],
+        "trend": "flat"
+      },
+      "alert": null
+    },
+    {
+      "id": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
+      "title": "Écran de paiement",
+      "project": "front",
+      "cwd": "/Users/alex/Code/portail/front",
+      "status": "waiting",
+      "running": true,
+      "accountId": "travail1",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 0,
+      "workflowsRunning": 0,
+      "weekPct": 5.0,
+      "lastActivity": "2026-10-19T21:12:00.000Z",
+      "needsYou": 2,
+      "headline": "T'attend : pousser la branche paiement ?",
+      "waitingFor": "Je peux pousser la branche paiement ?",
+      "rate": {
+        "weekPctPerHour": 0.0,
+        "tokensPerMin": 0,
+        "spark": [
+          0.6,
+          0.5,
+          0.4,
+          0.3,
+          0.2,
+          0.1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "trend": "down"
+      },
+      "alert": null
+    },
+    {
+      "id": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "title": "Refonte site Camille Martinn",
+      "project": "boutique",
+      "cwd": "/Users/alex/Code/boutique",
+      "status": "working",
+      "running": true,
+      "accountId": "perso",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 1,
+      "workflowsRunning": 0,
+      "weekPct": 2.4,
+      "lastActivity": "2026-10-19T23:11:00.000Z",
+      "needsYou": 1,
+      "headline": "Lot 6 · C7 sur C10",
+      "progress": {
+        "done": 7,
+        "total": 10,
+        "label": "Lot 6",
+        "current": "C8 Galerie des songeries"
+      },
+      "tests": {
+        "failedRecent": 0,
+        "running": 0,
+        "lastOk": true,
+        "lastTs": "2026-10-19T22:50:00.000Z",
+        "lastTitle": "build Netlify"
+      },
+      "accepted": {
+        "today": 158,
+        "sinceSeen": 64
+      },
+      "artifacts": {
+        "count": 3,
+        "last": {
+          "title": "Maquette /songeries",
+          "url": "https://claude.ai/artifact/51c0e9aa-boutique-songeries",
+          "ts": "2026-10-19T19:40:00.000Z"
+        }
+      },
+      "rate": {
+        "weekPctPerHour": 3.6,
+        "tokensPerMin": 142000,
+        "spark": [
+          0.8,
+          0.9,
+          1.2,
+          1.6,
+          2.0,
+          2.4,
+          2.2,
+          2.6,
+          3.0,
+          2.8,
+          3.1,
+          3.4,
+          3.2,
+          3.5,
+          3.8,
+          3.6,
+          3.9,
+          4.1,
+          3.8,
+          4.2,
+          4.4,
+          4.1,
+          4.5,
+          4.3,
+          4.6,
+          4.8,
+          4.5,
+          4.9,
+          5.1,
+          5.0
+        ],
+        "trend": "up"
+      },
+      "alert": {
+        "kind": "emballe",
+        "since": "2026-10-19T22:58:00.000Z",
+        "reason": "Les mêmes tests échouent en boucle depuis 20 min (14 lancements)."
+      }
+    },
+    {
+      "id": "e5f6a7b8-c9d0-4e1f-a2b3-c4d5e6f7a8b9",
+      "title": "Analyse : pourquoi atelier perd des joueurs",
+      "project": "atelier",
+      "cwd": "/Users/alex/Code/atelier",
+      "status": "closed",
+      "running": false,
+      "accountId": "perso",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 0,
+      "workflowsRunning": 0,
+      "weekPct": 0.9,
+      "lastActivity": "2026-10-19T16:11:00.000Z",
+      "needsYou": 0,
+      "headline": "Rapport « Analyse finale atelier » publié",
+      "alert": null
+    }
+  ],
+  "engine": {
+    "indexing": false,
+    "wrapperActive": false
+  },
+  "recentAccepted": [
+    {
+      "ts": "2026-10-19T23:16:40.000Z",
+      "kind": "command",
+      "title": "Lancer vitest sur Pastille",
+      "detail": "npx vitest run src/components/Pastille.test.tsx",
+      "decision": "auto",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:16:05.000Z",
+      "kind": "file",
+      "title": "Modifie Fin.tsx",
+      "detail": "apps/web/src/ecrans/Fin.tsx",
+      "decision": "auto",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:15:31.000Z",
+      "kind": "mcp",
+      "title": "Capture de l'écran de fin",
+      "detail": "figma-perso · get_screenshot",
+      "decision": "auto",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "agent": null,
+      "service": "figma"
+    },
+    {
+      "ts": "2026-10-19T23:14:02.000Z",
+      "kind": "command",
+      "title": "Vérifier les types",
+      "detail": "npx tsc -b",
+      "decision": "auto",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:13:20.000Z",
+      "kind": "agent",
+      "title": "Lancer l'agent verifier:contrat",
+      "detail": "Relire le contrat d'adresse",
+      "decision": "auto",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:11:00.000Z",
+      "kind": "mcp",
+      "title": "Lire la page /songeries",
+      "detail": "webflow-perso · data_pages_tool",
+      "decision": "auto",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "agent": null,
+      "service": "webflow"
+    },
+    {
+      "ts": "2026-10-19T23:09:12.000Z",
+      "kind": "commit",
+      "title": "Commit « Icônes de fin de partie »",
+      "detail": "feat(fin): icônes de la charte 1.4",
+      "decision": "auto",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:07:45.000Z",
+      "kind": "web",
+      "title": "Lire la doc de Netlify",
+      "detail": "docs.netlify.com/configure-builds",
+      "decision": "auto",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T23:05:30.000Z",
+      "kind": "mcp",
+      "title": "Requête sur la table adresses",
+      "detail": "supabase · execute_sql",
+      "decision": "auto",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "agent": null,
+      "service": "supabase"
+    },
+    {
+      "ts": "2026-10-19T23:02:10.000Z",
+      "kind": "push",
+      "title": "Pousser la branche lot-10",
+      "detail": "git push origin lot-10",
+      "decision": "auto",
+      "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
+      "conversationTitle": "Portail · back",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T22:58:00.000Z",
+      "kind": "question",
+      "title": "Question choisie : « Fond B »",
+      "detail": "Choisi : Fond B (recommandé)",
+      "decision": "auto",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
+      "conversationTitle": "Atelier",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T22:55:41.000Z",
+      "kind": "file",
+      "title": "Crée songeries.html",
+      "detail": "site/songeries.html",
+      "decision": "auto",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "agent": null,
+      "service": null
+    },
+    {
+      "ts": "2026-10-19T22:51:03.000Z",
+      "kind": "mcp",
+      "title": "Note de réunion",
+      "detail": "obsidian · reunion",
+      "decision": "auto",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "agent": null,
+      "service": "obsidian"
+    },
+    {
+      "ts": "2026-10-19T22:47:30.000Z",
+      "kind": "command",
+      "title": "Construire le site",
+      "detail": "npm run build",
+      "decision": "auto",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "conversationTitle": "Boutique",
+      "agent": null,
+      "service": null
+    }
+  ]
+}

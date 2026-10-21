@@ -1,0 +1,9 @@
+# Données locales de Vigie (réglages, historique, comptes) : jamais publiées
+data/
+# Constructions
+dist/
+mac/Vigie.app/
+mac/VigieApp/.build/
+mac/VigieApp/Snapshots/
+.build/
+.DS_Store

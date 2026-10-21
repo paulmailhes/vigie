@@ -1,0 +1,941 @@
+{
+  "summary": {
+    "id": "b1b9b451-c53c-439e-b804-3689257268e3",
+    "title": "Refaire le site Horizon complet",
+    "project": "atelier",
+    "cwd": "/Users/alex/Code/atelier",
+    "status": "working",
+    "running": true,
+    "accountId": "travail1",
+    "autoAccept": true,
+    "autoAcceptOverride": null,
+    "connectors": "off",
+    "agentsRunning": 2,
+    "workflowsRunning": 1,
+    "weekPct": 14.2,
+    "lastActivity": "2026-10-19T23:15:31.000Z",
+    "needsYou": 3,
+    "headline": "Étape L2.24 sur L2.29",
+    "branch": "v1.4",
+    "startedAt": "2026-10-19T08:41:00.000Z"
+  },
+  "contextTokens": 182000,
+  "now": {
+    "text": "La charte 1.4 est appliquée écran par écran. L2.19 à L2.23 sont faites et vérifiées (245 tests réussis). Claude est sur L2.24, les icônes de fin de partie. La publication attend ta relecture de la planche.",
+    "ts": "2026-10-19T23:18:00.000Z",
+    "tasks": [
+      {
+        "text": "Dessiner les 4 icônes de fin de partie",
+        "status": "done"
+      },
+      {
+        "text": "Les poser sur l'écran de fin",
+        "status": "done"
+      },
+      {
+        "text": "Les régler pour le grain de nuit",
+        "status": "done"
+      },
+      {
+        "text": "Tests visuels de l'écran de fin",
+        "status": "doing"
+      },
+      {
+        "text": "Relecture par un agent",
+        "status": "todo"
+      }
+    ],
+    "tasksTs": "2026-10-19T23:16:00.000Z",
+    "plan": {
+      "title": "Plan d'exécution 1.4",
+      "file": "/Users/alex/Code/atelier/atelier/docs/superpowers/plans/2026-10-19-1.4-execution.md",
+      "updatedAt": "2026-10-19T22:41:00.000Z",
+      "steps": [
+        {
+          "id": "L2.1",
+          "text": "Palette de nuit",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.2",
+          "text": "Typographie",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.3",
+          "text": "Grille et marges",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.4",
+          "text": "Icônes de base",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.5",
+          "text": "Jetons de couleur",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.6",
+          "text": "Mode sombre",
+          "status": "done",
+          "group": "A. Le socle de la charte"
+        },
+        {
+          "id": "L2.7",
+          "text": "Boutons",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.8",
+          "text": "Pastilles",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.9",
+          "text": "Cartes de joueur",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.10",
+          "text": "Jauge",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.11",
+          "text": "Fenêtres",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.12",
+          "text": "Menus",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.13",
+          "text": "Champs",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.14",
+          "text": "Notifications",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.15",
+          "text": "Classement",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.16",
+          "text": "Minuteur",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.17",
+          "text": "Avatars",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.18",
+          "text": "Chargement",
+          "status": "done",
+          "group": "B. Les composants"
+        },
+        {
+          "id": "L2.19",
+          "text": "Couleurs du thème de nuit",
+          "status": "done",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.20",
+          "text": "Titres et typographie",
+          "status": "done",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.21",
+          "text": "Écran d'accueil",
+          "status": "done",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.22",
+          "text": "Pastilles et boutons",
+          "status": "done",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.23",
+          "text": "Jauge de la partie",
+          "status": "done",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.24",
+          "text": "Icônes de fin de partie",
+          "status": "doing",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.25",
+          "text": "Grain de nuit",
+          "status": "todo",
+          "group": "C. La charte appliquée aux écrans"
+        },
+        {
+          "id": "L2.26",
+          "text": "Écran des scores",
+          "status": "todo",
+          "group": "D. Finitions et publication"
+        },
+        {
+          "id": "L2.27",
+          "text": "Animations de victoire",
+          "status": "todo",
+          "group": "D. Finitions et publication"
+        },
+        {
+          "id": "L2.28",
+          "text": "Accessibilité des pastilles",
+          "status": "todo",
+          "group": "D. Finitions et publication"
+        },
+        {
+          "id": "L2.29",
+          "text": "Relecture finale et publication",
+          "status": "todo",
+          "group": "D. Finitions et publication"
+        }
+      ],
+      "done": 23,
+      "total": 29,
+      "current": "L2.24"
+    }
+  },
+  "chapters": [
+    {
+      "id": "ch-4",
+      "prompt": "applique la partie C du plan 1.4 : la charte sur tous les écrans, un agent par écran, et vérifie chaque écran avant de passer au suivant",
+      "start": "2026-10-19T15:14:00.000Z",
+      "end": null,
+      "durationMs": 29100000,
+      "stats": {
+        "workflows": 1,
+        "agents": 11,
+        "artifacts": 0,
+        "files": 24,
+        "tests": 40,
+        "testsFailed": 3,
+        "commits": 6
+      },
+      "outcome": "L2.19 à L2.23 faites et vérifiées, 245 tests réussis. L2.24 en cours : icônes de fin de partie."
+    },
+    {
+      "id": "ch-3",
+      "prompt": "retouche la charte après ma relecture : fond B, jauge plus fine, titres moins gras",
+      "start": "2026-10-19T14:11:00.000Z",
+      "end": "2026-10-19T14:53:00.000Z",
+      "durationMs": 2520000,
+      "stats": {
+        "workflows": 0,
+        "agents": 3,
+        "artifacts": 1,
+        "files": 9,
+        "tests": 6,
+        "testsFailed": 0,
+        "commits": 2
+      },
+      "outcome": "Fond B appliqué, jauge affinée, titres en semi-gras. La planche est à jour."
+    },
+    {
+      "id": "ch-2",
+      "prompt": "fais-moi une planche de validation de la charte 1.4 pour que je la relise",
+      "start": "2026-10-19T11:54:00.000Z",
+      "end": "2026-10-19T12:40:00.000Z",
+      "durationMs": 2760000,
+      "stats": {
+        "workflows": 0,
+        "agents": 2,
+        "artifacts": 1,
+        "files": 4,
+        "tests": 0,
+        "testsFailed": 0,
+        "commits": 1
+      },
+      "outcome": "Artefact « Charte atelier 1.4 » publié. 12 questions posées, toutes répondues."
+    },
+    {
+      "id": "ch-1",
+      "prompt": "reprends le site Horizon à zéro : pages, charte, composants, et mets une version de test en ligne",
+      "start": "2026-10-19T08:41:00.000Z",
+      "end": "2026-10-19T09:50:00.000Z",
+      "durationMs": 4140000,
+      "stats": {
+        "workflows": 1,
+        "agents": 6,
+        "artifacts": 0,
+        "files": 58,
+        "tests": 12,
+        "testsFailed": 0,
+        "commits": 4
+      },
+      "outcome": "Squelette du site en place : 9 pages, 31 composants, version de test en ligne sur Netlify."
+    }
+  ],
+  "accepted": [
+    {
+      "ts": "2026-10-19T23:15:00.000Z",
+      "kind": "command",
+      "title": "Lancer les tests et vérifier les types",
+      "detail": "npx vitest run && npx tsc -b",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T23:12:00.000Z",
+      "kind": "file",
+      "title": "Modifie IconeFin.tsx",
+      "detail": "apps/web/src/components/IconeFin.tsx",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T23:09:00.000Z",
+      "kind": "agent",
+      "title": "Lance l'agent « faire:L2.24 »",
+      "detail": "Icônes de fin de partie",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T23:02:00.000Z",
+      "kind": "commit",
+      "title": "Commit « Jauge de la partie affinée »",
+      "detail": "git commit -m \"L2.23 jauge\" · branche v1.4",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:40:00.000Z",
+      "kind": "mcp",
+      "title": "Figma · use_figma",
+      "detail": "Ranger les captures de la page 2",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:31:00.000Z",
+      "kind": "web",
+      "title": "Lire la doc de Vite",
+      "detail": "https://vite.dev/guide/assets",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:12:00.000Z",
+      "kind": "command",
+      "title": "Construire le site",
+      "detail": "pnpm --filter web build",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T22:10:00.000Z",
+      "kind": "push",
+      "title": "Envoyer la branche v1.4",
+      "detail": "git push origin v1.4",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T21:58:00.000Z",
+      "kind": "commit",
+      "title": "Commit « Pastilles : la teinte suit le thème »",
+      "detail": "git commit · branche v1.4",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T21:44:00.000Z",
+      "kind": "command",
+      "title": "Supprimer l'ancien dossier de captures",
+      "detail": "rm -rf apps/web/public/captures-v13",
+      "decision": "you"
+    },
+    {
+      "ts": "2026-10-19T21:30:00.000Z",
+      "kind": "mcp",
+      "title": "Supabase · list_tables",
+      "detail": "Lire la structure de la base",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T20:02:00.000Z",
+      "kind": "question",
+      "title": "Publier la 1.4 tout de suite ?",
+      "detail": "Choisi pour toi : « Attendre ta relecture (recommandé) »",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T19:40:00.000Z",
+      "kind": "file",
+      "title": "Crée Grain.tsx",
+      "detail": "apps/web/src/components/Grain.tsx",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T19:12:00.000Z",
+      "kind": "command",
+      "title": "Installer les dépendances",
+      "detail": "pnpm install",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T18:50:00.000Z",
+      "kind": "mcp",
+      "title": "Netlify · deploy",
+      "detail": "Déployer la version de test",
+      "decision": "waiting"
+    },
+    {
+      "ts": "2026-10-19T18:14:00.000Z",
+      "kind": "question",
+      "title": "Quel fond pour la charte ?",
+      "detail": "Choisi pour toi : « Fond B (recommandé) »",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T17:30:00.000Z",
+      "kind": "command",
+      "title": "Lancer les tests de bout en bout",
+      "detail": "npx playwright test",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T16:55:00.000Z",
+      "kind": "other",
+      "title": "Lire le plan 1.4",
+      "detail": "~/Documents/atelier/plan-1.4.md",
+      "decision": "auto"
+    },
+    {
+      "ts": "2026-10-19T16:20:00.000Z",
+      "kind": "mcp",
+      "title": "Resend · send_email",
+      "detail": "Envoyer le récapitulatif à l'équipe",
+      "decision": "blocked"
+    },
+    {
+      "ts": "2026-10-19T15:20:00.000Z",
+      "kind": "agent",
+      "title": "Lance le workflow « partie-c-charte-ecrans »",
+      "detail": "11 agents prévus",
+      "decision": "auto"
+    }
+  ],
+  "activity": [
+    {
+      "ts": "2026-10-19T23:15:00.000Z",
+      "kind": "command",
+      "title": "Lance vitest",
+      "detail": "npx vitest run",
+      "agent": "refuter:L2.23",
+      "ok": true
+    }
+  ],
+  "agents": {
+    "running": [
+      {
+        "id": "ag-24",
+        "title": "faire:L2.24",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T23:02:00.000Z",
+        "lastAt": "2026-10-19T23:15:00.000Z",
+        "durationMs": 780000,
+        "actions": 44,
+        "files": 3,
+        "tests": 2,
+        "status": "running",
+        "lastAction": "Lance vitest sur IconeFin.test.tsx"
+      },
+      {
+        "id": "ag-23r",
+        "title": "refuter:L2.23",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Réfuter",
+        "startedAt": "2026-10-19T22:58:00.000Z",
+        "lastAt": "2026-10-19T23:14:00.000Z",
+        "durationMs": 960000,
+        "actions": 27,
+        "files": 0,
+        "tests": 5,
+        "status": "running",
+        "lastAction": "Relit Jauge.tsx"
+      }
+    ],
+    "done": [
+      {
+        "id": "ag-23",
+        "title": "faire:L2.23",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T22:20:00.000Z",
+        "lastAt": "2026-10-19T22:57:00.000Z",
+        "durationMs": 2220000,
+        "actions": 61,
+        "files": 4,
+        "tests": 3,
+        "status": "done",
+        "lastAction": "Jauge affinée, 52 tests réussis"
+      },
+      {
+        "id": "ag-22r",
+        "title": "refuter:L2.22",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Réfuter",
+        "startedAt": "2026-10-19T21:50:00.000Z",
+        "lastAt": "2026-10-19T22:16:00.000Z",
+        "durationMs": 1560000,
+        "actions": 33,
+        "files": 0,
+        "tests": 4,
+        "status": "done",
+        "lastAction": "245 tests réussis, rien à reprendre"
+      },
+      {
+        "id": "ag-22",
+        "title": "faire:L2.22",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T21:02:00.000Z",
+        "lastAt": "2026-10-19T21:48:00.000Z",
+        "durationMs": 2760000,
+        "actions": 72,
+        "files": 6,
+        "tests": 3,
+        "status": "done",
+        "lastAction": "Pastilles et boutons faits"
+      },
+      {
+        "id": "ag-21r",
+        "title": "refuter:L2.21",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Réfuter",
+        "startedAt": "2026-10-19T20:30:00.000Z",
+        "lastAt": "2026-10-19T20:58:00.000Z",
+        "durationMs": 1680000,
+        "actions": 29,
+        "files": 0,
+        "tests": 4,
+        "status": "failed",
+        "lastAction": "3 tests en échec sur l'écran d'accueil"
+      },
+      {
+        "id": "ag-21",
+        "title": "faire:L2.21",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T19:44:00.000Z",
+        "lastAt": "2026-10-19T20:28:00.000Z",
+        "durationMs": 2640000,
+        "actions": 58,
+        "files": 5,
+        "tests": 2,
+        "status": "done",
+        "lastAction": "Écran d'accueil fait"
+      },
+      {
+        "id": "ag-20",
+        "title": "faire:L2.20",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T18:20:00.000Z",
+        "lastAt": "2026-10-19T19:40:00.000Z",
+        "durationMs": 4800000,
+        "actions": 80,
+        "files": 7,
+        "tests": 3,
+        "status": "done",
+        "lastAction": "Titres et typographie faits"
+      },
+      {
+        "id": "ag-19",
+        "title": "faire:L2.19",
+        "type": "workflow-subagent",
+        "workflow": "partie-c-charte-ecrans",
+        "phase": "Faire",
+        "startedAt": "2026-10-19T15:22:00.000Z",
+        "lastAt": "2026-10-19T18:10:00.000Z",
+        "durationMs": 10080000,
+        "actions": 96,
+        "files": 9,
+        "tests": 4,
+        "status": "done",
+        "lastAction": "Couleurs du thème de nuit faites"
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "id": "wf_partie_c",
+      "name": "partie-c-charte-ecrans",
+      "summary": "La charte 1.4 sur chaque écran, un agent par écran puis une relecture",
+      "status": "running",
+      "startedAt": "2026-10-19T15:20:00.000Z",
+      "durationMs": 28800000,
+      "agents": 11,
+      "tokens": 387955,
+      "phases": [
+        "Faire",
+        "Réfuter"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "title": "Charte atelier 1.4",
+      "url": "https://claude.ai/artifact/8d2c51e4-charte-atelier-14",
+      "description": "Couleurs, typographie, pastilles et jauge, avec les deux fonds à comparer",
+      "ts": "2026-10-19T14:50:00.000Z",
+      "publishes": 2
+    },
+    {
+      "title": "Planche de validation L2.18",
+      "url": "https://claude.ai/artifact/1b77e0c2-planche-l218",
+      "description": "Les 12 écrans côte à côte pour ta relecture",
+      "ts": "2026-10-19T12:38:00.000Z",
+      "publishes": 1
+    }
+  ],
+  "files": [
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/components/IconeFin.tsx",
+      "name": "IconeFin.tsx",
+      "ext": "tsx",
+      "kind": "code",
+      "created": true,
+      "writes": 3,
+      "ts": "2026-10-19T23:12:00.000Z",
+      "by": "faire:L2.24",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/components/Jauge.tsx",
+      "name": "Jauge.tsx",
+      "ext": "tsx",
+      "kind": "code",
+      "created": false,
+      "writes": 4,
+      "ts": "2026-10-19T22:55:00.000Z",
+      "by": "faire:L2.23",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/components/Pastille.tsx",
+      "name": "Pastille.tsx",
+      "ext": "tsx",
+      "kind": "code",
+      "created": false,
+      "writes": 1,
+      "ts": "2026-10-19T21:40:00.000Z",
+      "by": "faire:L2.22",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/styles/theme-nuit.css",
+      "name": "theme-nuit.css",
+      "ext": "css",
+      "kind": "style",
+      "created": true,
+      "writes": 6,
+      "ts": "2026-10-19T21:20:00.000Z",
+      "by": "faire:L2.19",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/pages/index.astro",
+      "name": "index.astro",
+      "ext": "astro",
+      "kind": "page",
+      "created": false,
+      "writes": 2,
+      "ts": "2026-10-19T20:20:00.000Z",
+      "by": "faire:L2.21",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/src/data/scores.json",
+      "name": "scores.json",
+      "ext": "json",
+      "kind": "data",
+      "created": false,
+      "writes": 1,
+      "ts": "2026-10-19T19:58:00.000Z",
+      "by": "faire:L2.21",
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/public/fond-b.png",
+      "name": "fond-b.png",
+      "ext": "png",
+      "kind": "image",
+      "created": true,
+      "writes": 1,
+      "ts": "2026-10-19T14:40:00.000Z",
+      "by": null,
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/public/intro.mp4",
+      "name": "intro.mp4",
+      "ext": "mp4",
+      "kind": "media",
+      "created": true,
+      "writes": 1,
+      "ts": "2026-10-19T09:30:00.000Z",
+      "by": null,
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/apps/web/vite.config.ts",
+      "name": "vite.config.ts",
+      "ext": "ts",
+      "kind": "config",
+      "created": false,
+      "writes": 2,
+      "ts": "2026-10-19T22:30:00.000Z",
+      "by": null,
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Code/atelier/README.md",
+      "name": "README.md",
+      "ext": "md",
+      "kind": "doc",
+      "created": false,
+      "writes": 1,
+      "ts": "2026-10-19T09:48:00.000Z",
+      "by": null,
+      "location": "project"
+    },
+    {
+      "path": "/Users/alex/Documents/atelier/plan-1.4.md",
+      "name": "plan-1.4.md",
+      "ext": "md",
+      "kind": "doc",
+      "created": false,
+      "writes": 2,
+      "ts": "2026-10-19T15:10:00.000Z",
+      "by": null,
+      "location": "elsewhere"
+    },
+    {
+      "path": "/private/tmp/claude-501/atelier/capture-accueil.png",
+      "name": "capture-accueil.png",
+      "ext": "png",
+      "kind": "image",
+      "created": true,
+      "writes": 1,
+      "ts": "2026-10-19T20:26:00.000Z",
+      "by": "refuter:L2.21",
+      "location": "scratch"
+    }
+  ],
+  "tests": [
+    {
+      "ts": "2026-10-19T23:15:00.000Z",
+      "kind": "tests",
+      "ok": true,
+      "passed": 245,
+      "failed": 0,
+      "title": "Lancer vitest et tsc",
+      "command": "npx vitest run && npx tsc -b",
+      "by": "refuter:L2.23"
+    },
+    {
+      "ts": "2026-10-19T22:50:00.000Z",
+      "kind": "types",
+      "ok": true,
+      "passed": null,
+      "failed": null,
+      "title": "Vérifier les types",
+      "command": "npx tsc -b",
+      "by": "faire:L2.23"
+    },
+    {
+      "ts": "2026-10-19T22:12:00.000Z",
+      "kind": "build",
+      "ok": true,
+      "passed": null,
+      "failed": null,
+      "title": "Construire le site",
+      "command": "pnpm --filter web build",
+      "by": null
+    },
+    {
+      "ts": "2026-10-19T21:30:00.000Z",
+      "kind": "lint",
+      "ok": true,
+      "passed": null,
+      "failed": null,
+      "title": "Relire le style du code",
+      "command": "pnpm lint",
+      "by": "faire:L2.22"
+    },
+    {
+      "ts": "2026-10-19T20:56:00.000Z",
+      "kind": "tests",
+      "ok": false,
+      "passed": 242,
+      "failed": 3,
+      "title": "Tests de l'écran d'accueil",
+      "command": "npx vitest run accueil",
+      "by": "refuter:L2.21"
+    },
+    {
+      "ts": "2026-10-19T17:30:00.000Z",
+      "kind": "e2e",
+      "ok": false,
+      "passed": 11,
+      "failed": 1,
+      "title": "Parcours complet dans le navigateur",
+      "command": "npx playwright test",
+      "by": null
+    },
+    {
+      "ts": "2026-10-19T16:02:00.000Z",
+      "kind": "tests",
+      "ok": true,
+      "passed": 198,
+      "failed": 0,
+      "title": "Lancer vitest",
+      "command": "npx vitest run",
+      "by": "faire:L2.19"
+    }
+  ],
+  "mcp": [
+    {
+      "name": "figma-perso",
+      "scope": "user",
+      "uses": 350,
+      "enabled": true,
+      "status": "connected"
+    },
+    {
+      "name": "obsidian",
+      "scope": "user",
+      "uses": 4,
+      "enabled": true,
+      "status": "connected"
+    },
+    {
+      "name": "artlist",
+      "scope": "user",
+      "uses": 0,
+      "enabled": true,
+      "status": "failed"
+    },
+    {
+      "name": "figma-pro",
+      "scope": "user",
+      "uses": 0,
+      "enabled": false,
+      "status": "connected"
+    },
+    {
+      "name": "webflow-perso",
+      "scope": "user",
+      "uses": 0,
+      "enabled": false,
+      "status": "connected"
+    },
+    {
+      "name": "anarlog",
+      "scope": "user",
+      "uses": 0,
+      "enabled": true,
+      "status": "connected"
+    },
+    {
+      "name": "supabase",
+      "scope": "project",
+      "uses": 128,
+      "enabled": true,
+      "status": "connected"
+    },
+    {
+      "name": "netlify",
+      "scope": "project",
+      "uses": 12,
+      "enabled": true,
+      "status": "connected"
+    },
+    {
+      "name": "resend",
+      "scope": "project",
+      "uses": 0,
+      "enabled": false,
+      "status": "connected"
+    },
+    {
+      "name": "Notion",
+      "scope": "connector",
+      "uses": 12,
+      "enabled": false,
+      "status": "connected"
+    },
+    {
+      "name": "Gmail",
+      "scope": "connector",
+      "uses": 0,
+      "enabled": false,
+      "status": "connected"
+    },
+    {
+      "name": "Qonto",
+      "scope": "connector",
+      "uses": 0,
+      "enabled": false,
+      "status": "needs-auth"
+    }
+  ],
+  "tokens": {
+    "today": {
+      "input": 182340,
+      "output": 96210,
+      "cacheRead": 18400211,
+      "cacheWrite": 920114
+    },
+    "total": {
+      "input": 401220,
+      "output": 288901,
+      "cacheRead": 61204118,
+      "cacheWrite": 2810442
+    }
+  },
+  "limits": [
+    {
+      "ts": "2026-10-19T21:41:00.000Z",
+      "text": "You've hit your session limit · resets 3:40am"
+    }
+  ]
+}

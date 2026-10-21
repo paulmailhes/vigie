@@ -1,0 +1,201 @@
+#!/bin/bash -p
+# Vigie — lanceur de Claude Code pour l'extension VS Code (réglage claudeCode.claudeProcessWrapper).
+#
+# L'extension l'appelle ainsi : <ce script> <binaire claude intégré> <arguments…>.
+# Pour une conversation (--input-format stream-json), il choisit le compte d'après data/accounts.json :
+#   - reprise (--resume=<uuid>) : le compte noté pour cette conversation, sinon Travail 1 ;
+#   - conversation neuve : le compte par défaut (defaultForNew).
+# Un compte autre que Travail 1 = CLAUDE_CONFIG_DIR=<son dossier>, écrit exactement comme dans accounts.json :
+# le nom de l'entrée de trousseau en dépend. Il coupe aussi les connecteurs claude.ai si Vigie le demande.
+# Les appels annexes (auth status, mcp, sonde de configuration…) partent tels quels, donc sur Travail 1.
+# Règle d'or : à la moindre erreur, on lance le binaire avec ses arguments d'origine, sans rien changer.
+# Le journal (data/launches.log) ne garde que l'heure, le pid, le compte, l'id de conversation et la raison :
+# jamais les arguments, qui peuvent contenir des jetons (--mcp-config).
+# « -p » : ni BASH_ENV ni fonctions exportées ne peuvent s'inviter ici. Bash 3.2 (celui de macOS).
+
+case "$1" in
+  '') echo "claude-account-wrapper : binaire manquant" >&2; exit 127 ;;
+  -*) bin=claude ;;            # pas de binaire intégré transmis : celui du PATH, comme l'extension
+  *) bin="$1"; shift ;;
+esac
+
+JQ=/usr/bin/jq
+MAIN=travail1
+NL='
+'
+UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+H="${VIGIE_HOME:-$HOME}"
+V_KIND=""; V_ACC=""; V_DIR=""; V_CONN=""; V_SID=""; V_WHY=""; V_MODE=""; V_REWRITE=0
+V_ARGS=()
+
+# Choix du compte, des connecteurs et du mode de permission, en une lecture (jq : ~3 ms).
+# Sorties, une par ligne : compte, dossier (vide = Travail 1), connecteurs (off|on|garder), mode par défaut
+# de ~/.claude/settings.json, raison, puis « fin » pour vérifier que rien n'a été tronqué.
+PROG='
+def j: try fromjson catch null;
+def str: if type == "string" then . else null end;
+(if type == "object" then . else error("comptes") end) as $m
+| [ ($m.accounts // [])[] | select(type == "object" and (.id | type) == "string") ] as $acc
+| (($m.sessions // {}) | if type == "object" then . else {} end) as $map
+| (if $sid != "" then ($map[$sid] | str) else null end) as $mapped
+| (if $mapped != null then {id: $mapped, why: "choisi"}
+   elif $isnew == "1" then {id: (($m.defaultForNew | str) // $main), why: "nouvelle"}
+   else {id: $main, why: "sans-choix"} end) as $want
+| ([ $acc[] | select(.id == $want.id) ] | first) as $a
+| ($st | j) as $s
+| ($se | j) as $set
+| (if ($s | type) != "object" then "garder"
+   else ((if $sid != "" then (($s.sessions // {}) | if type == "object" then (.[$sid] // {}) else {} end
+                              | if type == "object" then (.connectors | str) else null end)
+          else null end)
+         // ($s.connectorsDefault | str) // "off") end) as $c
+| [ (if $a == null then $main else $a.id end),
+    (if $a == null then "" else (($a.configDir | str) // "") end),
+    $c,
+    (if ($set | type) == "object"
+     then (($set.permissions // {}) | if type == "object" then ((.defaultMode | str) // "") else "" end)
+     else "" end),
+    (if $a == null then "compte-inconnu" else $want.why end),
+    "fin" ]
+| map(gsub("\n"; " ")) | .[]
+'
+
+# Dossier data/ : VIGIE_DATA, sinon à côté du script (liens symboliques résolus).
+vigie_data() {
+  if [ -n "$VIGIE_DATA" ]; then printf '%s' "$VIGIE_DATA"; return 0; fi
+  local src="${BASH_SOURCE[0]}" dir n=0
+  while [ -L "$src" ] && [ $n -lt 20 ]; do
+    case "$src" in */*) dir="${src%/*}" ;; *) dir=. ;; esac
+    dir=$(CDPATH= cd -P "$dir" 2>/dev/null && pwd) || return 1
+    src=$(/usr/bin/readlink "$src") || return 1
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+    n=$((n + 1))
+  done
+  case "$src" in */*) dir="${src%/*}" ;; *) dir=. ;; esac
+  dir=$(CDPATH= cd -P "$dir/.." 2>/dev/null && pwd) || return 1
+  printf '%s/data' "$dir"
+}
+
+# Avec un lanceur, l'extension impose « default » quand l'onglet n'a pas de mode à elle.
+# On rend alors le mode de ~/.claude/settings.json (par exemple auto), sauf si l'utilisateur a lui-même choisi
+# « default » : mode de départ fixé dans VS Code, ou dernier mode retenu par l'extension.
+vigie_mode_libre() {
+  local vs="${VIGIE_VSCODE_SETTINGS:-$H/Library/Application Support/Code/User/settings.json}"
+  if [ -f "$vs" ] && /usr/bin/grep -q '"claudeCode.initialPermissionMode"' "$vs" 2>/dev/null; then return 1; fi
+  local db="${VIGIE_VSCODE_STATE_DB:-$H/Library/Application Support/Code/User/globalStorage/state.vscdb}" m
+  [ -r "$db" ] || return 1
+  m=$(/usr/bin/sqlite3 -readonly -cmd '.timeout 300' "$db" \
+    "select json_extract(value, '\$.defaultPermissionMode') from ItemTable where key in ('Anthropic.claude-code', 'anthropic.claude-code') limit 1;" 2>/dev/null) || return 1
+  case "$m" in default|manual) return 1 ;; esac
+  return 0
+}
+
+vigie_route() {
+  # Sonde de configuration de l'extension : ce n'est pas une conversation.
+  [ -n "$CLAUDE_CODE_CONFIG_PROBE" ] && return 1
+  local a prev="" stream=0 resume=0 pm="" isnew=1 out rest dm end fix=0
+  for a in "$@"; do
+    case "$prev" in
+      --input-format) [ "$a" = stream-json ] && stream=1 ;;
+      --resume) V_SID="$a" ;;
+      --session-id) [ "$resume" = 1 ] || V_SID="$a" ;;
+      --permission-mode) pm="$a" ;;
+    esac
+    case "$a" in
+      --input-format=stream-json) stream=1 ;;
+      --resume) resume=1; V_SID="" ;;
+      --resume=*) resume=1; V_SID="${a#--resume=}" ;;
+      --session-id=*) [ "$resume" = 1 ] || V_SID="${a#--session-id=}" ;;
+      --continue) resume=2 ;;
+      --permission-mode=*) pm="${a#--permission-mode=}" ;;
+    esac
+    prev="$a"
+  done
+  [ "$stream" = 1 ] || return 1
+  V_KIND=conv
+  if [ "$resume" = 2 ]; then V_SID=""; V_WHY=continuer; return 1; fi
+  if ! [[ $V_SID =~ $UUID_RE ]]; then
+    # reprise d'autre chose qu'un id (chemin…) : on ne devine pas
+    if [ "$resume" = 1 ]; then V_SID=""; V_WHY=reprise-illisible; return 1; fi
+    V_SID=""
+  fi
+  [ "$resume" = 1 ] && isnew=0
+  [ -n "$DATA" ] || { V_WHY=sans-data; return 1; }
+  [ -x "$JQ" ] || { V_WHY=sans-jq; return 1; }
+  local acc="$DATA/accounts.json" st="$DATA/state.json" se="$H/.claude/settings.json"
+  [ -f "$acc" ] || { V_WHY=sans-comptes; return 1; }
+  [ -r "$st" ] || st=/dev/null
+  [ -r "$se" ] || se=/dev/null
+  out=$("$JQ" -r --arg sid "$V_SID" --arg isnew "$isnew" --arg main "$MAIN" \
+        --rawfile st "$st" --rawfile se "$se" "$PROG" "$acc" 2>/dev/null) || { V_WHY=comptes-illisibles; return 1; }
+  rest="$out$NL"
+  V_ACC="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  V_DIR="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  V_CONN="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  dm="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  V_WHY="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  end="${rest%%"$NL"*}"
+  if [ "$end" != fin ] || [ -z "$V_ACC" ]; then V_WHY=comptes-illisibles; return 1; fi
+
+  if [ -n "$V_DIR" ]; then
+    case "$V_DIR" in */) V_WHY=chemin; return 1 ;; /*) ;; *) V_WHY=chemin; return 1 ;; esac
+    [ -d "$V_DIR" ] || { V_WHY=dossier-absent; return 1; }
+    # historique partagé indispensable : sans lui l'extension repartirait d'une conversation vide
+    if ! { [ -L "$V_DIR/projects" ] && [ "$V_DIR/projects" -ef "$H/.claude/projects" ]; }; then V_WHY=historique-non-relie; return 1; fi
+    "$JQ" -e '(.oauthAccount | type) == "object"' "$V_DIR/.claude.json" >/dev/null 2>&1 || { V_WHY=non-connecte; return 1; }
+  fi
+
+  if [ "$pm" = default ]; then
+    case "$dm" in
+      auto|acceptEdits)
+        if vigie_mode_libre; then
+          V_MODE="$dm"; V_REWRITE=1
+          for a in "$@"; do
+            if [ "$fix" = 1 ]; then
+              fix=0
+              [ "$a" = default ] && a="$V_MODE"
+              V_ARGS+=("$a")
+              continue
+            fi
+            case "$a" in
+              --permission-mode=default) V_ARGS+=("--permission-mode=$V_MODE") ;;
+              --permission-mode) V_ARGS+=("$a"); fix=1 ;;
+              *) V_ARGS+=("$a") ;;
+            esac
+          done
+        fi ;;
+    esac
+  fi
+  return 0
+}
+
+# Une ligne par conversation lancée : « epoch  pid  compte  conversation|-  raison ».
+# data/launches/<pid> : le serveur y lit sur quel compte tourne chaque processus (exec garde le pid)
+# et épingle les conversations neuves. data/launches.log : l'historique, pour comprendre après coup.
+vigie_log() {
+  [ -n "$DATA" ] && [ -d "$DATA" ] || return 0
+  local f="$DATA/launches.log" sz line
+  line="$(/bin/date +%s)	$$	$1	${V_SID:--}	$2"
+  [ -d "$DATA/launches" ] || /bin/mkdir -p "$DATA/launches" 2>/dev/null
+  printf '%s\n' "$line" > "$DATA/launches/$$" 2>/dev/null
+  if [ -f "$f" ]; then
+    sz=$(/usr/bin/stat -f %z "$f" 2>/dev/null)
+    if [ "${sz:-0}" -gt 262144 ] 2>/dev/null; then
+      /usr/bin/tail -n 400 "$f" > "$f.$$" 2>/dev/null && /bin/mv -f "$f.$$" "$f" 2>/dev/null
+    fi
+  fi
+  printf '%s\n' "$line" >> "$f" 2>/dev/null
+  return 0
+}
+
+DATA=$(vigie_data 2>/dev/null) || DATA=""
+
+if vigie_route "$@"; then
+  vigie_log "$V_ACC" "$V_WHY"
+  if [ -n "$V_DIR" ]; then export CLAUDE_CONFIG_DIR="$V_DIR"; fi
+  if [ "$V_CONN" = off ]; then export ENABLE_CLAUDEAI_MCP_SERVERS=false; fi
+  if [ "$V_REWRITE" = 1 ]; then exec "$bin" "${V_ARGS[@]}"; fi
+  exec "$bin" "$@"
+fi
+if [ "$V_KIND" = conv ]; then vigie_log "$MAIN" "${V_WHY:-repli}"; fi
+exec "$bin" "$@"

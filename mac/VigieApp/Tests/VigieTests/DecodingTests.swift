@@ -1,0 +1,220 @@
+import Foundation
+import Testing
+@testable import Vigie
+
+/// Le contrat avec le moteur (docs/api-v2.md) : décodage tolérant, exemples, réponses réelles du moteur.
+struct DecodingTests {
+    private static let packageRoot = URL(filePath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+    @Test func toleratesMissingNullAndBrokenFields() throws {
+        let json = """
+        { "now": "2026-10-20T01:14:00Z", "since": 1760917200000,
+          "settings": { "autoAccept": true, "guard": null },
+          "sinceSummary": "oups",
+          "toReview": [ { "id": "q:1", "kind": "question", "ts": "2026-10-20T01:14:00.123Z",
+                          "question": { "id": "1", "items": [ { "question": "Q ?", "options": [ {"label": "A"}, 42, {"label": "B"} ],
+                                                                "chosen": ["A", "B"] } ] } },
+                        { "kind": "blocked" },
+                        { "id": "w:2", "kind": "nouveau-type", "ts": "pas une date" } ],
+          "reports": null,
+          "accounts": [ { "id": "t1", "wrongAccount": true,
+                          "usage": { "week": { "pct": 39, "resetsAt": "2026-10-26T19:00:00+01:00" }, "observedAt": null } } ],
+          "conversations": [ { "id": "c1", "status": "busy", "weekPct": 14 }, { "title": "sans id" } ],
+          "engine": { "notices": ["Indexation en cours", { "message": "Nouvelle version" }, 3] },
+          "champInconnu": { "x": 1 } }
+        """
+        let overview = try JSONDecoder().decode(Overview.self, from: Data(json.utf8))
+        #expect(overview.now != nil)
+        #expect(abs((overview.since?.timeIntervalSince1970 ?? 0) - 1_760_917_200) < 1)
+        #expect(overview.settings?.autoAccept == true)
+        #expect(overview.settings?.guardRules == nil)
+        #expect(overview.sinceSummary == nil)
+        #expect(overview.toReview.count == 2)
+        #expect(overview.toReview.first?.ts != nil)
+        #expect(overview.toReview.first?.question?.items.first?.options.count == 2)
+        #expect(overview.toReview.first?.question?.items.first?.chosenLabels == ["A", "B"])
+        #expect(overview.toReview.first?.questionID == "1")
+        #expect(overview.toReview.last?.ts == nil)
+        #expect(overview.toReview.last?.reviewKind == .other)
+        #expect(overview.reports.isEmpty)
+        #expect(overview.accounts.first?.usage?.week?.resetsAt != nil)
+        #expect(overview.accounts.first?.wrongAccount == true)
+        #expect(overview.conversations.count == 1)
+        #expect(overview.conversations.first?.state == .working)
+        #expect(overview.engine?.notices.map(\.text) == ["Indexation en cours", "Nouvelle version"])
+    }
+
+    @Test func decodesPlanAndFreshness() throws {
+        let json = """
+        { "summary": { "id": "c1" },
+          "now": { "text": "…", "ts": "2026-10-20T01:14:00Z", "tasks": [], "tasksTs": "2026-10-20T01:10:00.000Z",
+                   "plan": { "title": "Plan d'exécution 1.4", "updatedAt": "2026-10-20T00:41:00Z",
+                             "steps": [ { "id": "L2.23", "text": "Jauge", "status": "done", "group": "C" },
+                                        { "id": "L2.24", "text": "Icônes", "status": "doing", "group": "C" },
+                                        { "id": "L2.25", "status": "todo" }, 7 ],
+                             "current": "L2.24" } } }
+        """
+        let detail = try JSONDecoder().decode(ConversationDetail.self, from: Data(json.utf8))
+        let plan = try #require(detail.now?.plan)
+        #expect(detail.now?.tasksTs != nil)
+        #expect(plan.updatedAt != nil)
+        #expect(plan.steps.count == 3)
+        #expect(plan.doneCount == 1)
+        #expect(plan.totalCount == 3)
+        #expect(plan.currentIndex == 1)
+        #expect(plan.steps[1].label == "L2.24 Icônes")
+        #expect(plan.steps[2].label == "L2.25")
+
+        let usage = try JSONDecoder().decode(AccountUsage.self, from: Data("""
+        { "session": null, "week": { "pct": 8 }, "observedAt": "2026-10-19T20:05:00Z", "source": "ping" }
+        """.utf8))
+        #expect(usage.session == nil)
+        #expect(usage.week?.pct == 8)
+        #expect(usage.source == "ping")
+    }
+
+    @Test func decodesPreviewFiles() throws {
+        try decodeFolder(Self.packageRoot.appending(path: "Preview"), required: true)
+    }
+
+    private func decodeFolder(_ folder: URL, required: Bool) throws {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        if required { #expect(names.contains("overview.json")) }
+        let decoder = JSONDecoder()
+        for name in names where name.hasSuffix(".json") {
+            let data = try Data(contentsOf: folder.appending(path: name))
+            switch name {
+            case "overview.json":
+                let overview = try decoder.decode(Overview.self, from: data)
+                #expect(!overview.conversations.isEmpty, "\(name)")
+            case "mcp.json":
+                let mcp = try decoder.decode(MCPState.self, from: data)
+                #expect(!mcp.user.isEmpty, "\(name)")
+            case "accounts.json":
+                let accounts = try decoder.decode(AccountsState.self, from: data)
+                #expect(!accounts.accounts.isEmpty, "\(name)")
+            case let usage where usage.hasPrefix("usage-series-"):
+                let series = try decoder.decode(UsageSeries.self, from: data)
+                #expect(!series.conversations.isEmpty, "\(name)")
+                #expect(series.conversations.allSatisfy { $0.points.allSatisfy { $0.t != nil } }, "\(name)")
+            default:
+                let detail = try decoder.decode(ConversationDetail.self, from: data)
+                #expect(detail.summary != nil, "\(name)")
+            }
+        }
+    }
+
+    /// Tour 3 : consommation, alerte « s'emballe », actions sensibles « seulement par Vigie ».
+    @Test func decodesRoundThreeFields() throws {
+        let json = """
+        { "settings": { "guard": { "enabled": true, "mode": "vigie", "rules": [] } },
+          "toReview": [ { "id": "a:1", "kind": "blocked", "state": "awaiting", "approvalId": 42, "command": "sudo ls" },
+                        { "id": "g:2", "kind": "blocked", "state": "waiting", "pendingId": "9" } ],
+          "conversations": [
+            { "id": "c1", "rate": { "weekPctPerHour": 1.2, "tokensPerMin": 48000, "spark": [0, 0.4, null, 1.1], "trend": "up" },
+              "alert": { "kind": "emballe", "since": "2026-10-20T01:14:00Z", "reason": "Boucle" } },
+            { "id": "c2", "rate": "oups", "alert": null } ] }
+        """
+        let overview = try JSONDecoder().decode(Overview.self, from: Data(json.utf8))
+        #expect(overview.settings?.guardRules?.mode == "vigie")
+        #expect(overview.toReview.first?.approvalId == "42")
+        #expect(overview.toReview.first?.isAwaitingApproval == true)
+        #expect(overview.toReview.first?.needsDecision == true)
+        #expect(overview.toReview.last?.isAwaitingApproval == false)
+        #expect(overview.toReview.last?.needsDecision == true)
+        let first = overview.conversations.first
+        #expect(first?.rate?.weekPctPerHour == 1.2)
+        #expect(first?.rate?.spark == [0, 0.4, 1.1])
+        #expect(first?.alert?.isRunaway == true)
+        #expect(first?.alert?.since != nil)
+        #expect(overview.conversations.last?.rate == nil)
+        #expect(overview.conversations.last?.alert == nil)
+
+        let series = try JSONDecoder().decode(UsageSeries.self, from: Data("""
+        { "stepMin": 10, "conversations": [ { "id": "c1", "points": [ { "t": "2026-10-20T01:00:00Z", "weekPct": 0.5, "tokens": 1000 },
+                                                                    { "t": "2026-10-20T01:10:00Z", "weekPct": 0.25 }, 3 ] },
+                                            { "title": "sans id" } ],
+          "accounts": null }
+        """.utf8))
+        #expect(series.conversations.count == 1)
+        #expect(series.conversations.first?.totalPct == 0.75)
+        #expect(series.conversations.first?.totalTokens == 1000)
+        #expect(series.accounts.isEmpty)
+    }
+
+    @Test func fineFormats() {
+        #expect(Fmt.rate(1.2) == "1,2 %/h")
+        #expect(Fmt.pctFine(0.034) == "0,03 %")
+        #expect(Fmt.pctFine(14.2) == "14 %")
+        #expect(Fmt.tokensPerMin(48000) == "48 k tokens/min")
+    }
+
+    @Test func rowIdentifiersAreStableAndUnique() {
+        let items = ["a", "b", "a", "c", "a"]
+        let rows = RowIDs.make(items) { $0 }
+        #expect(Set(rows.map(\.id)).count == items.count)
+        // Un nouvel élément en tête ne change pas les identifiants des anciens.
+        let more = RowIDs.make(["a"] + items) { $0 }
+        #expect(Array(more.dropFirst().map(\.id)) == rows.map(\.id))
+    }
+
+    @Test func projectNames() {
+        #expect(ProjectName.display("atelier") == "Atelier")
+        #expect(ProjectName.display("auto-accept") == "Auto-accept")
+        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail/back") == "Portail · back")
+        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail-back/back") == "Portail · back")
+        #expect(ProjectName.display("front", cwd: "/Users/alex/Code/front") == "Front")
+    }
+
+    @Test func fixtureNames() {
+        #expect(VigieClient.fixtureName(for: "/api/v2/overview") == "overview.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/conversation/abc") == "conversation-abc.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/mcp") == "mcp.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/usage/series?window=600") == "usage-series-600.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/usage/series") == "usage-series-60.json")
+    }
+}
+
+/// « Coller une commande claude mcp add … ».
+struct MCPCommandTests {
+    @Test func httpWithHeader() throws {
+        let draft = try MCPCommandParser.parse(
+            "claude mcp add --transport http figma-pro https://mcp.figma.com/mcp -H \"Authorization: Bearer abc\"").get()
+        #expect(draft.transport == .http)
+        #expect(draft.name == "figma-pro")
+        #expect(draft.url == "https://mcp.figma.com/mcp")
+        #expect(draft.headers.first?.key == "Authorization")
+        #expect(draft.headers.first?.value == "Bearer abc")
+    }
+
+    @Test func stdioWithEnvAndSeparator() throws {
+        let draft = try MCPCommandParser.parse(
+            "claude mcp add supabase -s project -e SUPABASE_TOKEN=xyz -- npx -y @supabase/mcp-server-supabase --project-ref=abc").get()
+        #expect(draft.transport == .stdio)
+        #expect(draft.command == "npx")
+        #expect(draft.arguments == "-y @supabase/mcp-server-supabase --project-ref=abc")
+        #expect(draft.scope == "project")
+        #expect(draft.env.first?.value == "xyz")
+    }
+
+    @Test func addJSON() throws {
+        let draft = try MCPCommandParser.parse(
+            "claude mcp add-json obsidian '{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"server.mjs\"]}'").get()
+        #expect(draft.command == "node")
+        #expect(draft.arguments == "server.mjs")
+    }
+
+    @Test func rejectsOtherCommands() {
+        if case .success = MCPCommandParser.parse("npm install x") {
+            Issue.record("une commande npm ne doit pas être acceptée")
+        }
+    }
+
+    @Test func maskedValuesBlockSaving() {
+        var draft = MCPDraft.from(name: "artlist", type: "http", target: "https://mcp.artlist.io/mcp?key=••••")
+        #expect(draft.containsMaskedValue)
+        draft.url = "https://mcp.artlist.io/mcp?key=nouvelle"
+        #expect(!draft.containsMaskedValue)
+    }
+}

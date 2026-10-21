@@ -1,0 +1,61 @@
+{
+  "summary": {
+    "id": "e5f6a7b8-c9d0-4e1f-a2b3-c4d5e6f7a8b9",
+    "title": "Analyse : pourquoi atelier perd des joueurs",
+    "project": "atelier",
+    "cwd": "/Users/alex/Code/atelier",
+    "status": "closed",
+    "running": false,
+    "accountId": "perso",
+    "autoAccept": true,
+    "connectors": "off",
+    "agentsRunning": 0,
+    "workflowsRunning": 0,
+    "weekPct": 0.9,
+    "lastActivity": "2026-10-19T16:11:00.000Z",
+    "needsYou": 0,
+    "headline": "Rapport « Analyse finale atelier » publié",
+    "startedAt": "2026-10-19T06:30:00.000Z"
+  },
+  "now": {
+    "text": "Rapport publié : 73 propositions classées par effet attendu.",
+    "ts": "2026-10-19T16:11:00.000Z",
+    "tasks": []
+  },
+  "chapters": [
+    {
+      "id": "a-1",
+      "prompt": "analyse pourquoi atelier perd des joueurs et propose des corrections",
+      "start": "2026-10-19T06:30:00.000Z",
+      "end": "2026-10-19T16:11:00.000Z",
+      "durationMs": 34860000,
+      "stats": {
+        "workflows": 1,
+        "agents": 9,
+        "artifacts": 1,
+        "files": 2,
+        "tests": 0,
+        "testsFailed": 0,
+        "commits": 0
+      },
+      "outcome": "Rapport « Analyse finale atelier » publié, 73 propositions."
+    }
+  ],
+  "accepted": [],
+  "agents": {
+    "running": [],
+    "done": []
+  },
+  "artifacts": [
+    {
+      "title": "Analyse finale atelier",
+      "url": "https://claude.ai/artifact/3f9c2a10-6b1e-4c55-9d0a-atelier-analyse",
+      "description": "73 propositions classées",
+      "ts": "2026-10-19T16:11:00.000Z",
+      "publishes": 1
+    }
+  ],
+  "files": [],
+  "tests": [],
+  "mcp": []
+}
