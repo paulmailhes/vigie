@@ -5,6 +5,11 @@ import SwiftUI
 // puis « Conversations » (une ligne chacune : état, ce qu'elle fait, compte, débit, étapes).
 
 extension VigieStore {
+    /// Ce qui attend une décision maintenant dans cette conversation (action sensible, question, attente).
+    func urgentItems(for conversationID: String) -> [ReviewItem] {
+        toReview.filter { $0.conversationId == conversationID && ($0.needsDecision || $0.reviewKind == .waiting) }
+    }
+
     /// Compte sur lequel tourne vraiment la conversation (processus lancé), sinon celui choisi.
     func runningAccountId(of conversation: ConversationSummary) -> String? {
         conversation.account?.running ?? conversation.accountId ?? account(nil)?.id
@@ -186,10 +191,27 @@ struct ConversationListSection: View {
                 RowsBlock {
                     ConversationListHeader()
                     ForEach(open) { conversation in
-                        ConversationListRow(conversation: conversation,
-                                            data: CardData(summary: conversation, detail: store.details[conversation.id]?.raw,
-                                                           since: store.since, now: store.now),
-                                            sensitive: sensitiveItem(for: conversation.id))
+                        // la conversation, et juste dessous ce qu'elle attend de toi, avec les boutons
+                        VStack(spacing: 0) {
+                            ConversationListRow(conversation: conversation,
+                                                data: CardData(summary: conversation, detail: store.details[conversation.id]?.raw,
+                                                               since: store.since, now: store.now),
+                                                sensitive: sensitiveItem(for: conversation.id))
+                            let waiting = store.urgentItems(for: conversation.id)
+                            if !waiting.isEmpty {
+                                VStack(spacing: 0) {
+                                    ForEach(waiting) { item in
+                                        ReviewRow(item: item)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                    }
+                                }
+                                .background(Theme.alert.opacity(0.06), in: .rect(cornerRadius: 10))
+                                .padding(.leading, 40)
+                                .padding(.trailing, 12)
+                                .padding(.bottom, 10)
+                            }
+                        }
                     }
                 }
             }
@@ -314,7 +336,9 @@ struct ConversationListRow: View {
     /// Ce qui t'attend (rouge) : une action à autoriser, une question, une attente.
     @ViewBuilder
     private var attention: some View {
-        if let resume = conversation.resume {
+        if !store.urgentItems(for: conversation.id).isEmpty {
+            EmptyView()
+        } else if let resume = conversation.resume {
             Button {
                 Task { await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd) }
             } label: {

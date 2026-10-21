@@ -1,139 +1,112 @@
 import SwiftUI
 
-// Une colonne par compte, partout sur la page MCP : on lit d'un coup d'œil où un MCP marche,
-// où il faut l'autoriser (orange, un clic), où il échoue (rouge), où il manque.
+// L'état d'un MCP sur chaque compte, résumé : ce qui marche en une mention, ce qui est à régler avec son geste.
 // Chaque compte Claude garde sa propre autorisation : il faut connecter un MCP une fois par compte.
 
-enum MCPColumns {
-    static let cell: CGFloat = 92
-}
-
-/// En-tête des colonnes : le nom de chaque compte, au-dessus de ses cases.
-struct MCPAccountsHeader: View {
-    @Environment(VigieStore.self) private var store
-    /// Largeur réservée à droite des cases (bouton « partout », utilisations, interrupteur, menu).
-    var trailing: CGFloat = 0
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text("Une autorisation par compte : connecte chaque MCP une fois sur chacun.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            ForEach(store.accounts) { account in
-                Text(account.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: MCPColumns.cell)
-                    .opacity(account.isConnected ? 1 : Theme.dim)
-            }
-            Color.clear.frame(width: trailing, height: 1)
-        }
-    }
-}
-
-/// Les cases d'un MCP, une par compte.
+/// L'état d'un MCP sur tes comptes Claude, en une ligne : « ✓ tous tes comptes » quand tout va bien, sinon
+/// seulement les comptes à régler, chacun avec son geste (Connecter, Ajouter, Échec). Tient avec beaucoup de comptes.
 struct MCPAccountCells: View {
     @Environment(VigieStore.self) private var store
     let name: String
     let health: [MCPHealth]
-    /// Comptes qui déclarent ce MCP (vide : on ne sait pas, toutes les cases sont lues dans `health`).
+    /// Comptes qui déclarent ce MCP (vide : on ne sait pas, l'état est lu dans `health`).
     var declaredIn: [String] = []
     /// Dossier du projet (MCP de projet) ; nil pour un MCP du Mac.
     var path: String?
     /// Ajouter ce MCP à un compte où il manque (MCP du Mac seulement).
     var addTo: ((String) -> Void)?
+    /// Limiter à ces comptes (MCP du compte : le sien seulement).
+    var only: [String]? = nil
 
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(store.accounts) { account in
-                MCPAccountCell(name: name, account: account, entry: health.first { $0.accountId == account.id },
-                               missing: !declaredIn.isEmpty && !declaredIn.contains(account.id),
-                               path: path, addTo: addTo)
-                    .frame(width: MCPColumns.cell)
-            }
+    private var accounts: [Account] {
+        store.accounts.filter { !$0.isCodex && $0.isConnected && (only == nil || only!.contains($0.id)) }
+    }
+
+    private enum State { case ok, connect, failed, missing, pending, off, unknown }
+
+    private func state(_ account: Account) -> State {
+        if !declaredIn.isEmpty && !declaredIn.contains(account.id) { return .missing }
+        switch health.first(where: { $0.accountId == account.id })?.mcpStatus ?? .unknown {
+        case .connected: return .ok
+        case .needsAuth: return .connect
+        case .failed: return .failed
+        case .pendingApproval: return .pending
+        case .disabled: return .off
+        case .unknown: return .unknown
         }
     }
-}
-
-/// Une case : OK (neutre), Connecter (orange), Échec (rouge), Ajouter (manquant), « — » (pas encore vérifié).
-struct MCPAccountCell: View {
-    @Environment(VigieStore.self) private var store
-    let name: String
-    let account: Account
-    let entry: MCPHealth?
-    let missing: Bool
-    let path: String?
-    let addTo: ((String) -> Void)?
 
     var body: some View {
-        Group {
-            if !account.isConnected {
-                Text("—").foregroundStyle(.tertiary)
-                    .help("\(account.displayName) n'est pas connecté")
-            } else if missing {
-                if let addTo {
-                    Button("Ajouter") { addTo(account.id) }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                        .help("« \(name) » n'est pas dans \(account.displayName) : l'y ajouter, avec la même configuration")
-                } else {
-                    Text("absent").foregroundStyle(.tertiary)
-                }
-            } else {
-                switch entry?.mcpStatus ?? .unknown {
-                case .connected:
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.secondary)
-                        .contextMenu { reconnectButton }
-                        .help(help("connecté"))
-                case .needsAuth:
-                    Button("Connecter") { connect(force: false) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.warn)
-                        .controlSize(.small)
-                        .help("Ouvre la page d'autorisation de « \(name) » pour \(account.displayName) dans ton navigateur")
-                case .failed:
-                    Menu("Échec") {
-                        reconnectButton
-                        Button("Vérifier de nouveau", systemImage: "arrow.triangle.2.circlepath") {
-                            Task { await store.mcpCheck(accountId: account.id, path: path) }
+        let states = accounts.map { ($0, state($0)) }
+        let ok = states.filter { $0.1 == .ok }.map(\.0)
+        let issues = states.filter { $0.1 != .ok && $0.1 != .unknown }
+        HStack(spacing: 6) {
+            ForEach(issues.prefix(3), id: \.0.id) { account, st in
+                chip(account, st)
+            }
+            if issues.count > 3 {
+                Text("+\(issues.count - 3)").font(.caption).foregroundStyle(.secondary)
+            }
+            if !ok.isEmpty {
+                Label(issues.isEmpty && ok.count == accounts.count ? (accounts.count > 1 ? "Tous tes comptes" : ok[0].displayName) : "\(ok.count) ok",
+                      systemImage: "checkmark")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .help("Marche sur " + ok.map(\.displayName).joined(separator: ", "))
+                    .contextMenu {
+                        ForEach(ok) { account in
+                            Button("Refaire l'autorisation sur \(account.displayName)", systemImage: "arrow.clockwise") {
+                                Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
+                            }
                         }
                     }
-                    .menuStyle(.button)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.alert)
-                    .fixedSize()
-                    .help(help("en échec"))
-                case .pendingApproval:
-                    Text("à approuver").foregroundStyle(Theme.warn)
-                        .help(help("en attente d'approbation : ouvre Claude Code dans ce dossier pour l'approuver"))
-                case .disabled:
-                    Text("coupé").foregroundStyle(.tertiary)
-                        .help(help("coupé"))
-                case .unknown:
-                    Text("—").foregroundStyle(.tertiary)
-                        .help("Pas encore vérifié sur \(account.displayName)")
-                }
+            } else if issues.isEmpty {
+                Text("pas encore vérifié").font(.callout).foregroundStyle(.tertiary)
             }
         }
-        .font(.callout)
+        .fixedSize()
     }
 
-    private var reconnectButton: some View {
-        Button("Refaire l'autorisation", systemImage: "arrow.clockwise") { connect(force: true) }
-    }
-
-    private func connect(force: Bool) {
-        Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: force) }
-    }
-
-    private func help(_ state: String) -> String {
-        var text = "\(account.displayName) : \(state)"
-        if let checked = entry?.checkedAt { text += " · vérifié \(Fmt.when(checked, now: store.now))" }
-        if let message = entry?.message, !message.isEmpty { text += "\n\(message)" }
-        return text
+    @ViewBuilder
+    private func chip(_ account: Account, _ st: State) -> some View {
+        switch st {
+        case .connect:
+            Button("\(account.displayName) · Connecter") {
+                Task { await store.mcpConnect(name: name, accountId: account.id, path: path) }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.warn)
+            .controlSize(.small)
+            .help("Ouvre la page d'autorisation de « \(name) » pour \(account.displayName) dans ton navigateur")
+        case .failed:
+            Menu("\(account.displayName) · échec") {
+                Button("Refaire l'autorisation", systemImage: "arrow.clockwise") {
+                    Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
+                }
+                Button("Vérifier de nouveau", systemImage: "arrow.triangle.2.circlepath") {
+                    Task { await store.mcpCheck(accountId: account.id, path: path) }
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.alert)
+            .fixedSize()
+        case .missing:
+            if let addTo {
+                Button("\(account.displayName) · Ajouter") { addTo(account.id) }
+                    .buttonStyle(.borderless)
+                    .help("« \(name) » n'est pas sur \(account.displayName) : l'y ajouter, avec la même configuration")
+            } else {
+                Text("absent de \(account.displayName)").font(.callout).foregroundStyle(.tertiary)
+            }
+        case .pending:
+            Text("\(account.displayName) · à approuver").font(.callout).foregroundStyle(Theme.warn)
+                .help("MCP de projet en attente d'approbation : ouvre Claude Code dans ce dossier")
+        case .off:
+            Text("\(account.displayName) · coupé").font(.callout).foregroundStyle(.tertiary)
+        case .ok, .unknown:
+            EmptyView()
+        }
     }
 }
 

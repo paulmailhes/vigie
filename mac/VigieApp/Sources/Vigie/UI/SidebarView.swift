@@ -114,8 +114,9 @@ struct SidebarConversationRow: View {
             Text(conversation.shortTitle)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if let count = conversation.needsYou, count > 0, Theme.needsYou(conversation.state) {
-                CountBadge(count: count, urgent: true)
+            let waiting = store.urgentItems(for: conversation.id).count
+            if waiting > 0 {
+                CountBadge(count: waiting, urgent: true)
             } else if conversation.isOpen {
                 Text(accountName)
                     .font(.caption)

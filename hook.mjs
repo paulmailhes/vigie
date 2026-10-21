@@ -440,12 +440,16 @@ const preOutput = (permissionDecision, permissionDecisionReason) =>
 // conversation. Refusée, ou sans réponse dans le délai : refus, la conversation continue le reste du travail.
 async function onPreToolUseGuard(input) {
   const state = readState();
-  if (state.guard.mode === 'vscode') return;
   const sid = input.session_id;
   if (!effective(state, sid).autoAccept) return; // L'utilisateur valide lui-même dans VS Code
   const tool = input.tool_name;
   const rule = matchGuard(state, tool, input.tool_input);
   if (!rule || readOnlyShell(tool, input.tool_input)) return;
+  // « Dans la conversation et dans Vigie » : Claude Code affiche sa fenêtre (même en mode auto, qui l'aurait
+  // validée seul) ; PermissionRequest attend alors en parallèle la décision prise dans Vigie.
+  if (state.guard.mode === 'vscode') {
+    return reply(preOutput('ask', `Action sensible (garde-fou Vigie : « ${rule.label} ») : à valider par l'utilisateur, ici ou dans Vigie.`));
+  }
   return holdForVigie(input, rule, state, 'PreToolUse');
 }
 
@@ -511,7 +515,7 @@ async function onCodex(input) {
   const rule = matchGuard(state, tool, input.tool_input);
   if (ev === 'PreToolUse') {
     if (!rule || readOnlyShell(tool, input.tool_input)) return;
-    if (state.guard.mode === 'vscode') return; // la fenêtre de Codex s'en charge (PermissionRequest)
+    // Codex ne sait pas afficher sa fenêtre à la demande : l'action attend dans Vigie, quel que soit le mode
     return holdForVigie(input, rule, state, 'PreToolUse');
   }
   if (ev !== 'PermissionRequest') return;

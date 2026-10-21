@@ -28,6 +28,7 @@ struct MCPRemoval: Equatable {
 struct MCPView: View {
     @Environment(VigieStore.self) private var store
     @State private var editor: MCPEditorRequest?
+    @State private var showLibrary = false
     @State private var removal: MCPRemoval?
     @State private var confirmRemoval = false
 
@@ -56,13 +57,19 @@ struct MCPView: View {
                 .help("Copie un message préparé et ouvre VS Code")
             }
             ToolbarItem {
-                Button("Ajouter un MCP", systemImage: "plus") { editor = .addUser }
-                    .help("Ajouter un MCP")
+                Menu {
+                    Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { showLibrary = true }
+                    Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { editor = .addUser }
+                } label: {
+                    Label("Ajouter un MCP", systemImage: "plus")
+                }
+                .help("Ajouter un MCP")
             }
         }
         .sheet(item: $editor) { request in
             MCPEditorSheet(request: request, projects: knownProjects)
         }
+        .sheet(isPresented: $showLibrary) { MCPLibrarySheet() }
         .confirmationDialog(removal.map { "Supprimer « \($0.name) » ?" } ?? "", isPresented: $confirmRemoval,
                             titleVisibility: .visible, presenting: removal) { removal in
             Button("Supprimer", role: .destructive) {
@@ -102,7 +109,6 @@ struct MCPView: View {
     private func content(_ mcp: MCPState) -> some View {
         Form {
             Section {
-                MCPAccountsHeader()
                 ForEach(mcp.user) { server in
                     UserMCPRow(server: server, accounts: store.accounts, projects: knownProjects,
                                edit: { editor = .editUser(server) },
@@ -110,12 +116,11 @@ struct MCPView: View {
                 }
                 if mcp.user.isEmpty { EmptyRow(text: "Aucun MCP sur ton Mac") }
             } header: {
-                MCPSectionHeader(title: "Sur ton Mac", text: "Dans toutes tes conversations, sur chaque compte.")
+                MCPSectionHeader(title: "MCP de ce Mac", text: "Dans toutes tes conversations, sur tous tes comptes Claude.")
             }
 
             Section {
                 let projects = mcp.projects + mcp.local
-                if !projects.isEmpty { MCPAccountsHeader() }
                 ForEach(projects) { project in
                     ProjectHeaderRow(project: project, isLocal: mcp.local.contains(project)) {
                         editor = .addProject(path: project.path)
@@ -128,21 +133,20 @@ struct MCPView: View {
                 }
                 if projects.isEmpty { EmptyRow(text: "Aucun .mcp.json dans ~/Code") }
             } header: {
-                MCPSectionHeader(title: "Dans tes projets", text: "Seulement quand Claude travaille dans ce dossier (.mcp.json).")
+                MCPSectionHeader(title: "MCP des projets", text: "Seulement quand Claude travaille dans ce dossier (fichier .mcp.json).")
             }
 
             Section {
                 @Bindable var store = store
                 Toggle("Activés dans les nouvelles conversations", isOn: $store.connectorsDefaultOn)
                     .toggleStyle(.switch)
-                if !mcp.connectors.isEmpty { MCPAccountsHeader() }
                 ForEach(mcp.connectors.sorted { ($0.uses7d ?? 0) > ($1.uses7d ?? 0) }) { connector in
                     ConnectorRow(connector: connector, account: store.account(connector.accountId))
                 }
-                if mcp.connectors.isEmpty { EmptyRow(text: "Aucun connecteur vu") }
+                if mcp.connectors.isEmpty { EmptyRow(text: "Aucun MCP du compte vu") }
             } header: {
-                MCPSectionHeader(title: "Connecteurs de compte (claude.ai)",
-                                 text: "Propres à chaque compte. Coupés par défaut, réglables par conversation.")
+                MCPSectionHeader(title: "MCP du compte (claude.ai)",
+                                 text: "Branchés à ton compte sur claude.ai (Gmail, Drive…), partagés par toutes ses conversations. Coupés par défaut, réglables par conversation.")
             }
         }
         .pageForm()
@@ -430,7 +434,8 @@ struct ConnectorRow: View {
             Text(connector.name)
             Spacer(minLength: 8)
             UsesLabel(count: connector.uses7d)
-            MCPAccountCells(name: connector.name, health: connector.health, declaredIn: connector.accountId.map { [$0] } ?? [])
+            if let account { Text(account.displayName).font(.caption).foregroundStyle(.secondary) }
+            MCPAccountCells(name: connector.name, health: connector.health, only: connector.accountId.map { [$0] })
         }
         .padding(.vertical, 1)
     }

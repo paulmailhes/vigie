@@ -436,7 +436,7 @@ struct ConversationHeader: View {
             Button {
                 Task { await store.setConnectors(false, for: summary.id) }
             } label: {
-                choiceLabel("Coupés", selected: !on)
+                choiceLabel("Coupés (recommandé)", selected: !on)
             }
             Button {
                 Task { await store.setConnectors(true, for: summary.id) }
@@ -444,11 +444,11 @@ struct ConversationHeader: View {
                 choiceLabel("Activés", selected: on)
             }
         } label: {
-            Label(on ? "Connecteurs : activés" : "Connecteurs : coupés", systemImage: on ? "link" : "link.badge.plus")
+            Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp)
         }
         .menuStyle(.button)
         .glassButton()
-        .help("Connecteurs de compte (claude.ai) pour cette conversation")
+        .help("Les MCP de ton compte claude.ai (Gmail, Drive…) dans cette conversation. Les MCP de ce Mac et du projet restent actifs.")
     }
 
     @ViewBuilder

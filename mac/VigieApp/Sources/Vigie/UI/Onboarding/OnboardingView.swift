@@ -7,10 +7,13 @@ struct OnboardingView: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @AppStorage(OnboardingView.doneKey) private var done = false
-    @State private var step = 0
+    @State private var step: Int
+
+    /// `start` : ouvrir directement sur une étape (captures d'écran).
+    init(start: Int = 0) { _step = State(initialValue: start) }
 
     static let doneKey = "onboarding.done"
-    private let steps = 4
+    private let steps = 5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +22,7 @@ struct OnboardingView: View {
                 case 0: welcome
                 case 1: guards
                 case 2: accounts
+                case 3: mcps
                 default: ready
                 }
             }
@@ -155,7 +159,74 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: 4. C'est parti
+    // MARK: 4. MCP
+
+    @State private var showLibrary = false
+
+    private var mcps: some View {
+        @Bindable var store = store
+        let mcp = store.mcp
+        let projectCount = ((mcp?.projects ?? []) + (mcp?.local ?? [])).reduce(0) { $0 + $1.servers.count }
+        return VStack(alignment: .leading, spacing: 18) {
+            header(Icon.mcp, "Tes MCP", "Les outils que Claude peut utiliser (Notion, Figma, ta base de données…). Il y en a trois sortes :")
+            VStack(spacing: 0) {
+                mcpFamily("desktopcomputer", "MCP de ce Mac", mcp.map { Fmt.count($0.user.count, "MCP", "MCP") },
+                          "Dans toutes tes conversations, sur tous tes comptes Claude.")
+                Divider()
+                mcpFamily("folder", "MCP des projets", mcp.map { _ in Fmt.count(projectCount, "MCP", "MCP") },
+                          "Seulement quand Claude travaille dans le dossier du projet (fichier .mcp.json).")
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    mcpFamily("person.crop.circle", "MCP du compte (claude.ai)", mcp.map { Fmt.count($0.connectors.count, "MCP", "MCP") },
+                              "Branchés à ton compte sur claude.ai (Gmail, Drive…), partagés par toutes ses conversations.")
+                    Toggle(isOn: $store.connectorsDefaultOn) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Les activer dans les nouvelles conversations")
+                            Text("Coupés, ils n'encombrent pas Claude ; tu peux les allumer pour une conversation précise.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+            }
+            .background(.quinary, in: .rect(cornerRadius: Theme.corner))
+            HStack(spacing: 10) {
+                Button("Ajouter des MCP officiels", systemImage: "books.vertical") { showLibrary = true }
+                    .glassButton()
+                Text("Tout se règle ensuite dans la page MCP.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .sheet(isPresented: $showLibrary) { MCPLibrarySheet() }
+        .task { if store.mcp == nil { await store.refreshMCP() } }
+    }
+
+    private func mcpFamily(_ symbol: String, _ title: String, _ count: String?, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title).font(.headline)
+                    Spacer()
+                    Text(count ?? "…").foregroundStyle(.secondary).monospacedDigit()
+                }
+                Text(text)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+    }
+
+    // MARK: 5. C'est parti
 
     @State private var notificationsAsked = false
 

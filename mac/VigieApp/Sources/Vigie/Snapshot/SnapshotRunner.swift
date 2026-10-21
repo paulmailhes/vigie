@@ -96,6 +96,8 @@ final class SnapshotRunner {
             }
 
             await captureMenuPanel(theme: theme, appearance: NSAppearance(named: appearanceName))
+            await captureAlone(OnboardingView(start: 3), "14-accueil-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
+            await captureAlone(MCPLibrarySheet(), "15-bibliotheque-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
         }
 
         finish(code: 0, message: "\(written.count) captures dans \(folder.path)")
@@ -313,9 +315,14 @@ final class SnapshotRunner {
         unsafeBitCast(app.method(for: selector), to: Activate.self)(app, selector, true)
     }
 
+    /// Une vue seule (accueil, feuille), rendue dans sa propre fenêtre.
+    private func captureAlone(_ view: some View, _ name: String, appearance: NSAppearance?) async {
+        await captureMenuPanel(theme: "", appearance: appearance, root: AnyView(view.background(.background)), name: name)
+    }
+
     /// Le panneau de la barre des menus, rendu dans une petite fenêtre à part.
-    private func captureMenuPanel(theme: String, appearance: NSAppearance?) async {
-        let hosting = NSHostingView(rootView: MenuBarPanel().environment(store))
+    private func captureMenuPanel(theme: String, appearance: NSAppearance?, root: AnyView? = nil, name: String? = nil) async {
+        let hosting = NSHostingView(rootView: (root ?? AnyView(MenuBarPanel())).environment(store))
         let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 600), styleMask: [.borderless],
                              backing: .buffered, defer: false)
         panel.appearance = appearance
@@ -333,7 +340,7 @@ final class SnapshotRunner {
            let output = flatten([.image(image, hosting.bounds)], size: hosting.bounds.size,
                                 scale: CGFloat(image.pixelsWide) / max(hosting.bounds.width, 1),
                                 appearance: panel.effectiveAppearance) {
-            save(output, "13-barre-des-menus-\(theme)")
+            save(output, name ?? "13-barre-des-menus-\(theme)")
         }
         panel.orderOut(nil)
         panel.close()

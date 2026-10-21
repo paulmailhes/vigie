@@ -241,11 +241,11 @@ function freshVigie() {
   vscodeSession(); // même dans une conversation VS Code : plus de fenêtre pour les actions sensibles
   fs.rmSync(HISTORY_FILE, { force: true });
   fs.rmSync(APPROVALS_FILE, { force: true });
-  setState({ autoAccept: true }); // garde-fous par défaut : mode vigie, délai de 10 min ignoré
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie' } }); // seulement par Vigie, délai de 10 min
 }
 
 test('mode vigie : action sensible refusée tout de suite, à autoriser dans Vigie (agents compris)', () => {
-  assert.equal(DEFAULT_STATE.guard.mode, 'vigie');
+  assert.equal(DEFAULT_STATE.guard.mode, 'vscode', 'par défaut : dans la conversation et dans Vigie');
   freshVigie();
   const long = `sudo bash -c 'echo ${'x'.repeat(5000)}'`;
   const r = vigieRun(long);
@@ -324,7 +324,7 @@ test('mode vigie : L\'utilisateur refuse, l\'élément sort de la liste et rien 
 });
 
 test('mode vigie : approvals.json ne s\'écrit pas sans l\'utilisateur', () => {
-  setState({ autoAccept: true });
+  setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, mode: 'vigie' } });
   assert.equal(perm('Write', { file_path: '/Users/alex/Code/auto-accept/data/approvals.json', content: '{}' }), 'deny');
   assert.equal(bash(`node -e "require('fs').writeFileSync('approvals.json', '{}')"`), 'deny');
   assert.equal(bash('curl -s -X POST -H "X-Vigie: 1" http://127.0.0.1:4777/api/v2/approvals -d \'{"approvalId":"0123456789abcdef"}\''), 'deny');
@@ -439,4 +439,15 @@ test('question : répondue depuis Vigie (mode « toujours me demander »), trans
   assert.equal(o.behavior, 'allow');
   assert.deepEqual(o.updatedInput.answers, { 'Quel fond pour la charte ?': 'Fond B' }, 'la réponse de l’utilisateur, sans mention de Vigie');
   assert.equal(hist().at(-1).event, 'question-repondue-app');
+});
+
+test('par défaut (dans la conversation et dans Vigie) : la fenêtre de Claude Code s’affiche pour une action sensible, même en mode auto', () => {
+  vscodeSession();
+  setState({ autoAccept: true });
+  const pre = (command) => run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, permission_mode: 'auto' }, { HOME });
+  const o = pre('git push --force origin main');
+  assert.equal(o.hookSpecificOutput.permissionDecision, 'ask', 'la fenêtre s’affiche');
+  assert.match(o.hookSpecificOutput.permissionDecisionReason, /ici ou dans Vigie/);
+  assert.equal(pre('npm test'), null, 'le reste passe sans rien demander');
+  assert.equal(pre('grep -n "sudo" lib/state.mjs'), null, 'une lecture qui cite un mot sensible non plus');
 });

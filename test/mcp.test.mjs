@@ -308,7 +308,8 @@ describe('inventaire', () => {
     // correctif de production : « à reconnecter » = compte principal seulement ; les autres dans needsAuthIn
     assert.equal(u['figma-perso'].needsAuth, false);
     assert.deepEqual(u['figma-perso'].needsAuthIn, ['perso']);
-    assert.deepEqual(u['figma-perso'].health, [], 'pas encore de relevé');
+    assert.deepEqual(u['figma-perso'].health, [{ accountId: 'perso', status: 'needs-auth', checkedAt: null }],
+      'pas encore de relevé : le cache de Claude Code suffit pour proposer « Connecter »');
     assert.equal(u.obsidian.target, 'python3 ~/tools/obsidian/server.py');
     assert.equal(u.secretive.target, `npx -y some-mcp --api-key ${MASK}`);
     assert.deepEqual(u['notion-perso'].disabledIn, [path.join(CODE, 'alpha')]);

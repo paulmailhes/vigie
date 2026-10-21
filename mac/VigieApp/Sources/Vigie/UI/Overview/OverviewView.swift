@@ -55,7 +55,8 @@ struct OverviewView: View {
 
     /// Ce qui attend ta décision maintenant (rouge) : toujours en haut, en entier.
     private var urgent: [ReviewItem] {
-        store.toReview.filter { $0.needsDecision || $0.reviewKind == .waiting }
+        let open = Set(store.conversations.filter(\.isOpen).map(\.id))
+        return store.toReview.filter { ($0.needsDecision || $0.reviewKind == .waiting) && !open.contains($0.conversationId ?? "") }
     }
 
     /// Le reste (questions choisies pour toi, actions laissées de côté, limites) : à relire, sans urgence.

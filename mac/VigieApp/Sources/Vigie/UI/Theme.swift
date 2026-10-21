@@ -152,9 +152,9 @@ enum Theme {
 
     static func title(for group: MCPGroup) -> String {
         switch group {
-        case .mac: "Sur ton Mac"
-        case .project: "Projet"
-        case .connector: "Connecteurs de compte"
+        case .mac: "MCP de ce Mac"
+        case .project: "MCP du projet"
+        case .connector: "MCP du compte (claude.ai)"
         }
     }
 
