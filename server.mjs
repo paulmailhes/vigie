@@ -1259,7 +1259,7 @@ async function postGateway(body) {
       return [200, { ok: true, ...a, gateway: gateway.status() }];
     }
     if (action === 'authorize') return [200, { ok: true, ...(await gateway.authorize(name, { id: body.profileId, label: body.label })), gateway: gateway.status() }];
-    if (action === 'activate') { gateway.activate(name, body.profileId); return [200, { ok: true, gateway: gateway.status() }]; }
+    if (action === 'activate') { gateway.activate(name, body.profileId); await gateway.verify(name); return [200, { ok: true, gateway: gateway.status() }]; }
     if (action === 'rename') { gateway.renameProfile(name, body.profileId, body.label); return [200, { ok: true, gateway: gateway.status() }]; }
     if (action === 'removeProfile') { gateway.removeProfile(name, body.profileId); return [200, { ok: true, gateway: gateway.status() }]; }
     if (action === 'restore') {
@@ -1679,6 +1679,8 @@ server.listen(PORT, HOST, () => {
   setTimeout(updateTick, 60_000);
   setInterval(updateTick, 30 * 60_000);
   if (!process.env.VIGIE_NO_MCP_SYNC) {
+    // espaces de la passerelle encore acceptés par leur service ?
+    setTimeout(() => { for (const n of gateway.names()) gateway.verify(n).catch(() => {}); }, 10_000);
     setTimeout(syncMcpAccounts, 30_000);
     setInterval(syncMcpAccounts, 5 * 60_000);
   }

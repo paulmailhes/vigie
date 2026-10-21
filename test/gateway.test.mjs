@@ -11,8 +11,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie-passerelle-'));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 // Faux service : MCP protégé + serveur d'autorisation (découverte, inscription, code + PKCE, rafraîchissement).
-function fakeService({ secret = false } = {}) {
-  const state = { codes: new Map(), tokens: new Map(), refreshes: 0, seen: [], lastChallenge: null, registered: 0 };
+function fakeService({ secret = false, oneGrantPerClient = false } = {}) {
+  const state = { codes: new Map(), tokens: new Map(), clientOf: new Map(), refreshes: 0, seen: [], lastChallenge: null, registered: 0 };
   const srv = http.createServer(async (req, res) => {
     const base = `http://127.0.0.1:${srv.address().port}`;
     const url = new URL(req.url, base);
@@ -28,7 +28,7 @@ function fakeService({ secret = false } = {}) {
       state.registered++;
       const r = JSON.parse(body);
       assert.deepEqual(r.redirect_uris, ['http://localhost:4777/oauth/callback']);
-      return json(201, { client_id: 'vigie-client', ...(secret ? { client_secret: 'chut' } : {}), token_endpoint_auth_method: r.token_endpoint_auth_method });
+      return json(201, { client_id: `vigie-client-${state.registered}`, ...(secret ? { client_secret: 'chut' } : {}), token_endpoint_auth_method: r.token_endpoint_auth_method });
     }
     if (url.pathname === '/token') {
       const f = new URLSearchParams(body);
@@ -38,10 +38,14 @@ function fakeService({ secret = false } = {}) {
         const ok = c && crypto.createHash('sha256').update(f.get('code_verifier')).digest('base64url') === c.challenge && f.get('redirect_uri') === 'http://localhost:4777/oauth/callback';
         if (!ok) return json(400, { error: 'invalid_grant' });
         const t = `jeton-${c.space}-1`;
+        // comme Webflow : une nouvelle autorisation pour la même application annule les jetons d'avant
+        if (oneGrantPerClient) for (const [k, v] of state.tokens) if (state.clientOf.get(k) === f.get('client_id')) state.tokens.delete(k);
         state.tokens.set(t, c.space);
+        state.clientOf.set(t, f.get('client_id'));
         return json(200, { access_token: t, refresh_token: `refresh-${c.space}`, expires_in: c.expiresIn ?? 3600 });
       }
       if (f.get('grant_type') === 'refresh_token') {
+        if (state.revoked) return json(400, { error: 'invalid_grant' }); // autorisation annulée (comme Webflow)
         state.refreshes++;
         const space = f.get('refresh_token').replace('refresh-', '');
         const t = `jeton-${space}-${state.refreshes + 1}`;
@@ -143,23 +147,36 @@ test('passerelle : autorisée une fois, relaie JSON et flux SSE avec le jeton ; 
   r = await call();
   assert.equal(svc.state.refreshes, 1);
   assert.equal(svc.state.seen.at(-1).auth, 'jeton-client-a-2');
+  // essai rapide : un espace accepté reste tel quel
+  await gw.verify('webflow');
+  assert.equal(gw.status().webflow.connected, true);
   // jeton refusé par le service (révoqué) : rafraîchi et requête rejouée une fois
   svc.state.tokens.delete('jeton-client-a-2');
   r = await call();
   assert.equal(r.status, 200);
   assert.equal(svc.state.refreshes, 2);
+  // autorisation annulée chez le service (jeton et rafraîchissement refusés) : l'essai la marque à réautoriser
+  svc.state.tokens.clear();
+  const realRefresh = svc.state.refreshes;
+  await gw.verify('webflow');
+  assert.equal(svc.state.refreshes, realRefresh + 1, 'un rafraîchissement tenté');
+  svc.state.tokens.clear();
+  svc.state.revoked = true;
+  await gw.verify('webflow');
+  assert.ok(gw.status().webflow.profiles[0].error, 'marqué à réautoriser');
+  assert.equal(gw.status().webflow.connected, false);
   eng.srv.close(); svc.srv.close();
 });
 
-test('espaces : un deuxième espace autorisé, changement en un clic sans réautoriser ; secret d\'application gardé au trousseau', async () => {
-  const svc = await fakeService({ secret: true });
+test('espaces : un deuxième espace autorisé n\'annule pas le premier (une inscription par espace), changement en un clic ; secret au trousseau', async () => {
+  const svc = await fakeService({ secret: true, oneGrantPerClient: true });
   const opened = [];
   const kc = memoryKeychain();
   const gw = createGateway({ dataDir: path.join(TMP, 'b'), keychain: kc, openUrl: (u) => opened.push(u) });
   const cfg = gw.add('webflow-pro', `${svc.base}/mcp`);
   await gw.callback(approveIn(svc, (await gw.authorize('webflow-pro', { label: 'Client A' })).url, 'client-a'));
   await gw.callback(approveIn(svc, (await gw.authorize('webflow-pro', { label: 'Client B' })).url, 'client-b'));
-  assert.equal(svc.state.registered, 1, 'Vigie s\'inscrit une seule fois');
+  assert.equal(svc.state.registered, 2, 'une inscription par espace : le service ne les confond pas');
   assert.ok(!fs.readFileSync(gw.file, 'utf8').includes('chut'), 'secret d\'application hors du fichier');
   const st = gw.status()['webflow-pro'];
   assert.deepEqual(st.profiles.map((p) => p.label), ['Client A', 'Client B']);
@@ -174,6 +191,10 @@ test('espaces : un deuxième espace autorisé, changement en un clic sans réaut
   gw.removeProfile('webflow-pro', st.profiles[0].id);
   assert.equal(gw.status()['webflow-pro'].active, st.profiles[1].id);
   assert.ok(![...kc._map.keys()].includes(`jeton:webflow-pro:${st.profiles[0].id}`), 'jeton de l\'espace retiré du trousseau');
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(gw.file, 'utf8')).clients).length, 1, 'son inscription aussi');
+  // réautoriser un espace garde son inscription (pas de nouvelle)
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow-pro', { id: st.profiles[1].id })).url, 'client-b'));
+  assert.equal(svc.state.registered, 2);
   gw.remove('webflow-pro');
   assert.equal(gw.status()['webflow-pro'], undefined);
   eng.srv.close(); svc.srv.close();
