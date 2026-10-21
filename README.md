@@ -68,7 +68,11 @@ Changer le compte d'une conversation la relance sur l'autre compte avec tout son
 
 ![MCP](docs/images/mcp.png)
 
-Chaque MCP a une colonne par compte : ✓ quand il marche, **Connecter** quand il faut l'autoriser, **Échec** en rouge s'il échoue. « Partout » le connecte sur tous tes comptes, l'un après l'autre. Chaque compte Claude garde sa propre autorisation : il faut connecter un MCP une fois par compte.
+Trois familles : **MCP de ce Mac** (dans toutes tes conversations), **MCP des projets** (fichier `.mcp.json` d'un dossier) et **MCP du compte** (branchés à ton compte sur claude.ai, coupés ou activés par défaut dans les nouvelles conversations).
+
+Chaque MCP tient sur une ligne : « ✓ Tous tes comptes » quand il marche partout, sinon seuls les comptes à régler apparaissent, avec leur bouton (**Connecter**, **Ajouter**, **échec**). « Partout » le connecte sur tous tes comptes, l'un après l'autre. Chaque compte Claude garde sa propre autorisation : il faut connecter un MCP une fois par compte.
+
+La **bibliothèque** (bouton « + ») propose les serveurs officiels des éditeurs (Notion, Figma, GitHub, Linear, Stripe…) : tu coches tes comptes, Vigie l'ajoute puis ouvre la page d'autorisation.
 
 ## Codex (OpenAI)
 
