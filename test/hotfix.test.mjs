@@ -378,3 +378,15 @@ test('seulement par Vigie : une lecture qui cite un mot sensible n\'est pas rete
   setState({ autoAccept: false });
   assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'sudo ls' } }, { HOME }), null);
 });
+
+test('seulement par Vigie : autorisée en PreToolUse, Claude Code redemande en PermissionRequest : acceptée une fois de plus, pas deux', async () => {
+  const o = await preHold('sudo -n true', (it) => approve(it.approvalId, 'allow', { history: hist() }));
+  assert.equal(o.permissionDecision, 'allow');
+  // le même appel passe ensuite par PermissionRequest (Claude Code demande quand même) : accepté
+  const second = vigieRun('sudo -n true');
+  assert.equal(behavior(second.out), 'allow', 'même appel, étape suivante');
+  assert.equal(second.last.event, 'garde-fou-autorise-vigie');
+  // une relance identique ensuite : de nouveau à autoriser
+  const third = vigieRun('sudo -n true');
+  assert.equal(behavior(third.out), 'deny');
+});

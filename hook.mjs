@@ -438,7 +438,7 @@ async function holdForVigie(input, rule, state, event) {
   const preOutput = (decision, reason) => verdict(event, decision === 'allow', reason);
   const hash = callHash(sid, tool, input.tool_input);
   const info = { ...ruleInfo(rule), hash };
-  const ok = takeApproval({ sessionId: sid, tool, hash });
+  const ok = takeApproval({ sessionId: sid, tool, hash, event });
   if (ok) return decide(input, 'garde-fou-autorise-vigie', preOutput('allow', 'Autorisée par l\'utilisateur dans Vigie'), { ...info, approvalId: ok.approvalId });
   const approvalId = newApprovalId();
   const minutes = state.guard.waitMin;
@@ -447,7 +447,7 @@ async function holdForVigie(input, rule, state, event) {
   log(input, 'garde-fou-en-attente-vigie', { ...info, approvalId, holdUntil: new Date(start + minutes * 60_000).toISOString() });
   onKill = () => log(input, 'garde-fou-vigie-clos', { ...info, approvalId, raison: 'interrompue' });
   const r = await waitFor(() => start + minutes * 60_000, (s) => {
-    if (takeApproval({ sessionId: sid, tool, hash })) return 'allow';
+    if (takeApproval({ sessionId: sid, tool, hash, event })) return 'allow';
     if (deniedApproval(approvalId)) return 'deny';
     if (!matchGuard(s, tool, input.tool_input)) return 'off';
     return true;
