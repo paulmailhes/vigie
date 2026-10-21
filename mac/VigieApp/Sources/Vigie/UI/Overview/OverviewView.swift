@@ -116,10 +116,8 @@ struct OverviewView: View {
     }
 
 
-    private var sinceHeader: String {
-        guard let since = store.since else { return "Depuis ton dernier passage" }
-        return "Depuis ton dernier passage, \(Fmt.when(since, now: store.now))"
-    }
+    /// Fenêtre glissante d'une heure, tenue par le moteur : rien à remettre à zéro.
+    private var sinceHeader: String { "Depuis une heure" }
 
     private var subtitle: String {
         let open = store.conversations.filter(\.isOpen)
@@ -130,7 +128,7 @@ struct OverviewView: View {
     }
 }
 
-/// « Depuis ton dernier passage » : une ligne de chiffres et « J'ai tout vu ».
+/// « Depuis une heure » : une ligne de chiffres, fenêtre glissante.
 struct SinceRow: View {
     @Environment(VigieStore.self) private var store
 
@@ -138,12 +136,7 @@ struct SinceRow: View {
         let summary = store.sinceSummary
         HStack(alignment: .center, spacing: 16) {
             FlowStats(items: items(summary))
-            Spacer(minLength: 8)
-            Button("J'ai tout vu", systemImage: "checkmark") {
-                Task { await store.markSeen() }
-            }
-            .glassButton()
-            .help("Remet les compteurs à zéro")
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
     }

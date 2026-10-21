@@ -1,7 +1,7 @@
 // Consommation en direct (rate) et alerte « s'emballe » (lib/usage.mjs) : calculs purs, sans fichier.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rateOf, runawayAlert, RATE_MINUTES, seriesFrom, seriesPoints } from '../lib/usage.mjs';
+import { rateOf, runawayAlert, RATE_MINUTES, seriesFrom, seriesPoints, weekRatio, toWeekPct } from '../lib/usage.mjs';
 
 const NOW = Date.parse('2026-10-20T12:00:30.000Z');
 const iso = (min) => new Date(NOW + min * 60_000).toISOString();
@@ -65,4 +65,18 @@ test('graphique : 60 seaux alignés sur le pas, le dernier contient la minute en
   const pts = seriesPoints(seriesFrom(NOW, 1), 1, [500_000, 0], [12, 0], WEEK);
   assert.deepEqual(pts.map((p) => [p.weekPct, p.tokens]), [[25, 12], [0, 0]]);
   assert.equal(seriesPoints(0, 1, [1], [1], null)[0].weekPct, null);
+});
+
+test('part de la semaine : un compte entamé ailleurs ne compte pas tout son pourcentage sur l’usage vu ici', () => {
+  // Travail 1 : toute sa semaine passée ici (78 % pour 1 000 de poids) ; Travail 2, même abonnement : 49 % dont
+  // presque tout ailleurs, seulement 50 de poids ici. Avant : 49/50 ≈ 1 point par unité, « 202 %/h ».
+  const t1 = { measured: null, upper: 78 / 1000, tier: 'max_20x' };
+  const t2 = { measured: null, upper: 49 / 50, tier: 'max_20x' };
+  assert.equal(weekRatio(t2, [t1]), 78 / 1000, 'ramené au rythme du même abonnement');
+  assert.equal(weekRatio(t1, [t2]), 78 / 1000, 'le plafond le plus bas reste le sien');
+  assert.equal(weekRatio(t2, [{ ...t1, tier: 'pro' }]), 49 / 50, 'autre abonnement : rien à comparer');
+  assert.equal(weekRatio({ ...t2, measured: 0.07 }, [t1]), 0.07, 'hausse mesurée : elle passe devant');
+  assert.equal(weekRatio({ ...t2, tier: null }, [t1]), 49 / 50, 'abonnement inconnu : son propre plafond');
+  assert.equal(toWeekPct(50, { ratio: 78 / 1000 }), 3.9);
+  assert.equal(toWeekPct(50, { den: 50, pct: 49 }), 49, 'ancien calcul sans ratio');
 });

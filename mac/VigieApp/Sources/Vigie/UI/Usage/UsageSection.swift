@@ -96,6 +96,8 @@ struct UsageLine: Identifiable, Equatable {
     var id: String
     var name: String
     var subtitle: String?
+    /// Compte dont elle consomme les tokens (Travail 1, Travail 2…).
+    var account: String?
     var color: Color
     var running: Bool
     var totalPct: Double
@@ -129,15 +131,17 @@ struct UsageLine: Identifiable, Equatable {
                 ?? conversation.project.map { ProjectName.display($0, cwd: conversation.cwd) }
                 ?? conversation.title ?? "Conversation"
             let title = live?.title ?? conversation.title
+            let accountID = live?.accountId ?? conversation.accountId
             lines.append(UsageLine(id: conversation.id, name: name,
                                    subtitle: title == name ? nil : title,
+                                   account: accountID.flatMap { store.account($0)?.displayName },
                                    color: palette[(colorIndex[conversation.id] ?? 0) % palette.count],
                                    running: live.map(\.isOpen) ?? (conversation.running ?? false),
                                    totalPct: conversation.totalPct, totalTokens: conversation.totalTokens,
                                    points: points))
         }
-        // Les plus gourmandes d'abord.
-        return lines.sorted { $0.totalPct > $1.totalPct }
+        // Rangées par compte, puis les plus gourmandes d'abord.
+        return lines.sorted { ($0.account ?? "~", -$0.totalPct) < ($1.account ?? "~", -$1.totalPct) }
     }
 
     /// Le point le plus proche d'une heure (survol).
@@ -248,6 +252,9 @@ private struct UsageChart: View {
                 HStack(spacing: 6) {
                     Circle().fill(line.color).frame(width: 7, height: 7)
                     Text(line.name).lineLimit(1)
+                    if let account = line.account {
+                        Text(account).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Spacer(minLength: 10)
                     Text(cumulative ? Fmt.pctFine(point.value) : Fmt.rate(point.value))
                         .monospacedDigit()
@@ -303,6 +310,15 @@ private struct UsageLegend: View {
                 .frame(width: 8, height: 8)
             Text(line.name)
                 .lineLimit(1)
+            if let account = line.account {
+                Text(account)
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: .capsule)
+                    .lineLimit(1)
+                    .help("Consomme les tokens de \(account)")
+            }
             if !line.running {
                 Text("fermée")
                     .font(.caption)
@@ -317,7 +333,7 @@ private struct UsageLegend: View {
     }
 
     private func help(_ line: UsageLine) -> String {
-        var parts = [line.subtitle ?? line.name, "\(Fmt.pctFine(line.totalPct)) de la semaine du compte"]
+        var parts = [line.subtitle ?? line.name, "\(Fmt.pctFine(line.totalPct)) de la semaine de \(line.account ?? "son compte")"]
         if line.totalTokens > 0 { parts.append("\(Fmt.tokensShort(line.totalTokens)) tokens") }
         return parts.joined(separator: " · ")
     }

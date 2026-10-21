@@ -385,7 +385,8 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   assert.equal(a.needsYou, o.toReview.filter((x) => x.conversationId === SID_A).length);
   assert.equal(a.needsYou, 5);
   assert.equal(b.needsYou, 0, 'limite remise à zéro : plus rien à regarder');
-  assert.deepEqual(o.sinceSummary, { accepted: 3, questionsAuto: 1, blocked: 2, reports: o.sinceSummary.reports, testsFailed: 1, limits: 2 });
+  // depuis une heure (glissante) : les acceptations d'il y a 65 à 80 min n'y sont plus, ni la limite de B
+  assert.deepEqual(o.sinceSummary, { accepted: 0, questionsAuto: 1, blocked: 2, reports: o.sinceSummary.reports, testsFailed: 1, limits: 1 });
   assert.equal(o.settings.questionsAuto, false);
   assert.equal(o.settings.guard.rules.length, DEFAULT_GUARDS.length);
   assert.equal(o.engine.wrapperActive, false);
@@ -405,7 +406,7 @@ test('cartes : progression, tests, acceptations du jour et depuis le dernier pas
   // acceptations de Vigie (auto-accepte, question-auto) : depuis minuit (heure locale) et depuis le dernier passage
   const midnight = new Date(NOW); midnight.setHours(0, 0, 0, 0);
   const today = [-80, -70, -65, -50].filter((m) => NOW + m * 60_000 >= midnight.getTime()).length;
-  assert.deepEqual(a.accepted, { today, sinceSeen: 4 });
+  assert.deepEqual(a.accepted, { today, sinceSeen: 1 }, 'depuis une heure : seule celle d\'il y a 50 min');
   assert.deepEqual(b.accepted, { today: 0, sinceSeen: 0 });
   assert.deepEqual(a.artifacts, { count: 0, last: null });
   assert.equal(b.progress, null);
@@ -436,7 +437,7 @@ test('détail : acceptées avec type et décision, MCP par étage, secrets masqu
   const d = r.body;
   assert.equal(d.summary.status, 'blocked');
   assert.equal(d.summary.branch, 'main');
-  assert.equal(d.summary.accepted.sinceSeen, 4);
+  assert.equal(d.summary.accepted.sinceSeen, 1, 'depuis une heure');
   assert.equal(d.now.plan, null);
   assert.equal(d.now.tasksTs, iso(-59));
   const acc = d.accepted;
@@ -688,13 +689,14 @@ test('questions à relire : changer prépare le texte de correction, puis la que
   assert.equal((await post('/api/v2/questions/inconnue/review', { action: 'ok' })).status, 404);
 });
 
-test('dernier passage : « j\'ai tout vu » remet les compteurs à zéro', async () => {
+test('depuis une heure : fenêtre glissante, sans bouton ; « j\'ai tout vu » accepté sans rien changer (ancienne app)', async () => {
+  const before = (await get('/api/v2/overview')).body;
+  assert.ok(Math.abs(Date.parse(before.since) - (Date.now() - 3600_000)) < 2 * 60_000, 'il y a une heure');
   const r = await post('/api/v2/seen', {});
   assert.equal(r.status, 200);
   const o = (await get('/api/v2/overview')).body;
-  assert.equal(o.since, r.body.since);
-  assert.equal(o.sinceSummary.accepted, 0);
-  assert.ok(!o.toReview.some((x) => x.id.startsWith('b:') || x.kind === 'limit'));
+  assert.equal(o.since, before.since, 'le clic ne remet rien à zéro');
+  assert.deepEqual(o.sinceSummary, before.sinceSummary);
   assert.ok(o.toReview.some((x) => x.id.startsWith('g:')), 'ce qui attend maintenant reste');
 });
 

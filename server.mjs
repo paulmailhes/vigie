@@ -17,7 +17,7 @@ import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
 import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
-import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints } from './lib/usage.mjs';
+import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
 const HOST = '127.0.0.1';
@@ -197,9 +197,12 @@ function orgOf(acc) {
   if (c?.key === key) return c.org;
   const j = readJson(p, null);
   const org = typeof j?.oauthAccount?.organizationUuid === 'string' ? j.oauthAccount.organizationUuid : null;
-  orgCache.set(p, { key, org });
+  const tier = typeof j?.oauthAccount?.organizationRateLimitTier === 'string' ? j.oauthAccount.organizationRateLimitTier : null;
+  orgCache.set(p, { key, org, tier });
   return org;
 }
+// Abonnement du compte (ex. default_claude_max_20x) : deux comptes du même abonnement consomment au même rythme.
+function tierOf(acc) { orgOf(acc); return orgCache.get(claudeJsonPath(acc))?.tier ?? null; }
 function accountByOrg(model) {
   const m = new Map();
   for (const a of model.accounts) { const o = orgOf(a); if (o && !m.has(o)) m.set(o, a.id); }
@@ -220,11 +223,40 @@ function mcpUsage() {
   return use;
 }
 
-// Part de la semaine du compte prise par une conversation : son poids d'usage depuis le début de la
-// fenêtre hebdomadaire du compte, divisé par celui de toutes les conversations de ce compte, multiplié
-// par le pourcentage hebdomadaire du compte. null si l'un des trois manque.
-function weekInfo(ctx, accountId) {
-  if (ctx.week.has(accountId)) return ctx.week.get(accountId);
+// Part de la semaine prise par un usage : poids d'usage × ratio (points de % de la semaine par unité de poids).
+// Le pourcentage d'un compte compte TOUT son usage, même ailleurs (autre Mac, collègue sur un compte partagé) :
+// « pct / poids vu ici » n'est qu'un plafond (un compte entamé à 46 % ailleurs donnait « 202 %/h »). Le ratio
+// vient donc, dans l'ordre : de la hausse mesurée du compte sur les dernières 24 h (relevés gardés dans
+// data/usage/semaine.json) ; sinon du plus petit plafond des comptes du même abonnement (même rythme).
+const WEEK_LOG = path.join(DATA, 'usage', 'semaine.json');
+let weekLog = null, weekLogSaved = 0;
+const sameWeek = (a, b) => Math.round(Date.parse(a) / 60_000) === Math.round(Date.parse(b) / 60_000);
+function noteWeek(accountId, w, observedAt, now) {
+  weekLog ??= readJson(WEEK_LOG, {}) || {};
+  const t = observedAt && Date.parse(observedAt) <= now ? observedAt : new Date(now).toISOString();
+  let list = Array.isArray(weekLog[accountId]) ? weekLog[accountId] : [];
+  const last = list.at(-1);
+  if (last && last.pct === w.pct && sameWeek(last.resetsAt, w.resetsAt)) return;
+  if (last && Date.parse(t) <= Date.parse(last.t)) return;
+  list = [...list.filter((o) => now - Date.parse(o.t) <= 8 * DAY), { t, pct: w.pct, resetsAt: w.resetsAt }].slice(-500);
+  weekLog[accountId] = list;
+  if (now - weekLogSaved < 30_000) return;
+  weekLogSaved = now;
+  try { fs.mkdirSync(path.dirname(WEEK_LOG), { recursive: true }); fs.writeFileSync(WEEK_LOG, JSON.stringify(weekLog) + '\n'); } catch { /* relevé suivant */ }
+}
+// Hausse d'au moins 3 points depuis le plus ancien relevé de cette semaine des dernières 24 h, rapportée au poids
+// vu ici depuis ce relevé (minute par minute). null tant qu'il n'y a pas de quoi mesurer.
+function measuredRatio(accountId, w, org, now) {
+  const first = (weekLog?.[accountId] || []).find((o) => sameWeek(o.resetsAt, w.resetsAt) && now - Date.parse(o.t) <= DAY);
+  if (!first || w.pct - first.pct < 3) return null;
+  const from = Math.floor(Date.parse(first.t) / 60_000) * 60_000;
+  const b = indexer.usageBucketsByOrg(from, 1, Math.max(1, Math.ceil((now - from) / 60_000))).get(org);
+  const used = b ? b.w.reduce((s, x) => s + x, 0) : 0;
+  return used > 0 ? (w.pct - first.pct) / used : null;
+}
+function weekBase(ctx, accountId) {
+  ctx.weekBase ??= new Map();
+  if (ctx.weekBase.has(accountId)) return ctx.weekBase.get(accountId);
   let info = null;
   const sum = ctx.accSums.find((a) => a.id === accountId);
   const acc = ctx.model.accounts.find((a) => a.id === accountId);
@@ -232,9 +264,21 @@ function weekInfo(ctx, accountId) {
   const reset = Date.parse(w?.resetsAt || '');
   const org = acc ? orgOf(acc) : null;
   if (org && typeof w?.pct === 'number' && Number.isFinite(w.pct) && Number.isFinite(reset)) {
+    noteWeek(accountId, w, sum.usage.observedAt, ctx.now);
     const start = new Date(reset - WEEK).toISOString();
     const den = conv.usageTotals(start).byOrg[org] || 0;
-    if (den > 0) info = { org, start, pct: w.pct, den };
+    if (den > 0) info = { org, start, pct: w.pct, den, tier: tierOf(acc), upper: w.pct / den, measured: measuredRatio(accountId, w, org, ctx.now) };
+  }
+  ctx.weekBase.set(accountId, info);
+  return info;
+}
+function weekInfo(ctx, accountId) {
+  if (ctx.week.has(accountId)) return ctx.week.get(accountId);
+  const base = weekBase(ctx, accountId);
+  let info = null;
+  if (base) {
+    const peers = base.measured === null ? ctx.model.accounts.filter((a) => a.id !== accountId).map((a) => weekBase(ctx, a.id)) : [];
+    info = { ...base, ratio: weekRatio(base, peers) };
   }
   ctx.week.set(accountId, info);
   return info;
@@ -242,7 +286,7 @@ function weekInfo(ctx, accountId) {
 function weekPct(ctx, id, accountId) {
   const w = weekInfo(ctx, accountId);
   if (!w) return null;
-  return Math.round((conv.usageWeight(id, w.start, w.org) / w.den) * w.pct * 10) / 10;
+  return Math.round(conv.usageWeight(id, w.start, w.org) * w.ratio * 10) / 10;
 }
 
 // Consommation en direct (rate) et alerte « s'emballe » d'une conversation (lib/usage.mjs) : poids minute par
@@ -345,7 +389,10 @@ function context() {
   const state = readState();
   const now = Date.now();
   const u = ui();
-  return { state, now, lastSeen: u.lastSeen, dismissed: dismissedOf(u), wrapperActive: accounts.wrapperActive(),
+  // « Depuis une heure » : fenêtre glissante (à la minute, pour les caches), plus de « J'ai tout vu » à cliquer.
+  // Ce qui a mal tourné (refus, échecs, limites) reste 24 h, ou jusqu'à ce que l'utilisateur le retire.
+  const lastSeen = new Date(Math.floor((now - HOUR) / 60_000) * 60_000).toISOString();
+  return { state, now, lastSeen, reviewSince: new Date(now - DAY).toISOString(), dismissed: dismissedOf(u), wrapperActive: accounts.wrapperActive(),
     model: accounts.load(), accSums: accounts.summaries(), waits: pendingWaits(state, now), week: new Map() };
 }
 
@@ -488,8 +535,8 @@ function reviewItems(ctx, sums) {
       title: 'Compte changé', detail: n.message, ts: n.ts });
   }
   for (const r of questions.toReview()) if (!conv.isThrowaway(r.sessionId)) past.push(reviewEntry(r, title(r.sessionId)));
-  // Refusées depuis le dernier passage, à faire soi-même (un refus de l'utilisateur depuis l'app n'en est pas une).
-  for (const b of recentBlocked({ history, since: ctx.lastSeen, limit: MAX_REVIEW })) {
+  // Refusées ou ratées ces dernières 24 h, à faire soi-même (un refus de l'utilisateur depuis l'app n'en est pas une).
+  for (const b of recentBlocked({ history, since: ctx.reviewSince, limit: MAX_REVIEW })) {
     if (b.by === 'you' || (b.sessionId && conv.isThrowaway(b.sessionId))) continue;
     past.push({ id: `b:${b.sessionId}:${b.ts}`, kind: 'blocked', state: 'blocked', reason: b.by,
       conversationId: b.sessionId ?? null, conversationTitle: title(b.sessionId), cwd: b.cwd ?? null,
@@ -500,10 +547,10 @@ function reviewItems(ctx, sums) {
         ? `${BLOCKED_WHY.echec} : ${what(b)}${b.extrait ? ` · « ${short(mask(b.extrait.replace(/^Exit code \d+\n?/, '')), 160)} »` : ''}.`
         : `${BLOCKED_WHY[b.by] || 'Refusée'} : ${what(b)}. À faire toi-même.`, ts: b.ts });
   }
-  // Limite atteinte depuis le dernier passage, tant qu'elle n'est pas remise à zéro.
+  // Limite atteinte ces dernières 24 h, tant qu'elle n'est pas remise à zéro.
   for (const s of indexer.sessions.values()) {
     if (conv.isThrowaway(s.id)) continue;
-    const l = s.limits.reduce((m, x) => (x.ts >= ctx.lastSeen && (!m || x.ts > m.ts) ? x : m), null);
+    const l = s.limits.reduce((m, x) => (x.ts >= ctx.reviewSince && (!m || x.ts > m.ts) ? x : m), null);
     if (!l || !(limitResetAt(l.text, l.ts) > ctx.now)) continue;
     past.push({ id: `l:${s.id}:${l.ts}`, kind: 'limit', conversationId: s.id, conversationTitle: title(s.id), title: 'Limite atteinte', detail: short(l.text, 200), ts: l.ts });
   }
