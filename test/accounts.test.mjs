@@ -502,6 +502,20 @@ test('connecter : Terminal sur le bon dossier, rien d\'automatique', () => {
   assert.deepEqual(A.connect('inconnu'), { ok: false, error: 'Compte inconnu.' });
 });
 
+test('connecter sans Claude Code utilisable : Terminal tout de suite ; copie de l\'extension nommée en entier', () => {
+  runner.calls.length = 0;
+  const none = createAccounts({ ...opts, claudeBin: null });
+  assert.deepEqual(none.connect('travail2'), { ok: true, message: 'Terminal est ouvert : tape /login.' });
+  assert.equal(runner.calls.some((c) => /claude$/.test(c.cmd)), false, 'rien de lancé en silence');
+  const ext = '/Users/x/.vscode/extensions/anthropic.claude-code-2.1.304-darwin-arm64/resources/native-binary/claude';
+  runner.login = 1; // la page ne s'ouvre pas : repli Terminal
+  runner.calls.length = 0;
+  createAccounts({ ...opts, claudeBin: ext }).connect('travail2');
+  const lit = runner.calls.find((c) => c.cmd === '/usr/bin/osascript').args.find((a) => a.startsWith('do script '));
+  assert.ok(lit.includes(`'${ext}'`), 'la commande de l\'extension, pas « claude » (absent du PATH)');
+  runner.login = undefined;
+});
+
 // --- bascule ---
 const SID = 'b1b9b451-c53c-439e-b804-3689257268e3';
 const SID2 = '46536060-8c84-46cc-872f-0a0df63ba2a6';
