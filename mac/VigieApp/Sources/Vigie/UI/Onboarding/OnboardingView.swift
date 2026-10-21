@@ -114,27 +114,27 @@ struct OnboardingView: View {
             Button("Ajouter un compte Claude", systemImage: "plus") { showAdd = true }
                 .glassButton()
             codexRow
-            if store.accounts.count > 1 {
-                Toggle(isOn: Binding(get: { store.accountsState?.wrapper?.active == true },
-                                     set: { on in Task { await store.setWrapper(on) } })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Un compte par conversation dans VS Code")
-                        Text("Vigie lance chaque conversation sur le compte que tu lui choisis.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
+            // Toujours proposé : même avec un seul compte, c'est ce lanceur qui coupe les MCP du compte.
+            Toggle(isOn: wrapperBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Vigie lance tes conversations dans VS Code")
+                    Text("Chaque conversation sur le compte que tu lui choisis, et les MCP du compte coupés ou non (étape suivante).")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                .toggleStyle(.switch)
             }
-            Text("Un seul compte ? Rien à faire, tu peux passer.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            .toggleStyle(.switch)
         }
         .sheet(isPresented: $showAdd) { OnboardingAddAccountSheet() }
         .sheet(isPresented: $showCodex) { CodexSetupSheet() }
     }
 
     @State private var showCodex = false
+
+    private var wrapperActive: Bool { store.accountsState?.wrapper?.active == true }
+    private var wrapperBinding: Binding<Bool> {
+        Binding(get: { wrapperActive }, set: { on in Task { await store.setWrapper(on) } })
+    }
 
     /// Codex (OpenAI), s'il est installé : connexion et approbation du hook, dans une feuille dédiée.
     @ViewBuilder
@@ -193,7 +193,20 @@ struct OnboardingView: View {
                     }
                     .toggleStyle(.switch)
                     .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, wrapperActive ? 10 : 4)
+                    // Sans le lanceur, Claude Code charge toujours les MCP du compte : on le dit, et on propose de l'activer.
+                    if !wrapperActive && !store.connectorsDefaultOn {
+                        HStack(spacing: 8) {
+                            Label("Pour les couper, Vigie doit lancer tes conversations.", systemImage: "exclamationmark.triangle")
+                                .font(.callout)
+                                .foregroundStyle(Theme.warn)
+                            Spacer()
+                            Button("L'activer") { wrapperBinding.wrappedValue = true }
+                                .glassButton(.primary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
+                    }
                 }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
