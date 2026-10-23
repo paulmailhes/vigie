@@ -930,3 +930,40 @@ test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à aut
   assert.equal((await post('/api/v2/approvals', { approvalId: A_ID })).status, 404, 'déjà utilisée');
   assert.deepEqual(await items(), []);
 });
+
+// ---------- connexions vues par le coffre (lib/vault.mjs : data/connexions.json) ----------
+test('connexions : compte du Mac refusé = « à reconnecter » ; connexion remise = un mot dans la vue d\'ensemble', async () => {
+  const CX = path.join(DATA, 'connexions.json');
+  const epoch = Math.floor(Date.now() / 1000);
+  wj(CX, { v: 1, checkedAtEpoch: epoch, accounts: { travail1: { connected: false, state: 'dead', since: iso(-3) } } });
+  let o = (await get('/api/v2/overview')).body;
+  const item = o.toReview.find((x) => x.id === 'cx:travail1:dead');
+  assert.ok(item, JSON.stringify(o.toReview.map((x) => x.id)));
+  assert.match(item.title, /à reconnecter$/);
+  assert.match(item.detail, /Anthropic a refusé sa connexion/);
+  assert.match(item.detail, /VS Code affiche « déconnecté »/);
+  assert.equal(item.kind, 'waiting');
+  assert.equal(o.accounts.find((a) => a.id === 'travail1').connected, false);
+  // remise en cours depuis peu : rien à montrer encore
+  wj(CX, { v: 1, checkedAtEpoch: epoch, accounts: { travail1: { connected: false, state: 'restoring', since: new Date().toISOString() } } });
+  o = (await get('/api/v2/overview')).body;
+  assert.ok(!o.toReview.some((x) => x.id.startsWith('cx:')));
+  wj(CX, { v: 1, checkedAtEpoch: epoch, accounts: { travail1: { connected: true, state: 'ok', restoredAt: new Date(Date.now() - 60_000).toISOString() } } });
+  o = (await get('/api/v2/overview')).body;
+  assert.ok(!o.toReview.some((x) => x.id.startsWith('cx:')));
+  assert.ok(o.engine.notices.some((n) => /^Connexion de .+ remise par Vigie à \d\d:\d\d/.test(n)), JSON.stringify(o.engine.notices));
+  assert.equal(o.accounts.find((a) => a.id === 'travail1').connected, true);
+  fs.rmSync(CX);
+});
+
+test('conversation jamais associée : affichée sur le compte des nouvelles conversations (comme le lanceur)', async () => {
+  let other = (await get('/api/v2/accounts')).body.accounts.find((a) => a.id !== 'travail1');
+  if (!other) other = (await post('/api/v2/accounts', { action: 'create', label: 'Compte essai' })).body.account;
+  assert.ok(other?.id);
+  assert.equal(rj(path.join(DATA, 'accounts.json')).sessions[SID_A], undefined, 'SID_A jamais associée');
+  assert.equal((await post('/api/v2/accounts', { action: 'setDefault', id: other.id })).status, 200);
+  const o = (await get('/api/v2/overview')).body;
+  assert.equal(o.conversations.find((c) => c.id === SID_A).accountId, other.id);
+  assert.equal(o.conversations.find((c) => c.id === SID_B).accountId, 'travail1', 'associée : son compte');
+  assert.equal((await post('/api/v2/accounts', { action: 'setDefault', id: 'travail1' })).status, 200);
+});

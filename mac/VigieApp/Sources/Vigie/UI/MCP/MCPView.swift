@@ -218,7 +218,8 @@ struct UsesLabel: View {
     }
 }
 
-/// Un MCP de ton Mac : nom, type et adresse, comptes, utilisations, raccourcis.
+/// Un MCP de ton Mac : nom et provenance, utilisations, interrupteur, menu ; en dessous, son espace (par Vigie) ou
+/// ce qui est à régler sur tes comptes.
 struct UserMCPRow: View {
     @Environment(VigieStore.self) private var store
     let server: UserMCP
@@ -229,45 +230,30 @@ struct UserMCPRow: View {
 
     var body: some View {
         let active = server.disabledIn.isEmpty
-        HStack(spacing: 10) {
-            ServiceGlyph(service: server.service, name: server.name)
-                .opacity(active ? 1 : Theme.dim)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(server.name)
-                        .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    if server.health.isEmpty && server.needsAuth == true {
-                        Pill(text: "À connecter", alert: true)
-                    }
-                }
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .opacity(active ? 1 : Theme.dim)
-            Spacer(minLength: 8)
-            if let gateway {
-                GatewayControls(name: server.name, server: gateway)
-            } else {
-                if migratable { GatewayMigrateButton(name: server.name) }
-                MCPConnectEverywhereButton(name: server.name, health: server.health)
-            }
-            UsesLabel(count: server.uses7d)
+        // Par Vigie, l'état se lit sur la passerelle (une autorisation pour tous) ; en direct, compte par compte.
+        let summary = gateway == nil ? MCPAccountSummary(accounts: accounts, health: server.health, declaredIn: server.accounts) : MCPAccountSummary(accounts: [], health: [])
+        let notChecked = gateway == nil && server.health.isEmpty && server.needsAuth == true
+        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !active, uses: server.uses7d) {
             Toggle("Actif", isOn: everywhere)
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
                 .help(active ? "Actif partout · couper dans tes \(projects.count) projets" : "Coupé dans \(disabledNames) · rallumer partout")
             moreMenu
-            if gateway == nil {
-                MCPAccountCells(name: server.name, health: server.health, declaredIn: server.accounts, path: nil) { id in
-                    Task { _ = await store.mcpUser("update", name: server.name, accounts: [id]) }
+        } details: {
+            if let gateway {
+                GatewayLine(name: server.name, server: gateway)
+            } else if !summary.isEmpty {
+                MCPAccountIssues(name: server.name, summary: summary, path: nil) { ids in
+                    Task { _ = await store.mcpUser("update", name: server.name, accounts: server.accounts + ids) }
+                }
+            } else if notChecked {
+                MCPIssueLine(systemImage: "person.crop.circle.badge.exclamationmark", color: Theme.warn, text: "À connecter (pas encore vérifié sur tes comptes)") {
+                    AsyncButton("Vérifier") { await store.mcpCheck() }
+                        .controlSize(.small)
                 }
             }
         }
-        .padding(.vertical, 2)
     }
 
     /// Passe par la passerelle de Vigie : une autorisation pour tous les comptes.
@@ -279,18 +265,15 @@ struct UserMCPRow: View {
         return server.type == "http" && (server.config?.headers?.isEmpty ?? true) && !MCPLibraryEntry.gatewayRefused.contains(host)
     }
 
-    /// D'abord ce qui sort de l'ordinaire (« coupé dans Boutique »), puis le type et l'adresse ; « absent » se lit
-    /// dans les cases des comptes.
+    /// D'abord ce qui sort de l'ordinaire (« Coupé dans Boutique »), puis d'où il vient, en mots simples.
     private var subtitle: String {
         var parts: [String] = []
-        if !server.disabledIn.isEmpty { parts.append("coupé dans \(disabledNames)") }
-        if server.differs == true && gateway == nil { parts.append("diffère selon le compte") }
+        if !server.disabledIn.isEmpty { parts.append("Coupé dans \(disabledNames)") }
         if let gateway {
-            parts.append("par Vigie, pour tous tes comptes")
-            parts.append(MCPHelp.shortTarget(gateway.url))
+            parts.append(MCPHelp.origin(type: "vigie", target: gateway.url))
         } else {
-            parts.append(server.type ?? "stdio")
-            parts.append(MCPHelp.shortTarget(server.target))
+            parts.append(MCPHelp.origin(type: server.type, target: server.target))
+            if server.differs == true { parts.append("réglé différemment selon le compte") }
         }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -313,7 +296,7 @@ struct UserMCPRow: View {
     }
 
     private var moreMenu: some View {
-        Menu {
+        MCPMoreMenu {
             if !projects.isEmpty {
                 Menu("Actif par projet") {
                     ForEach(projects) { project in
@@ -336,8 +319,8 @@ struct UserMCPRow: View {
                 }
             }
             if gateway == nil && (server.type == "http" || server.type == "sse") {
-                Menu("Refaire l'autorisation") {
-                    ForEach(accounts.filter { server.accounts.contains($0.id) && $0.isConnected }) { account in
+                Menu("Autoriser sur un compte") {
+                    ForEach(accounts.filter { server.accounts.contains($0.id) && $0.isConnected && !$0.isCodex }) { account in
                         Button(account.displayName) {
                             Task { await store.mcpConnect(name: server.name, accountId: account.id, path: nil, force: true) }
                         }
@@ -350,15 +333,7 @@ struct UserMCPRow: View {
             }
             Divider()
             Button("Supprimer", systemImage: "trash", role: .destructive, action: remove)
-        } label: {
-            Label("Plus", systemImage: "ellipsis")
-                .labelStyle(.iconOnly)
         }
-        .menuStyle(.button)
-        .buttonStyle(.borderless)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Plus d'actions")
     }
 
     private func projectBinding(_ path: String) -> Binding<Bool> {
@@ -413,47 +388,29 @@ struct ProjectServerRow: View {
 
     var body: some View {
         let enabled = !(server.disabled ?? false)
-        HStack(spacing: 10) {
-            ServiceGlyph(service: server.service, name: server.name)
-                .opacity(enabled ? 1 : Theme.dim)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(server.name)
-                    .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                Text([enabled ? nil : "coupé ici", server.type ?? "stdio", MCPHelp.shortTarget(server.target)]
-                    .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .opacity(enabled ? 1 : Theme.dim)
-            Spacer(minLength: 8)
-            UsesLabel(count: server.uses7d)
+        let summary = MCPAccountSummary(accounts: store.accounts, health: server.health)
+        let subtitle = [enabled ? nil : "Coupé ici", MCPHelp.origin(type: server.type, target: server.target)]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !enabled, uses: server.uses7d) {
             Toggle("Actif dans ce projet", isOn: enabledBinding(enabled))
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
                 .help(enabled ? "Couper pour ce projet" : "Rallumer pour ce projet")
-            Menu {
+            MCPMoreMenu {
                 Button("Modifier", systemImage: "pencil", action: edit)
                 Button("Demander à Claude", systemImage: "bubble.left.and.text.bubble.right") {
                     MCPHelp.askClaude(about: server.name, store: store)
                 }
                 Divider()
                 Button("Supprimer", systemImage: "trash", role: .destructive, action: remove)
-            } label: {
-                Label("Plus", systemImage: "ellipsis")
-                    .labelStyle(.iconOnly)
             }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Plus d'actions")
-            MCPAccountCells(name: server.name, health: server.health, path: project.path)
+        } details: {
+            if !summary.isEmpty {
+                MCPAccountIssues(name: server.name, summary: summary, path: project.path)
+            }
         }
         .padding(.leading, 16)
-        .padding(.vertical, 2)
     }
 
     private func enabledBinding(_ enabled: Bool) -> Binding<Bool> {
@@ -465,20 +422,22 @@ struct ProjectServerRow: View {
     }
 }
 
+/// Un MCP du compte (claude.ai) : sur un compte, ou sur tous ; pas d'interrupteur ici (réglage par conversation).
 struct ConnectorRow: View {
+    @Environment(VigieStore.self) private var store
     let connector: Connector
     let account: Account?
 
     var body: some View {
-        HStack(spacing: 10) {
-            ServiceGlyph(service: connector.service, name: connector.name)
-            Text(connector.name)
-            Spacer(minLength: 8)
-            UsesLabel(count: connector.uses7d)
-            if let account { Text(account.displayName).font(.caption).foregroundStyle(.secondary) }
-            MCPAccountCells(name: connector.name, health: connector.health, only: connector.accountId.map { [$0] })
+        let summary = MCPAccountSummary(accounts: store.accounts, health: connector.health, only: connector.accountId.map { [$0] })
+        MCPRowLayout(service: connector.service, name: connector.name,
+                     subtitle: account.map { "Sur \($0.displayName)" } ?? "Sur tes comptes", uses: connector.uses7d) {
+            EmptyView()
+        } details: {
+            if !summary.isEmpty {
+                MCPAccountIssues(name: connector.name, summary: summary)
+            }
         }
-        .padding(.vertical, 1)
     }
 }
 
@@ -508,6 +467,18 @@ enum MCPHelp {
             SystemActions.activateVSCode()
         }
         store.show(info: "« /mcp » copié : colle-le dans Claude, choisis « \(name) », puis Reconnecter")
+    }
+
+    /// D'où vient un MCP, en mots simples : « Par Vigie · mcp.webflow.com », « En ligne · mcp.figma.com »,
+    /// « Programme · python3 ~/Code/… ».
+    static func origin(type: String?, target: String?) -> String {
+        let place = shortTarget(target)
+        let kind = switch type {
+        case "vigie": "Par Vigie"
+        case "http", "sse": "En ligne"
+        default: "Programme"
+        }
+        return place.isEmpty ? kind : "\(kind) · \(place)"
     }
 
     /// « https://mcp.figma.com/mcp » → « mcp.figma.com » ; une commande reste telle quelle.

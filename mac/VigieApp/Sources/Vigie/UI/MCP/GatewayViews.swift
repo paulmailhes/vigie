@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Un MCP qui passe par la passerelle de Vigie : autorisé une fois pour tous les comptes, avec ses espaces
-/// (une autorisation par espace, par exemple un espace Webflow par client) et le passage de l'un à l'autre en un clic.
-struct GatewayControls: View {
+/// Ligne d'état d'un MCP qui passe par la passerelle de Vigie : autorisé une fois pour tous les comptes, avec ses
+/// espaces (une autorisation par espace, par exemple un espace Webflow par client) et le passage de l'un à l'autre en
+/// un clic. « Réautoriser » n'apparaît que si le service a refusé l'autorisation (une coupure réseau n'en est pas une).
+struct GatewayLine: View {
     @Environment(VigieStore.self) private var store
     let name: String
     let server: GatewayServer
@@ -12,30 +13,32 @@ struct GatewayControls: View {
     @State private var busy = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            if server.needsAuthorization {
-                AsyncButton(server.profiles.isEmpty ? "Autoriser" : "Réautoriser") {
-                    await store.gateway("authorize", name: name, server.active.map { ["profileId": .string($0)] } ?? [:])
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.warn)
-                .controlSize(.small)
-                .help("Ouvre la page du service : une seule autorisation, valable pour tous tes comptes")
-            }
+        Group {
             if server.open == true {
-                Label("Sans autorisation", systemImage: "checkmark")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else if !server.profiles.isEmpty {
-                spaces
+                MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Pour tous tes comptes, sans autorisation à donner") { EmptyView() }
+            } else if server.profiles.isEmpty {
+                MCPIssueLine(systemImage: "key", color: Theme.warn, text: "Pas encore autorisé : une seule autorisation pour tous tes comptes") {
+                    authorizeButton("Autoriser")
+                }
+            } else if server.needsAuthorization {
+                MCPIssueLine(systemImage: "exclamationmark.triangle.fill", color: Theme.warn,
+                             text: "Le service a refusé l'autorisation de l'espace « \(server.activeProfile?.label ?? "Espace") »") {
+                    HStack(spacing: 8) {
+                        spaces
+                        authorizeButton("Réautoriser")
+                    }
+                }
+            } else {
+                MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Une autorisation pour tous tes comptes") {
+                    spaces
+                }
             }
         }
-        .fixedSize()
         .alert("Nouvel espace", isPresented: $askingLabel) {
             TextField("Nom (par exemple, le client)", text: $label)
             Button("Autoriser") {
-                let name = label.trimmingCharacters(in: .whitespaces)
-                run { await store.gateway("authorize", name: self.name, ["label": .string(name.isEmpty ? "Espace" : name)]) }
+                let value = label.trimmingCharacters(in: .whitespaces)
+                run { await store.gateway("authorize", name: name, ["label": .string(value.isEmpty ? "Espace" : value)]) }
             }
             Button("Annuler", role: .cancel) {}
         } message: {
@@ -50,6 +53,16 @@ struct GatewayControls: View {
             }
             Button("Annuler", role: .cancel) {}
         }
+    }
+
+    private func authorizeButton(_ title: String) -> some View {
+        AsyncButton(title) {
+            await store.gateway("authorize", name: name, server.active.map { ["profileId": .string($0)] } ?? [:])
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.warn)
+        .controlSize(.small)
+        .help("Ouvre la page du service : une seule autorisation, valable pour tous tes comptes")
     }
 
     /// Menu des espaces : l'actif coché, puis ajouter, réautoriser, renommer, retirer.
@@ -89,12 +102,13 @@ struct GatewayControls: View {
             }
         } label: {
             BusyLabel(busy: busy) {
-                Label(server.activeProfile?.label ?? "Espace", systemImage: server.needsAuthorization ? "exclamationmark.triangle" : "checkmark.circle")
+                Text("Espace : \(server.activeProfile?.label ?? "?")")
             }
         }
         .menuStyle(.button)
-        .glassButton()
-        .help(server.profiles.count > 1 ? "Change d'espace en un clic : tous tes comptes suivent" : "Ajoute un autre espace (un client, un compte) pour passer de l'un à l'autre en un clic")
+        .controlSize(.small)
+        .fixedSize()
+        .help(server.profiles.count > 1 ? "Change d'espace en un clic : tous tes comptes suivent, conversations ouvertes comprises" : "Ajoute un autre espace (un client, un compte) pour passer de l'un à l'autre en un clic")
     }
 
     private func run(_ work: @escaping @MainActor () async -> Void) {
@@ -103,20 +117,5 @@ struct GatewayControls: View {
             await work()
             busy = false
         }
-    }
-}
-
-/// Un MCP en ligne encore branché compte par compte : le faire passer par Vigie (une autorisation pour tous).
-struct GatewayMigrateButton: View {
-    @Environment(VigieStore.self) private var store
-    let name: String
-
-    var body: some View {
-        AsyncButton("Une autorisation pour tous", systemImage: "arrow.triangle.merge") {
-            await store.gateway("migrate", name: name)
-        }
-        .glassButton()
-        .controlSize(.small)
-        .help("Vigie se connecte une fois à ce service, et tous tes comptes passent par lui : plus rien à autoriser compte par compte")
     }
 }

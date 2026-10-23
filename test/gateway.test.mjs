@@ -215,3 +215,189 @@ test('pas encore autorisé, service sans autorisation, adresse ou nom invalides'
   assert.equal(bad.ok, false);
   eng.srv.close(); svc.srv.close();
 });
+
+// --- sessions des conversations (2026-10-23) ---
+// Faux service « à sessions » comme Webflow : initialize ouvre une session liée à l'espace du jeton du moment ; les
+// requêtes suivantes exigent cette session (404 sinon) et répondent avec SON espace, quel que soit le jeton.
+function sessionService() {
+  return fakeService().then((svc) => {
+    const sessions = new Map();
+    const listens = [];
+    let n = 0;
+    const handler = svc.srv.listeners('request')[0];
+    svc.srv.removeAllListeners('request');
+    svc.srv.on('request', async (req, res) => {
+      const url = new URL(req.url, svc.base);
+      if (!url.pathname.startsWith('/mcp')) return handler(req, res);
+      const auth = String(req.headers.authorization || '').replace(/^Bearer /, '');
+      let body = '';
+      for await (const c of req) body += c;
+      svc.state.seen.push({ method: req.method, session: req.headers['mcp-session-id'], body, auth });
+      if (!svc.state.tokens.has(auth)) { res.writeHead(401, { 'WWW-Authenticate': `Bearer resource_metadata="${svc.base}/.well-known/oauth-protected-resource/mcp"` }); return res.end(); }
+      const msg = body ? JSON.parse(body) : null;
+      if (req.method === 'POST' && msg?.method === 'initialize') {
+        const id = `s-${++n}`;
+        sessions.set(id, svc.state.tokens.get(auth));
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': id });
+        return res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'faux-webflow' } } }));
+      }
+      const sid = req.headers['mcp-session-id'];
+      if (!sessions.has(sid)) { res.writeHead(404); return res.end(); }
+      if (req.method === 'GET') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': ouvert\n\n'); listens.push(res); return; }
+      if (!msg || msg.id === undefined) { res.writeHead(202); return res.end(); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { space: sessions.get(sid), session: sid, method: msg.method } }));
+    });
+    return { ...svc, sessions, listens };
+  });
+}
+const INIT = { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.306' } } };
+function mcpClient(eng, name, key) {
+  let sid = null;
+  const post = async (msg) => {
+    const r = await fetch(`${eng.base}/mcp/${name}`, { method: 'POST', body: JSON.stringify(msg),
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'X-Vigie-Key': key, ...(sid ? { 'Mcp-Session-Id': sid } : {}) } });
+    if (r.headers.get('mcp-session-id')) sid = r.headers.get('mcp-session-id');
+    const text = await r.text();
+    return { status: r.status, body: text ? JSON.parse(text) : null };
+  };
+  const listen = () => {
+    const ac = new AbortController();
+    const done = fetch(`${eng.base}/mcp/${name}`, { headers: { Accept: 'text/event-stream', 'X-Vigie-Key': key, 'Mcp-Session-Id': sid }, signal: ac.signal })
+      .then(async (r) => ({ status: r.status, text: await r.text() })).catch((e) => ({ error: e.name }));
+    return { done, stop: () => ac.abort() };
+  };
+  return { post, listen, sid: () => sid, setSid: (s) => { sid = s; } };
+}
+// Fin d'un test : tout fermer, flux d'écoute compris (sinon les serveurs attendent).
+function shut(...servers) {
+  for (const x of servers) { x.srv.closeAllConnections?.(); x.srv.close(); }
+  for (const x of servers) for (const s of x.listens || []) s.destroy();
+}
+const within = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} : rien après ${ms} ms`)), ms))]);
+
+test('espace changé ou réautorisé : la conversation suit, même session pour elle, sans rien recharger', async () => {
+  const svc = await sessionService();
+  const gw = createGateway({ dataDir: path.join(TMP, 'sessions'), keychain: memoryKeychain(), openUrl: () => {} });
+  const cfg = gw.add('webflow', `${svc.base}/mcp`);
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow', { label: 'Principal' })).url, 'principal'));
+  const eng = await engine(gw);
+  const c = mcpClient(eng, 'webflow', cfg.headers['X-Vigie-Key']);
+  assert.equal((await c.post(INIT)).status, 200);
+  const sid = c.sid();
+  assert.ok(sid);
+  assert.equal((await c.post({ jsonrpc: '2.0', method: 'notifications/initialized' })).status, 202);
+  assert.equal((await c.post({ jsonrpc: '2.0', id: 1, method: 'tools/call' })).body.result.space, 'principal');
+  const l = c.listen();
+  await new Promise((r) => setTimeout(r, 100));
+  // nouvel espace autorisé dans Vigie : il devient actif
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow', { label: 'Client B' })).url, 'client-b'));
+  const closed = await within(l.done, 2000, 'flux d\'écoute');
+  assert.equal(closed.status, 200, 'flux d\'écoute fermé : Claude Code le rouvre et relit ses outils');
+  let r = await c.post({ jsonrpc: '2.0', id: 2, method: 'tools/call' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.result.space, 'client-b', 'la conversation est sur le nouvel espace');
+  assert.equal(c.sid(), sid, 'même session pour la conversation');
+  const reopen = svc.state.seen.filter((x) => x.auth && x.body.includes('"initialize"')); // (sans jeton : sondes de l'autorisation)
+  assert.equal(reopen.length, 2, 'une session rouverte en coulisse');
+  assert.ok(svc.state.seen.some((x) => x.body.includes('notifications/initialized') && x.session === 's-2'), 'ouverture terminée dans les règles');
+  // retour au premier espace (un clic dans Vigie) : idem
+  const ids = gw.status()['webflow'].profiles.map((p) => p.id);
+  gw.activate('webflow', ids[0]);
+  assert.equal((await c.post({ jsonrpc: '2.0', id: 3, method: 'tools/call' })).body.result.space, 'principal');
+  // rien ne change : la même session du service sert
+  const before = svc.sessions.size;
+  await c.post({ jsonrpc: '2.0', id: 4, method: 'tools/call' });
+  assert.equal(svc.sessions.size, before);
+  shut(eng, svc);
+});
+
+test('moteur relancé : une session déjà ouverte est reprise, et suit le prochain changement d\'espace', async () => {
+  const svc = await sessionService();
+  const kc = memoryKeychain();
+  const dir = path.join(TMP, 'sessions-relance');
+  const gw = createGateway({ dataDir: dir, keychain: kc, openUrl: () => {} });
+  const cfg = gw.add('webflow', `${svc.base}/mcp`);
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow', { label: 'A' })).url, 'a'));
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow', { label: 'B' })).url, 'b'));
+  const ids = gw.status()['webflow'].profiles.map((p) => p.id);
+  gw.activate('webflow', ids[0]);
+  let eng = await engine(gw);
+  const c = mcpClient(eng, 'webflow', cfg.headers['X-Vigie-Key']);
+  await c.post(INIT);
+  assert.equal((await c.post({ jsonrpc: '2.0', id: 1, method: 'tools/call' })).body.result.space, 'a');
+  eng.srv.close();
+  const gw2 = createGateway({ dataDir: dir, keychain: kc, openUrl: () => {} }); // moteur relancé
+  eng = await engine(gw2);
+  const c2 = mcpClient(eng, 'webflow', cfg.headers['X-Vigie-Key']);
+  c2.setSid(c.sid());
+  assert.equal((await c2.post({ jsonrpc: '2.0', id: 2, method: 'tools/call' })).body.result.space, 'a', 'reprise telle quelle');
+  gw2.activate('webflow', ids[1]);
+  assert.equal((await c2.post({ jsonrpc: '2.0', id: 3, method: 'tools/call' })).body.result.space, 'b', 'puis suit le changement');
+  shut(eng, svc);
+});
+
+test('pas encore autorisé au démarrage de la conversation : elle démarre quand même, les outils arrivent dès l\'autorisation', async () => {
+  const svc = await sessionService();
+  const gw = createGateway({ dataDir: path.join(TMP, 'sessions-attente'), keychain: memoryKeychain(), openUrl: () => {} });
+  const cfg = gw.add('webflow', `${svc.base}/mcp`);
+  const eng = await engine(gw);
+  const c = mcpClient(eng, 'webflow', cfg.headers['X-Vigie-Key']);
+  let r = await c.post(INIT);
+  assert.equal(r.status, 200, 'pas d\'échec : sinon Claude Code abandonne ce MCP jusqu\'au rechargement');
+  assert.equal(r.body.result.capabilities.tools.listChanged, true);
+  assert.ok(c.sid());
+  assert.equal(svc.state.seen.length, 0, 'rien n\'est envoyé au service sans autorisation');
+  assert.equal((await c.post({ jsonrpc: '2.0', method: 'notifications/initialized' })).status, 202);
+  r = await c.post({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  assert.deepEqual(r.body.result.tools.map((t) => t.name), ['autoriser_dans_vigie']);
+  assert.match(r.body.result.tools[0].description, /autoriser dans Vigie/);
+  r = await c.post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'autoriser_dans_vigie', arguments: {} } });
+  assert.equal(r.body.result.isError, true);
+  const l = c.listen();
+  await new Promise((res) => setTimeout(res, 100));
+  // l'utilisateur autorise dans Vigie
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow')).url, 'principal'));
+  const got = await within(l.done, 2000, 'flux d\'écoute');
+  assert.match(got.text, /notifications\/tools\/list_changed/, 'Claude Code est prévenu que ses outils ont changé');
+  r = await c.post({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.result.space, 'principal', 'les vrais outils, par le service');
+  assert.equal(r.body.result.method, 'tools/list');
+  shut(eng, svc);
+});
+
+test('coupure réseau pendant un renouvellement : rien n\'est marqué « à réautoriser » ; marque effacée dès que le service répond', async () => {
+  const svc = await fakeService();
+  let clock = Date.now();
+  let offline = false;
+  const fetchImpl = (url, init) => (offline && String(url).includes('/token') ? Promise.reject(new TypeError('fetch failed')) : fetch(url, init));
+  const gw = createGateway({ dataDir: path.join(TMP, 'reseau'), keychain: memoryKeychain(), openUrl: () => {}, now: () => clock, fetchImpl });
+  const cfg = gw.add('webflow-pro', `${svc.base}/mcp`);
+  await gw.callback(approveIn(svc, (await gw.authorize('webflow-pro')).url, 'principal', 120));
+  const eng = await engine(gw);
+  const call = () => fetch(`${eng.base}/mcp/webflow-pro`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vigie-Key': cfg.headers['X-Vigie-Key'] },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+  clock += 100_000; // jeton bientôt expiré : renouvellement à la prochaine requête
+  offline = true;
+  const r = await call();
+  assert.equal(r.status, 503);
+  assert.equal(gw.status()['webflow-pro'].profiles[0].error, null, 'réseau coupé : pas un refus du service');
+  assert.equal(gw.status()['webflow-pro'].connected, true);
+  offline = false;
+  assert.equal((await call()).status, 200);
+  // une marque restée d'avant (ancienne version, ou refus passager) s'efface dès qu'une requête passe
+  const j = JSON.parse(fs.readFileSync(gw.file, 'utf8'));
+  j.servers['webflow-pro'].profiles[0].error = 'fetch failed';
+  fs.writeFileSync(gw.file, JSON.stringify(j));
+  assert.equal(gw.status()['webflow-pro'].connected, false);
+  assert.equal((await call()).status, 200);
+  assert.equal(gw.status()['webflow-pro'].profiles[0].error, null);
+  assert.equal(gw.status()['webflow-pro'].connected, true);
+  // et l'essai du démarrage aussi
+  j.servers['webflow-pro'].profiles[0].error = 'fetch failed';
+  fs.writeFileSync(gw.file, JSON.stringify(j));
+  await gw.verify('webflow-pro');
+  assert.equal(gw.status()['webflow-pro'].profiles[0].error, null);
+  shut(eng, svc);
+});

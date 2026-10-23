@@ -872,3 +872,109 @@ test('réinstallation (accounts.json effacé) : les comptes déjà connectés so
   assert.equal(E.load().accounts.length, 1);
   assert.equal(fs.existsSync(path.join(TMP, 'data neuve', 'accounts.json')), false, 'rien trouvé : rien écrit');
 });
+
+// --- connexions : l'état publié par le coffre (lib/vault.mjs) fait foi ---
+// Dossier de données à part (les tests précédents ont changé la liste des comptes de DATA).
+const XDATA = path.join(TMP, 'data connexions');
+const T2DIR = path.join(ACC, 'travail2');
+const PERSODIR = path.join(ACC, 'perso');
+wj(path.join(XDATA, 'accounts.json'), {
+  accounts: [{ id: 'travail1', label: 'Travail 1', configDir: null }, { id: 'travail2', label: 'Travail 2', configDir: T2DIR }, { id: 'perso', label: 'Perso', configDir: PERSODIR }],
+  defaultForNew: 'travail1', sessions: {}, pendingSwitches: {},
+});
+const X = createAccounts({ ...opts, dataDir: XDATA });
+const xModel = () => rj(path.join(XDATA, 'accounts.json'));
+const CX = path.join(XDATA, 'connexions.json');
+const setCx = (accounts, ageS = 0) => wj(CX, { v: 1, checkedAtEpoch: Math.floor(Date.now() / 1000) - ageS, accounts });
+
+test('connecté : l\'état du coffre fait foi s\'il est frais ; inconnu ou trop vieux, on regarde le trousseau', () => {
+  assert.equal(X.summaries()[0].connected, true);
+  setCx({ travail1: { connected: false, state: 'dead' } });
+  let t1 = X.summaries()[0];
+  assert.equal(t1.connected, false, 'entrée présente mais connexion refusée : pas connecté');
+  assert.deepEqual(t1.login, { state: 'dead', since: null, restoredAt: null });
+  setCx({ travail1: { connected: true, state: 'restored', restoredAt: '2026-10-23T08:20:30.000Z' } });
+  t1 = X.summaries()[0];
+  assert.equal(t1.connected, true);
+  assert.deepEqual(t1.login, { state: 'restored', since: null, restoredAt: '2026-10-23T08:20:30.000Z' });
+  setCx({ travail1: { connected: null, state: 'unknown' } });
+  assert.equal(X.summaries()[0].connected, true, 'lecture ratée : le trousseau dit qu\'elle existe');
+  setCx({ travail1: { connected: false, state: 'lost' } }, 3600);
+  assert.equal(X.summaries()[0].connected, true, 'moteur arrêté depuis longtemps : état ignoré');
+  assert.equal(X.summaries()[0].login, null);
+  fs.writeFileSync(CX, '{abîmé');
+  assert.equal(X.summaries()[0].connected, true);
+  // une bascule vers un compte que le coffre dit perdu est refusée
+  runner.keychain.add(keychainItem(T2DIR));
+  setCx({ travail2: { connected: false, state: 'lost' } });
+  assert.deepEqual(X.switchConversation(SID2, 'travail2', { liveSessions: [] }), { ok: false, error: 'Travail 2 n\'est pas connecté.' });
+  fs.rmSync(CX);
+  assert.equal(X.switchConversation(SID2, 'travail2', { liveSessions: [] }).ok, true, 'sans état : le trousseau suffit');
+  runner.keychain.delete(keychainItem(T2DIR));
+});
+
+test('conversation jamais associée : le compte des nouvelles conversations, partout (comme le lanceur)', () => {
+  const FREE = 'dd3be56b-8888-4999-8aaa-0bbb2222dddd';
+  X.setDefault('perso');
+  assert.equal(X.accountOf(FREE), 'perso');
+  assert.deepEqual(X.sessionAccount(FREE), { accountId: 'perso', pendingTo: null });
+  assert.equal(X.accountInfo(FREE, []).chosen, 'perso');
+  X.setDefault('travail1');
+  assert.equal(X.accountOf(FREE), 'travail1');
+});
+
+test('lancement de repli (compte voulu déconnecté) ou pour connecter le Mac : jamais épinglé, signalé', () => {
+  const t = Math.floor(Date.now() / 1000);
+  const L = path.join(XDATA, 'launches');
+  const S_REPLI = 'ee4cf67c-9999-4aaa-8bbb-1ccc3333eeee';
+  const S_MAC = 'ff5d078d-aaaa-4bbb-8ccc-2ddd4444ffff';
+  const S_VOULU = '0a6e189e-bbbb-4ccc-8ddd-3eee55550000';
+  w(path.join(L, String(PID + 10)), `${t}\t${PID + 10}\ttravail1\t-\trepli:travail2:non-connecte\n`);
+  w(path.join(L, String(PID + 11)), `${t}\t${PID + 11}\ttravail1\t-\tconnexion-du-mac\n`);
+  w(path.join(L, String(PID + 12)), `${t}\t${PID + 12}\ttravail1\t${S_VOULU}\trepli:travail2:non-connecte\n`);
+  const live = [
+    { pid: PID + 10, sessionId: S_REPLI, status: 'busy', startedAt: Date.now() },
+    { pid: PID + 11, sessionId: S_MAC, status: 'busy', startedAt: Date.now() },
+    { pid: PID + 12, sessionId: S_VOULU, status: 'busy', startedAt: Date.now() },
+  ];
+  assert.deepEqual(X.fallbacks(live), [
+    { sessionId: S_REPLI, wanted: 'travail2', running: 'travail1', why: 'non-connecte' },
+    { sessionId: S_VOULU, wanted: 'travail2', running: 'travail1', why: 'non-connecte' },
+  ]);
+  const r = X.processPending(live); // (fait aussi le ménage des fiches : ces pids n'existent pas)
+  assert.deepEqual(r.pinned, []);
+  assert.equal(xModel().sessions[S_REPLI], undefined);
+  assert.equal(xModel().sessions[S_MAC], undefined);
+});
+
+test('relevés d\'usage : rien tant que le Mac n\'est pas calme, puis un compte à la fois', async () => {
+  const fake = path.join(TMP, 'faux claude lent', 'claude');
+  const log = path.join(TMP, 'faux claude lent', 'appels.jsonl');
+  w(fake, `#!${process.execPath}
+import fs from 'node:fs';
+const t0 = Date.now();
+await new Promise((r) => setTimeout(r, 150));
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR || null, t0, t1: Date.now() }) + '\\n');
+`, 0o755);
+  runner.keychain.add(keychainItem(PERSODIR));
+  runner.keychain.add(keychainItem(T2DIR));
+  wj(path.join(HOME, '.claude.json'), { ...MAIN_JSON, cachedUsageUtilization: undefined });
+  const P = createAccounts({ ...opts, dataDir: XDATA, claudeBin: fake });
+  assert.deepEqual(P.autoRefresh({ calm: false }), [], 'démarrage du Mac : aucun relevé');
+  const started = P.autoRefresh({ calm: true });
+  assert.deepEqual(started, ['travail1', 'perso'], 'Travail 2 a un relevé frais (RunCat)');
+  await P.refreshSettled();
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).sort((a, b) => a.t0 - b.t0);
+  assert.equal(calls.length, 2);
+  for (let i = 1; i < calls.length; i++) assert.ok(calls[i].t0 >= calls[i - 1].t1, 'jamais deux relevés en même temps');
+  // compte que le coffre dit perdu : pas de relevé (il renouvellerait un jeton mort)
+  setCx({ perso: { connected: false, state: 'lost' } });
+  fs.rmSync(path.join(XDATA, 'usage'), { recursive: true, force: true });
+  const Q = createAccounts({ ...opts, dataDir: XDATA, claudeBin: fake });
+  assert.deepEqual(Q.autoRefresh({ calm: true }), ['travail1']);
+  await Q.refreshSettled();
+  fs.rmSync(CX);
+  wj(path.join(HOME, '.claude.json'), MAIN_JSON);
+  runner.keychain.delete(keychainItem(PERSODIR));
+  runner.keychain.delete(keychainItem(T2DIR));
+});

@@ -117,7 +117,8 @@ struct DecodingTests {
             { "id": "c2", "rate": "oups", "alert": null } ] }
         """
         let overview = try JSONDecoder().decode(Overview.self, from: Data(json.utf8))
-        #expect(overview.settings?.guardRules?.mode == "vigie")
+        // « mode » n'existe plus (actions sensibles toujours dans la conversation et dans Vigie) : ignoré, le reste se lit
+        #expect(overview.settings?.guardRules?.enabled == true)
         #expect(overview.toReview.first?.approvalId == "42")
         #expect(overview.toReview.first?.isAwaitingApproval == true)
         #expect(overview.toReview.first?.needsDecision == true)

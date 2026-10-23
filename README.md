@@ -16,6 +16,7 @@ Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fen�
 - **Il te montre où en est chaque conversation** : ta demande, son message en direct, sa feuille de route, le fil de ce qu'elle a fait (commits, déploiements, tests, agents).
 - **Il suit ta consommation** par compte et par conversation : session de 5 h, semaine, et l'heure exacte de remise à zéro.
 - **Il gère plusieurs comptes Claude** : ils restent connectés en même temps, et tu choisis le compte de chaque conversation.
+- **Il garde tes connexions** : une copie chiffrée de la connexion de chaque compte (Claude et Codex). Si une app la perd sans que tu te sois déconnecté (ça arrivait au redémarrage du Mac), Vigie la remet tout seul.
 - **Il gère tes MCP**, avec leur état sur chaque compte et un bouton « Connecter » qui ouvre directement la page d'autorisation.
 
 Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.
@@ -57,6 +58,22 @@ Active ensuite « Un compte par conversation dans VS Code » : chaque conversati
 
 Changer le compte d'une conversation la relance sur l'autre compte avec tout son historique. Elle reprend à ton prochain message dans VS Code. Le nouveau compte relit alors toute la conversation, ce qui consomme des crédits : Vigie affiche le nombre de tokens à relire avant de basculer.
 
+Une conversation sans compte choisi (une nouvelle, ou une ancienne jamais associée) part sur le **compte des nouvelles conversations**. Si son compte n'est pas connecté, elle part sur un compte qui l'est, et Vigie te le signale. Elle retrouve son compte dès qu'il est reconnecté.
+
+**Le compte du Mac** (celui de `~/.claude`) est celui que VS Code regarde pour dire « connecté » : s'il tombe, toutes les fenêtres affichent « déconnecté », quel que soit le compte de la conversation. Vigie le surveille en premier, et la connexion lancée depuis VS Code arrive bien sur lui.
+
+### Connexions gardées
+
+Vigie garde une copie de la connexion de chaque compte, tenue à jour à chaque renouvellement. Si une app la perd sans que tu te sois déconnecté, Vigie la remet après l'avoir constaté deux fois (15 s d'écart), en attendant que Claude Code ait fini d'écrire. Il ne remet jamais :
+
+- une connexion que tu as retirée toi-même (`/logout`, déconnexion de VS Code) ;
+- une connexion refusée par Anthropic : le compte passe « à reconnecter », et « Connecter » ouvre la page de connexion sur le bon compte ;
+- plus de trois fois par heure la même connexion.
+
+Les copies sont chiffrées (AES-256-GCM) dans `~/.vigie/data/coffre`. Leur clé est rangée dans le trousseau du Mac (« Vigie connexions »). Rien n'est écrit en clair, rien ne passe dans les journaux, et rien ne quitte le Mac. Vigie ne se sert jamais de ces connexions : il ne fait que les recopier. Pour Codex, Vigie remet `~/.codex/auth.json` s'il est abîmé. S'il a été retiré, c'est une déconnexion, et Vigie la respecte.
+
+Au démarrage du Mac, Vigie attend que tout soit calme avant ses propres relevés (crédits, MCP), qui lancent eux aussi Claude Code. Il les fait alors un compte à la fois.
+
 ## Une conversation
 
 ![Une conversation](docs/images/conversation.png)
@@ -75,6 +92,13 @@ Trois familles : **MCP de ce Mac** (dans toutes tes conversations), **MCP des pr
 Chaque MCP tient sur une ligne : « ✓ Tous tes comptes » quand il marche partout, sinon seuls les comptes à régler apparaissent, avec leur bouton (**Connecter**, **Ajouter**, **échec**). « Partout » le connecte sur tous tes comptes, l'un après l'autre. Chaque compte Claude garde sa propre autorisation : il faut connecter un MCP une fois par compte.
 
 La **bibliothèque** (bouton « + ») propose les serveurs officiels des éditeurs (Notion, Figma, GitHub, Linear, Stripe…) : tu coches tes comptes, Vigie l'ajoute puis ouvre la page d'autorisation.
+
+Les MCP qui passent par la **passerelle** de Vigie (une autorisation pour tous tes comptes, comme Webflow) suivent tes autorisations sans rien recharger dans VS Code :
+
+- tu autorises un nouvel espace, tu en changes ou tu réautorises : les conversations ouvertes passent dessus d'elles-mêmes ;
+- tu autorises un MCP alors que des conversations sont déjà ouvertes : leurs outils apparaissent tout seuls.
+
+Les MCP que le service refuse de faire passer par Vigie (Figma) restent branchés compte par compte : après les avoir autorisés, une conversation déjà ouverte demande un « Reconnect » dans le panneau MCP de VS Code.
 
 ## Codex (OpenAI)
 
@@ -96,7 +120,8 @@ Une conversation ne peut pas passer de Claude à Codex : leurs historiques sont 
 - Un **hook** de Claude Code (`hook.mjs`) reçoit chaque demande d'autorisation et répond à la place de la fenêtre. En cas de doute, il ne répond rien : la fenêtre normale de Claude Code s'affiche, jamais l'inverse.
 - Un **moteur local** (`server.mjs`, Node.js, sans dépendance) lit les conversations de Claude Code sur ton Mac et sert l'app sur `http://127.0.0.1:4777`, en local uniquement.
 - L'**app Mac** (SwiftUI) affiche le tout et envoie tes réglages au moteur.
-- Le **lanceur de comptes** (`bin/claude-account-wrapper`, facultatif) démarre chaque conversation VS Code sur le compte que tu lui as choisi.
+- Le **lanceur de comptes** (`bin/claude-account-wrapper`, facultatif) démarre chaque conversation VS Code sur le compte que tu lui as choisi, ou sur un compte connecté si le sien ne l'est pas.
+- Le **coffre des connexions** (`lib/vault.mjs`) garde une copie chiffrée de la connexion de chaque compte et la remet si une app la perd. Il publie l'état des connexions dans `~/.vigie/data/connexions.json` (connecté ou non, jamais rien de secret), que lit le lanceur.
 
 L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; ses données (réglages, historique) sont dans `~/.vigie/data`. Le hook est branché dans `~/.claude/settings.json` (et `~/.codex/hooks.json` pour Codex). Une sauvegarde de ces fichiers est faite à chaque modification.
 
@@ -104,7 +129,7 @@ L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; se
 
 ```bash
 ~/.vigie/scripts/uninstall.sh          # retire le hook et le moteur, quitte l'app ; garde tes réglages
-~/.vigie/scripts/uninstall.sh --tout   # efface aussi ~/.vigie et l'app
+~/.vigie/scripts/uninstall.sh --tout   # efface aussi ~/.vigie, l'app et la clé du coffre des connexions
 ```
 
 Claude Code redevient exactement comme avant, et les conversations ouvertes reprennent tout de suite le fonctionnement normal.

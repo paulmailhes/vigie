@@ -71,13 +71,15 @@ if [ -n "$STANDALONE_APP" ]; then
   esac
 fi
 # --tout : le dossier d'installation (~/.vigie) part aussi, réglages et historique compris, avec ce que macOS garde
-# pour l'app (préférences, dont l'accueil déjà vu ; autorisations ; jetons des MCP ; journal d'installation).
+# pour l'app (préférences, dont l'accueil déjà vu ; autorisations ; jetons des MCP ; clé du coffre des connexions,
+# dont les copies chiffrées sont dans ~/.vigie/data/coffre ; journal d'installation).
 # Les comptes Claude (~/.claude-comptes et leurs connexions) ne sont jamais touchés.
 if [ "${1:-}" = "--tout" ]; then
   run defaults delete io.github.paulmailhes.vigie 2>/dev/null || true
   run tccutil reset All io.github.paulmailhes.vigie >/dev/null 2>&1 || true
   if [ -z "$DRY" ]; then
     while security delete-generic-password -s "Vigie MCP" >/dev/null 2>&1; do :; done
+    while security delete-generic-password -s "Vigie connexions" >/dev/null 2>&1; do :; done
   fi
   run rm -f "$HOME/Library/Logs/Vigie-installation.log"
   case "$ROOT" in

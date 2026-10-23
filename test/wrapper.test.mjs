@@ -140,17 +140,20 @@ test('nouvelle conversation : compte par défaut', () => {
   assert.deepEqual([acc, sid, why], ['perso', '-', 'nouvelle']);
   setModel({ ...MODEL, defaultForNew: 'travail1' });
   assert.equal(run(CONV).cfg, '<absent>');
-  setModel({ ...MODEL, defaultForNew: 'disparu' });
-  assert.equal(run(CONV).cfg, '<absent>');
+  // VS Code lancé avec un CLAUDE_CONFIG_DIR : Travail 1 reste ~/.claude (la variable héritée est retirée)
+  assert.equal(run(CONV, { env: { CLAUDE_CONFIG_DIR: PERSO } }).cfg, '<absent>');
   setModel();
 });
 
-test('reprise sans choix noté : Travail 1, même si le défaut est un autre compte', () => {
+test('reprise sans choix noté : le compte des nouvelles conversations (réglage de Vigie)', () => {
   const r = run([...CONV, `--resume=${S_LIBRE}`]);
-  assert.equal(r.cfg, '<absent>');
+  assert.equal(r.cfg, PERSO);
   assert.equal(r.conn, 'false');
   const [, , acc, sid, why] = lastLog();
-  assert.deepEqual([acc, sid, why], ['travail1', S_LIBRE, 'sans-choix']);
+  assert.deepEqual([acc, sid, why], ['perso', S_LIBRE, 'sans-choix']);
+  setModel({ ...MODEL, defaultForNew: 'travail1' });
+  assert.equal(run([...CONV, `--resume=${S_LIBRE}`]).cfg, '<absent>');
+  setModel();
 });
 
 test('connecteurs : réglage par conversation prioritaire, état absent ou abîmé = inchangé', () => {
@@ -169,23 +172,87 @@ test('connecteurs : réglage par conversation prioritaire, état absent ou abîm
   setState();
 });
 
-test('compte pas connecté, historique non relié ou dossier absent : rien ne change', () => {
-  for (const [sid, why] of [[S_T2, 'non-connecte'], [S_CASSE, 'historique-non-relie']]) {
+test('compte pas connecté, historique non relié ou dossier absent : repli sur un compte qui marche, noté', () => {
+  for (const [sid, from, why] of [[S_T2, 'travail2', 'non-connecte'], [S_CASSE, 'casse', 'historique-non-relie']]) {
     const r = run([...CONV, `--resume=${sid}`]);
-    assert.equal(r.cfg, '<absent>', why);
-    assert.equal(r.conn, '<absent>', why);
+    assert.equal(r.cfg, PERSO, why);
+    assert.equal(r.conn, 'false', why);
     assert.deepEqual(r.args, [...CONV, `--resume=${sid}`]);
-    const [, , acc, , got] = lastLog();
-    assert.deepEqual([acc, got], ['travail1', why]);
+    const [, , acc, s, got] = lastLog();
+    assert.deepEqual([acc, s, got], ['perso', sid, `repli:${from}:${why}`]);
   }
   const gone = structuredClone(MODEL);
   gone.accounts[1].configDir = path.join(ACC, 'nulle part');
   setModel(gone);
   assert.equal(run([...CONV, `--resume=${S_PERSO}`]).cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', S_PERSO, 'repli:perso:dossier-absent']);
   gone.accounts[1].configDir = `${PERSO}/`; // barre finale : autre entrée de trousseau, on refuse
   setModel(gone);
   assert.equal(run([...CONV, `--resume=${S_PERSO}`]).cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', S_PERSO, 'repli:perso:chemin']);
+  setModel({ ...MODEL, defaultForNew: 'disparu' });
+  assert.equal(run(CONV).cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', '-', 'repli:disparu:compte-inconnu']);
   setModel();
+});
+
+// État des connexions publié par le moteur (lib/vault.mjs) : data/connexions.json.
+const CX = path.join(DATA, 'connexions.json');
+const setCx = (accounts, ageS = 0) => wj(CX, { v: 1, checkedAtEpoch: Math.floor(Date.now() / 1000) - ageS, accounts });
+
+test('compte déconnecté d\'après Vigie : la conversation part sur un compte connecté', () => {
+  setCx({ perso: { connected: false, state: 'dead' }, travail1: { connected: true } });
+  let r = run([...CONV, `--resume=${S_PERSO}`]);
+  assert.equal(r.cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', S_PERSO, 'repli:perso:non-connecte']);
+  // nouvelle conversation : même chose (le défaut « perso » n'est pas connecté)
+  r = run(CONV);
+  assert.equal(r.cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', '-', 'repli:perso:non-connecte']);
+  // état inconnu (lecture ratée) : le compte reste utilisable
+  setCx({ perso: { connected: null, state: 'unknown' } });
+  assert.equal(run([...CONV, `--resume=${S_PERSO}`]).cfg, PERSO);
+  // état trop vieux (moteur arrêté) : ignoré
+  setCx({ perso: { connected: false } }, 3600);
+  assert.equal(run([...CONV, `--resume=${S_PERSO}`]).cfg, PERSO);
+  // état abîmé : ignoré
+  fs.writeFileSync(CX, '{abîmé');
+  assert.equal(run([...CONV, `--resume=${S_PERSO}`]).cfg, PERSO);
+  // aucun compte connecté : Travail 1 tel quel
+  setCx({ perso: { connected: false }, travail1: { connected: false } });
+  r = run([...CONV, `--resume=${S_PERSO}`]);
+  assert.equal(r.cfg, '<absent>');
+  assert.equal(r.conn, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', S_PERSO, 'repli:perso:non-connecte']);
+  fs.rmSync(CX);
+});
+
+test('compte du Mac déconnecté : une conversation neuve part dessus (la connexion de VS Code y arrive)', () => {
+  // VS Code ne regarde que ce compte pour dire « connecté » : sa connexion doit l'atteindre
+  setCx({ travail1: { connected: false, state: 'lost' }, perso: { connected: true } });
+  let r = run(CONV);
+  assert.equal(r.cfg, '<absent>');
+  assert.deepEqual(lastLog().slice(2), ['travail1', '-', 'connexion-du-mac']);
+  // une reprise reste sur son compte
+  r = run([...CONV, `--resume=${S_PERSO}`]);
+  assert.equal(r.cfg, PERSO);
+  fs.rmSync(CX);
+});
+
+test('déconnexion et connexion depuis VS Code : notées (le coffre ne remet rien), sans fiche de processus', () => {
+  const n = logLines();
+  const out = run(['auth', 'logout']);
+  assert.equal(out.cfg, '<absent>');
+  assert.deepEqual(out.args, ['auth', 'logout']);
+  assert.deepEqual(lastLog().slice(2), ['travail1', '-', 'deconnexion']);
+  assert.ok(!fs.existsSync(path.join(DATA, 'launches', String(out.pid))));
+  run(['auth', 'login', '--claudeai']);
+  assert.deepEqual(lastLog().slice(2), ['travail1', '-', 'connexion']);
+  run(['auth', 'status', '--json']);
+  assert.equal(logLines(), n + 2, 'auth status (très fréquent) n\'est pas noté');
+  // lancé avec un autre dossier de compte : on ne sait pas lequel, pas de compte noté
+  run(['auth', 'logout'], { env: { CLAUDE_CONFIG_DIR: PERSO } });
+  assert.deepEqual(lastLog().slice(2), ['-', '-', 'deconnexion']);
 });
 
 test('accounts.json absent ou abîmé : rien ne change', () => {

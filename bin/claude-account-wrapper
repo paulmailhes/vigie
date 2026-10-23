@@ -3,11 +3,17 @@
 #
 # L'extension l'appelle ainsi : <ce script> <binaire claude intégré> <arguments…>.
 # Pour une conversation (--input-format stream-json), il choisit le compte d'après data/accounts.json :
-#   - reprise (--resume=<uuid>) : le compte noté pour cette conversation, sinon Travail 1 ;
-#   - conversation neuve : le compte par défaut (defaultForNew).
+#   - le compte noté pour cette conversation ;
+#   - sinon (conversation neuve, ou reprise jamais associée) : le compte des nouvelles conversations (defaultForNew) ;
+#   - ce compte ne marche pas (pas connecté d'après data/connexions.json, publié par le coffre du moteur, dossier
+#     absent, historique non relié) : le premier qui marche parmi le défaut, Travail 1 et les autres, noté
+#     « repli:<voulu>:<raison> » (la conversation reste associée à son compte, elle y revient à la reprise suivante) ;
+#   - Travail 1 déconnecté : une conversation neuve part dessus (« connexion-du-mac »). L'extension ne regarde que
+#     ce compte pour dire « connecté » : sa connexion (une conversation neuve) doit l'atteindre.
 # Un compte autre que Travail 1 = CLAUDE_CONFIG_DIR=<son dossier>, écrit exactement comme dans accounts.json :
 # le nom de l'entrée de trousseau en dépend. Il coupe aussi les connecteurs claude.ai si Vigie le demande.
-# Les appels annexes (auth status, mcp, sonde de configuration…) partent tels quels, donc sur Travail 1.
+# Les appels annexes (auth status, mcp, sonde de configuration…) partent tels quels, donc sur Travail 1 ;
+# « auth logout » et « auth login » sont notés (le coffre ne remet pas une connexion que l'utilisateur retire).
 # Règle d'or : à la moindre erreur, on lance le binaire avec ses arguments d'origine, sans rien changer.
 # Le journal (data/launches.log) ne garde que l'heure, le pid, le compte, l'id de conversation et la raison :
 # jamais les arguments, qui peuvent contenir des jetons (--mcp-config).
@@ -25,23 +31,33 @@ NL='
 '
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 H="${VIGIE_HOME:-$HOME}"
-V_KIND=""; V_ACC=""; V_DIR=""; V_CONN=""; V_SID=""; V_WHY=""; V_MODE=""; V_REWRITE=0
+V_KIND=""; V_ACC=""; V_DIR=""; V_CONN=""; V_SID=""; V_WHY=""; V_MODE=""; V_REWRITE=0; U_WHY=""
 V_ARGS=()
+US=$'\037' # séparateur des champs d'un compte candidat (jamais dans un chemin raisonnable, jamais un blanc)
 
 # Choix du compte, des connecteurs et du mode de permission, en une lecture (jq : ~3 ms).
-# Sorties, une par ligne : compte, dossier (vide = Travail 1), connecteurs (off|on|garder), mode par défaut
-# de ~/.claude/settings.json, raison, puis « fin » pour vérifier que rien n'a été tronqué.
+# Sorties, une par ligne : connecteurs (off|on|garder), mode par défaut de ~/.claude/settings.json, compte voulu,
+# raison, puis les comptes candidats dans l'ordre (voulu, défaut, Travail 1, les autres) :
+# « id US dossier (vide = Travail 1) US connecté d'après le coffre (1|0) US connu (1|0) », puis « fin » pour
+# vérifier que rien n'a été tronqué. L'état du coffre ne compte que s'il a moins de 15 min (moteur vivant).
 PROG='
 def j: try fromjson catch null;
 def str: if type == "string" then . else null end;
+def uniq: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
 (if type == "object" then . else error("comptes") end) as $m
 | [ ($m.accounts // [])[] | select(type == "object" and (.id | type) == "string") ] as $acc
 | (($m.sessions // {}) | if type == "object" then . else {} end) as $map
+| (($m.defaultForNew | str) // $main) as $def
 | (if $sid != "" then ($map[$sid] | str) else null end) as $mapped
-| (if $mapped != null then {id: $mapped, why: "choisi"}
-   elif $isnew == "1" then {id: (($m.defaultForNew | str) // $main), why: "nouvelle"}
-   else {id: $main, why: "sans-choix"} end) as $want
-| ([ $acc[] | select(.id == $want.id) ] | first) as $a
+| ($cx | j) as $x
+| (if ($x | type) == "object" and (($x.checkedAtEpoch | type) == "number")
+      and (now - $x.checkedAtEpoch) < 900 and (now - $x.checkedAtEpoch) > -900
+      and (($x.accounts | type) == "object") then $x.accounts else {} end) as $live
+| def up($id): ($live[$id] | if type == "object" then .connected else null end) != false;
+  (if $mapped != null then {id: $mapped, why: "choisi"}
+   elif $isnew == "1" then {id: $def, why: "nouvelle"}
+   else {id: $def, why: "sans-choix"} end) as $want0
+| (if $isnew == "1" and (up($main) | not) then {id: $main, why: "connexion-du-mac"} else $want0 end) as $want
 | ($st | j) as $s
 | ($se | j) as $set
 | (if ($s | type) != "object" then "garder"
@@ -49,16 +65,38 @@ def str: if type == "string" then . else null end;
                               | if type == "object" then (.connectors | str) else null end)
           else null end)
          // ($s.connectorsDefault | str) // "off") end) as $c
-| [ (if $a == null then $main else $a.id end),
-    (if $a == null then "" else (($a.configDir | str) // "") end),
-    $c,
+| (([ $want.id, $def, $main ] + [ $acc[].id ]) | uniq) as $ids
+| [ $c,
     (if ($set | type) == "object"
      then (($set.permissions // {}) | if type == "object" then ((.defaultMode | str) // "") else "" end)
      else "" end),
-    (if $a == null then "compte-inconnu" else $want.why end),
-    "fin" ]
+    $want.id,
+    $want.why ]
+  + [ $ids[] as $id
+      | ([ $acc[] | select(.id == $id) ] | first) as $a
+      | [ $id,
+          (if $id == $main or $a == null then "" else (($a.configDir | str) // "") end),
+          (if up($id) or ($want.why == "connexion-du-mac" and $id == $main) then "1" else "0" end),
+          (if $a != null or $id == $main then "1" else "0" end) ]
+      | map(gsub("[\u001f\n]"; " ")) | join("\u001f") ]
+  + [ "fin" ]
 | map(gsub("\n"; " ")) | .[]
 '
+
+# Un compte candidat marche-t-il ? (id, dossier, connecté d'après le coffre, connu) ; sinon U_WHY dit pourquoi.
+vigie_usable() {
+  U_WHY=""
+  [ "$4" = 1 ] || { U_WHY=compte-inconnu; return 1; }
+  if [ -n "$2" ]; then
+    case "$2" in */) U_WHY=chemin; return 1 ;; /*) ;; *) U_WHY=chemin; return 1 ;; esac
+    [ -d "$2" ] || { U_WHY=dossier-absent; return 1; }
+    # historique partagé indispensable : sans lui l'extension repartirait d'une conversation vide
+    if ! { [ -L "$2/projects" ] && [ "$2/projects" -ef "$H/.claude/projects" ]; }; then U_WHY=historique-non-relie; return 1; fi
+    "$JQ" -e '(.oauthAccount | type) == "object"' "$2/.claude.json" >/dev/null 2>&1 || { U_WHY=non-connecte; return 1; }
+  fi
+  [ "$3" = 1 ] || { U_WHY=non-connecte; return 1; }
+  return 0
+}
 
 # Dossier data/ : VIGIE_DATA, sinon à côté du script (liens symboliques résolus).
 vigie_data() {
@@ -93,7 +131,12 @@ vigie_mode_libre() {
 vigie_route() {
   # Sonde de configuration de l'extension : ce n'est pas une conversation.
   [ -n "$CLAUDE_CODE_CONFIG_PROBE" ] && return 1
-  local a prev="" stream=0 resume=0 pm="" isnew=1 out rest dm end fix=0
+  # Déconnexion et connexion de l'extension : passent telles quelles, mais notées pour le coffre.
+  if [ "$1" = auth ]; then
+    case "$2" in logout) V_KIND=annexe; V_WHY=deconnexion ;; login) V_KIND=annexe; V_WHY=connexion ;; esac
+    return 1
+  fi
+  local a prev="" stream=0 resume=0 pm="" isnew=1 out rest dm end fix=0 want line cid cdir cup cknown first=1 wfail=""
   for a in "$@"; do
     case "$prev" in
       --input-format) [ "$a" = stream-json ] && stream=1 ;;
@@ -122,28 +165,36 @@ vigie_route() {
   [ "$resume" = 1 ] && isnew=0
   [ -n "$DATA" ] || { V_WHY=sans-data; return 1; }
   [ -x "$JQ" ] || { V_WHY=sans-jq; return 1; }
-  local acc="$DATA/accounts.json" st="$DATA/state.json" se="$H/.claude/settings.json"
+  local acc="$DATA/accounts.json" st="$DATA/state.json" se="$H/.claude/settings.json" cx="$DATA/connexions.json"
   [ -f "$acc" ] || { V_WHY=sans-comptes; return 1; }
   [ -r "$st" ] || st=/dev/null
   [ -r "$se" ] || se=/dev/null
+  [ -r "$cx" ] || cx=/dev/null
   out=$("$JQ" -r --arg sid "$V_SID" --arg isnew "$isnew" --arg main "$MAIN" \
-        --rawfile st "$st" --rawfile se "$se" "$PROG" "$acc" 2>/dev/null) || { V_WHY=comptes-illisibles; return 1; }
+        --rawfile st "$st" --rawfile se "$se" --rawfile cx "$cx" "$PROG" "$acc" 2>/dev/null) || { V_WHY=comptes-illisibles; return 1; }
   rest="$out$NL"
-  V_ACC="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
-  V_DIR="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
   V_CONN="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
   dm="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+  want="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
   V_WHY="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
-  end="${rest%%"$NL"*}"
-  if [ "$end" != fin ] || [ -z "$V_ACC" ]; then V_WHY=comptes-illisibles; return 1; fi
-
-  if [ -n "$V_DIR" ]; then
-    case "$V_DIR" in */) V_WHY=chemin; return 1 ;; /*) ;; *) V_WHY=chemin; return 1 ;; esac
-    [ -d "$V_DIR" ] || { V_WHY=dossier-absent; return 1; }
-    # historique partagé indispensable : sans lui l'extension repartirait d'une conversation vide
-    if ! { [ -L "$V_DIR/projects" ] && [ "$V_DIR/projects" -ef "$H/.claude/projects" ]; }; then V_WHY=historique-non-relie; return 1; fi
-    "$JQ" -e '(.oauthAccount | type) == "object"' "$V_DIR/.claude.json" >/dev/null 2>&1 || { V_WHY=non-connecte; return 1; }
-  fi
+  # Premier candidat qui marche ; le premier est toujours le compte voulu.
+  while [ -n "$rest" ]; do
+    line="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+    if [ "$line" = fin ]; then end=fin; break; fi
+    case "$line" in *"$US"*"$US"*"$US"*) ;; *) break ;; esac
+    cid="${line%%"$US"*}"; line="${line#*"$US"}"
+    cdir="${line%%"$US"*}"; line="${line#*"$US"}"
+    cup="${line%%"$US"*}"; cknown="${line#*"$US"}"
+    if [ -z "$V_ACC" ]; then
+      if vigie_usable "$cid" "$cdir" "$cup" "$cknown"; then V_ACC="$cid"; V_DIR="$cdir"
+      elif [ "$first" = 1 ]; then wfail="$U_WHY"; fi
+    fi
+    first=0
+  done
+  if [ "$end" != fin ] || [ -z "$want" ]; then V_ACC=""; V_DIR=""; V_WHY=comptes-illisibles; return 1; fi
+  if [ -n "$wfail" ]; then V_WHY="repli:$want:$wfail"; fi
+  # aucun compte ne marche : Travail 1 tel quel (Claude Code y proposera de se connecter)
+  [ -n "$V_ACC" ] || return 1
 
   if [ "$pm" = default ]; then
     case "$dm" in
@@ -172,12 +223,15 @@ vigie_route() {
 # Une ligne par conversation lancée : « epoch  pid  compte  conversation|-  raison ».
 # data/launches/<pid> : le serveur y lit sur quel compte tourne chaque processus (exec garde le pid)
 # et épingle les conversations neuves. data/launches.log : l'historique, pour comprendre après coup.
+# Troisième argument « annexe » : pas de fiche de processus (ce n'est pas une conversation).
 vigie_log() {
   [ -n "$DATA" ] && [ -d "$DATA" ] || return 0
   local f="$DATA/launches.log" sz line
   line="$(/bin/date +%s)	$$	$1	${V_SID:--}	$2"
-  [ -d "$DATA/launches" ] || /bin/mkdir -p "$DATA/launches" 2>/dev/null
-  printf '%s\n' "$line" > "$DATA/launches/$$" 2>/dev/null
+  if [ "$3" != annexe ]; then
+    [ -d "$DATA/launches" ] || /bin/mkdir -p "$DATA/launches" 2>/dev/null
+    printf '%s\n' "$line" > "$DATA/launches/$$" 2>/dev/null
+  fi
   if [ -f "$f" ]; then
     sz=$(/usr/bin/stat -f %z "$f" 2>/dev/null)
     if [ "${sz:-0}" -gt 262144 ] 2>/dev/null; then
@@ -192,10 +246,13 @@ DATA=$(vigie_data 2>/dev/null) || DATA=""
 
 if vigie_route "$@"; then
   vigie_log "$V_ACC" "$V_WHY"
-  if [ -n "$V_DIR" ]; then export CLAUDE_CONFIG_DIR="$V_DIR"; fi
+  # Travail 1 = ~/.claude : une variable héritée (VS Code lancé depuis un terminal de compte) n'a rien à faire ici.
+  if [ -n "$V_DIR" ]; then export CLAUDE_CONFIG_DIR="$V_DIR"; else unset CLAUDE_CONFIG_DIR; fi
   if [ "$V_CONN" = off ]; then export ENABLE_CLAUDEAI_MCP_SERVERS=false; fi
   if [ "$V_REWRITE" = 1 ]; then exec "$bin" "${V_ARGS[@]}"; fi
   exec "$bin" "$@"
 fi
 if [ "$V_KIND" = conv ]; then vigie_log "$MAIN" "${V_WHY:-repli}"; fi
+# Appel annexe : sur Travail 1, sauf si l'extension elle-même tourne avec un autre dossier (compte alors inconnu).
+if [ "$V_KIND" = annexe ]; then vigie_log "$([ -z "$CLAUDE_CONFIG_DIR" ] && printf %s "$MAIN" || printf -)" "$V_WHY" annexe; fi
 exec "$bin" "$@"

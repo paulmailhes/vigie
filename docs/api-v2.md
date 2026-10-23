@@ -14,8 +14,9 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
   "email": "alex@studio-exemple.fr",        // ? inconnu tant que le compte n'est pas connecté
   "expectedEmail": "alex@studio-exemple.fr",  // ? adresse prévue pour ce compte
   "wrongAccount": false,            // true si connecté avec une autre adresse que celle prévue : l'app le signale
-  "connected": true,
-  "isDefault": true,                // compte des nouvelles conversations
+  "connected": true,                // d'après le coffre des connexions s'il a un état frais (contenu du trousseau), sinon l'entrée existe
+  "login": { "state": "ok", "since": "2026-10-23T08:20:30.000Z", "restoredAt": null }, // ? vu par le coffre (voir plus bas)
+  "isDefault": true,                // compte des nouvelles conversations (et de celles jamais associées)
   "usage": {
     "session":   { "pct": 100, "resetsAt": "2026-10-20T00:40:00.000Z" },   // ? fenêtre de 5 h
     "week":      { "pct": 39,  "resetsAt": "2026-10-26T19:00:00.000Z" },   // ?
@@ -249,6 +250,15 @@ Valeurs vérifiées (sinon 400, rien n'est écrit) : booléens stricts ; `questi
 
 ### Comptes (champs ajoutés par le module des comptes)
 `AccountSummary` peut porter `expectedEmail` (? adresse prévue pour ce compte) et `wrongAccount` (connecté avec une autre adresse que celle prévue).
+
+### Connexions (coffre, `lib/vault.mjs`, 2026-10-23)
+`AccountSummary.login` (null sans état de moins de 15 min) : `state` = `ok` | `restored` (remise par Vigie à ce passage) | `restoring` (perdue, remise en cours) | `lost` (perdue, rien à remettre) | `dead` (refusée par Anthropic : jetons vidés par Claude Code) | `logged-out` | `unknown` (trousseau illisible à ce passage : `connected` garde la dernière valeur connue) ; `since` (? début de cet état) ; `restoredAt` (? dernière remise).
+
+Le coffre publie `data/connexions.json` toutes les 20 s, lu par le lanceur : `{ v: 1, checkedAt, checkedAtEpoch, accounts: { <id>: { connected, state, since, restoredAt, email } }, codex }`. Jamais rien de secret.
+
+Dans « À regarder » (`toReview`, `kind: "waiting"`) : `cx:<compte>:<état>` (« <compte> : à reconnecter » ; `lost`, `dead`, `restoring` depuis plus de 2 min, et le compte du Mac s'il est `logged-out`), `cf:<conversation>:<compte>` (« Partie sur <compte> » : conversation ouverte lancée sur un autre compte que le sien, qui n'était pas connecté). `engine.notices` : « Connexion de <compte> remise par Vigie à HH:MM… » pendant une heure.
+
+Journal du lanceur (`data/launches.log`), raisons nouvelles : `sans-choix` (reprise jamais associée : compte des nouvelles conversations), `repli:<voulu>:<raison>` (compte voulu inutilisable : `non-connecte`, `historique-non-relie`, `dossier-absent`, `chemin`, `compte-inconnu`), `connexion-du-mac` (compte du Mac déconnecté : une conversation neuve part dessus pour que la connexion de VS Code l'atteigne), `deconnexion` / `connexion` (`auth logout` / `auth login` de l'extension, sans fiche de processus).
 
 ## Ajouts du 2026-10-20 (retours de l'utilisateur, tour 2)
 

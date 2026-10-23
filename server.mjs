@@ -11,7 +11,8 @@ import { spawn } from 'node:child_process';
 import { Indexer, actionKind, maskSecrets } from './lib/indexer.mjs';
 import { createCodex } from './lib/codex.mjs';
 import { createConversations } from './lib/conversations.mjs';
-import { createAccounts, MAIN_ID } from './lib/accounts.mjs';
+import { createAccounts, MAIN_ID, chosenAccount } from './lib/accounts.mjs';
+import { createVault, createKeychain } from './lib/vault.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
@@ -35,9 +36,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_BIN = process.env.VIGIE_OPEN_BIN || '/usr/bin/open';
 const OSASCRIPT = process.env.VIGIE_OSASCRIPT || '/usr/bin/osascript';
 const PBCOPY = process.env.VIGIE_PBCOPY || '/usr/bin/pbcopy';
-// État réel des MCP (`claude mcp list`) : premier relevé 20 s après le démarrage, puis toutes les 10 min.
+// État réel des MCP (`claude mcp list`) : premier relevé quand le Mac est calme (voir calm), puis toutes les 20 min.
+// Chaque relevé lance un Claude Code par compte et par dossier, qui peut renouveler des jetons : pas plus souvent.
 const MCP_CHECK = process.env.VIGIE_MCP_CHECK !== '0';
-const MCP_CHECK_EVERY_MS = 10 * 60_000, MCP_CHECK_FIRST_MS = 20_000;
+const MCP_CHECK_EVERY_MS = 20 * 60_000, MCP_CHECK_FIRST_MS = 20_000;
+// Coffre des connexions (lib/vault.mjs) : passage toutes les 20 s.
+const VAULT_EVERY_MS = 20_000;
 
 process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée :', clean(e)));
 
@@ -53,6 +57,20 @@ const desktop = createDesktop({ home: accounts.paths.home });
 // (les tests lancent le moteur sur un port libre).
 const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`) });
 const HOME = accounts.paths.home;
+// Coffre des connexions : copie chiffrée de la connexion de chaque compte, remise si une app la perd (lib/vault.mjs).
+// Le vrai trousseau seulement sur le vrai dossier perso (jamais pendant les tests), sinon un faux security
+// (VIGIE_SECURITY_BIN) ; VIGIE_NO_VAULT le coupe.
+const SECURITY_BIN = (() => {
+  if (process.env.VIGIE_NO_VAULT) return null;
+  if (process.env.VIGIE_SECURITY_BIN) return process.env.VIGIE_SECURITY_BIN;
+  let real = '';
+  try { real = os.userInfo().homedir; } catch { real = os.homedir(); }
+  return path.resolve(HOME) === path.resolve(real) ? '/usr/bin/security' : null;
+})();
+const vault = SECURITY_BIN ? createVault({
+  dataDir: DATA, home: HOME, codexHome: codex.paths.codexHome, keychain: createKeychain({ bin: SECURITY_BIN }),
+  accounts: () => accounts.load().accounts.map((a) => ({ id: a.id, label: a.label, configDir: a.configDir, expectedEmail: a.expectedEmail })),
+}) : null;
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
 const mcp = createMcp({
   home: HOME,
@@ -60,6 +78,7 @@ const mcp = createMcp({
   accounts: () => accounts.load().accounts.map((a) => ({ id: a.id, label: a.label, configDir: a.configDir, claudeJsonPath: claudeJsonPath(a) })),
   usage: () => mcpUsage(),
   checkPaths: () => mcpCheckPaths(),
+  canCheck: (a) => accounts.connected(a.id),
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
@@ -328,7 +347,7 @@ function usageSeries(url) {
     const running = indexer.live.has(s.id);
     if (!running && !(String(s.lastTs || '') >= cutoff)) continue;
     if (!running && conv.isThrowaway(s.id)) continue;
-    const accountId = ctx.model.sessions[s.id] || MAIN_ID;
+    const accountId = chosenAccount(ctx.model, s.id);
     const w = weekInfo(ctx, accountId);
     const b = indexer.usageBuckets(s, from, stepMin, SERIES_POINTS, w ? w.org : undefined);
     const sum = sums.get(s.id);
@@ -480,6 +499,51 @@ function limitResetAt(text, ts) {
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
 const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office', 'sous-agent': 'Refusée (demandée par un agent)', echec: 'Autorisée, mais elle a échoué' };
 
+// ---------- connexions des comptes (coffre, lib/vault.mjs) ----------
+const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+// « À regarder » : un compte à reconnecter (sa connexion a disparu sans copie à remettre, ou Anthropic l'a refusée,
+// ou la remise traîne), le compte du Mac déconnecté (VS Code dit « déconnecté » partout sans lui), une conversation
+// ouverte partie sur un autre compte parce que le sien ne marchait pas.
+function connectionItems(ctx, title) {
+  const out = [];
+  const label = (id) => ctx.accSums.find((a) => a.id === id)?.label || id;
+  const fix = 'Dans Comptes, « Connecter » ouvre la page de connexion sur ce compte.';
+  for (const a of ctx.accSums) {
+    const st = a.login?.state;
+    const main = a.id === MAIN_ID;
+    const since = a.login?.since || new Date(ctx.now).toISOString();
+    const why = st === 'dead' ? 'Anthropic a refusé sa connexion'
+      : st === 'lost' ? 'Sa connexion a disparu et Vigie n\'avait pas de quoi la remettre'
+      : st === 'restoring' && ctx.now - Date.parse(since) > 2 * 60_000 ? 'Sa connexion a disparu et Vigie n\'arrive pas à la remettre'
+      : st === 'logged-out' && main ? 'Il n\'est pas connecté' : null;
+    if (!why) continue;
+    out.push({ id: `cx:${a.id}:${st}`, kind: 'waiting', conversationId: null, conversationTitle: a.label,
+      title: `${a.label} : à reconnecter`,
+      detail: `${why}. ${main ? 'C\'est le compte du Mac : sans lui, VS Code affiche « déconnecté » dans toutes ses fenêtres.' : 'Ses conversations partent sur un autre compte en attendant.'} ${fix}`,
+      ts: since });
+  }
+  let falls = [];
+  try { falls = accounts.fallbacks(indexer.live); } catch { /* journal du lanceur illisible */ }
+  for (const f of falls) {
+    out.push({ id: `cf:${f.sessionId}:${f.running}`, kind: 'waiting', conversationId: f.sessionId, conversationTitle: title(f.sessionId),
+      title: `Partie sur ${label(f.running)}`,
+      detail: `${label(f.wanted)} ${f.why === 'non-connecte' ? 'n\'était pas connecté' : 'ne pouvait pas servir'} quand elle a démarré. Elle reprendra sur ${label(f.wanted)} quand il sera reconnecté (au prochain démarrage de la conversation).`,
+      ts: new Date(Number(indexer.live.get(f.sessionId)?.startedAt) || ctx.now).toISOString() });
+  }
+  return out;
+}
+// Connexions remises par le coffre dans l'heure : un mot dans la vue d'ensemble.
+function connectionNotices(sums) {
+  const out = [];
+  const recent = (iso) => typeof iso === 'string' && Date.now() - Date.parse(iso) < HOUR;
+  for (const a of sums) {
+    if (recent(a.login?.restoredAt)) out.push(`Connexion de ${a.label} remise par Vigie à ${hhmm(a.login.restoredAt)} : elle avait disparu sans que tu te déconnectes.`);
+  }
+  const cx = vault?.status()?.codex;
+  if (recent(cx?.restoredAt)) out.push(`Connexion de Codex remise par Vigie à ${hhmm(cx.restoredAt)} : son fichier de connexion était abîmé.`);
+  return out;
+}
+
 // « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui a mal tourné ces dernières 24 h.
 // Chaque garde-fou porte de quoi décider ou refaire l'action : state, pendingId, expiresAt, rule, command
 // (masquée, 4000 caractères au plus), byAgent, cwd, needsPassword.
@@ -543,6 +607,7 @@ function reviewItems(ctx, sums) {
     live.push({ id: `s:${n.sessionId}:${n.ts}`, kind: 'waiting', conversationId: n.sessionId, conversationTitle: title(n.sessionId),
       title: 'Compte changé', detail: n.message, ts: n.ts });
   }
+  for (const item of connectionItems(ctx, title)) live.push(item);
   for (const r of questions.toReview()) if (!conv.isThrowaway(r.sessionId)) past.push(reviewEntry(r, title(r.sessionId)));
   // Refusées ou ratées ces dernières 24 h, à faire soi-même (un refus de l'utilisateur depuis l'app n'en est pas une).
   for (const b of recentBlocked({ history, since: ctx.reviewSince, limit: MAX_REVIEW })) {
@@ -618,7 +683,7 @@ function cardFailures(sid, now) {
 function decorate(sum, ctx, needs, accepted) {
   const eff = effective(ctx.state, sum.id);
   const ov = Object.hasOwn(ctx.state.sessions, sum.id) ? ctx.state.sessions[sum.id] : null;
-  const accountId = ctx.model.sessions[sum.id] || MAIN_ID; // sans choix noté, le lanceur la reprend sur Travail 1
+  const accountId = chosenAccount(ctx.model, sum.id); // sans choix noté : le compte des nouvelles conversations, comme le lanceur
   const waits = ctx.waits.get(sum.id) || [];
   let status = sum.status;
   if (sum.running && waits.some((w) => !w.question)) status = 'blocked';
@@ -700,7 +765,7 @@ function overviewV2() {
     accounts: withCodexAccount(ctx.accSums),
     conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
-    engine: { indexing: !indexer.progress.done, wrapperActive: ctx.wrapperActive, notices: healthNotices },
+    engine: { indexing: !indexer.progress.done, wrapperActive: ctx.wrapperActive, notices: [...healthNotices, ...connectionNotices(ctx.accSums)] },
     update: updater.status(),
   };
 }
@@ -1519,12 +1584,39 @@ const server = http.createServer((req, res) => {
 });
 
 // ---------- tâches de fond ----------
+// Le Mac est-il calme ? Pas pendant ses 5 premières minutes, ni dans les 2 minutes qui suivent le démarrage du moteur,
+// ni dans la minute qui suit le lancement d'une conversation : c'est là que les conversations de VS Code renouvellent
+// toutes leurs jetons. Les relevés automatiques de Vigie (usage, MCP), qui lancent eux aussi Claude Code, attendent
+// (2026-10-23 : relevés et conversations ensemble au démarrage, trousseau saturé, comptes déconnectés).
+// Réveil après une veille : même tempête qu'au démarrage (jetons expirés pendant la nuit), alors que os.uptime()
+// compte le temps de veille. Repéré à un trou de plus d'une minute entre deux tours de la boucle (toutes les 4 s).
+const ENGINE_STARTED = Date.now();
+let lastTickAt = Date.now(), wokeAt = 0;
+function noteTick() {
+  const t = Date.now();
+  if (t - lastTickAt > 60_000) wokeAt = t;
+  lastTickAt = t;
+}
+function calm() {
+  if (process.env.VIGIE_CALM === '1') return true;
+  if (os.uptime() < 300 || Date.now() - ENGINE_STARTED < 120_000 || Date.now() - wokeAt < 300_000) return false;
+  try { if (Date.now() - fs.statSync(path.join(DATA, 'launches.log')).mtimeMs < 60_000) return false; } catch { /* aucun lancement noté */ }
+  return true;
+}
+// Coffre des connexions : un passage à la fois, le premier dès le démarrage (c'est là que les connexions se perdent).
+let vaultBusy = false;
+async function vaultTick() {
+  if (!vault || vaultBusy) return;
+  vaultBusy = true;
+  try { await vault.sync(); } catch (e) { console.error('[vigie] coffre :', clean(e)); } finally { vaultBusy = false; }
+}
 let healthNotices = [];
 let switchNotices = []; // bascules appliquées : L'utilisateur doit envoyer un message pour relancer la conversation
 let ticking = false;
 let lastHealth = 0;
 let nextMcpCheck = Date.now() + MCP_CHECK_FIRST_MS;
 async function tick() {
+  noteTick(); // avant le garde : un tour long n'est pas pris pour une veille
   if (ticking) return;
   ticking = true;
   try { readHistory(); await indexer.refresh(); } catch (e) { console.error('[vigie] indexation :', clean(e)); }
@@ -1542,12 +1634,12 @@ async function tick() {
     if (Date.now() - lastHealth > 60_000) {
       lastHealth = Date.now();
       healthNotices = accounts.health().notices || [];
-      accounts.autoRefresh();
+      accounts.autoRefresh({ calm: calm() });
     }
   } catch (e) { console.error('[vigie] comptes :', clean(e)); }
-  // État réel des MCP (`claude mcp list`, aucune requête au modèle) : en fond, un relevé à la fois.
+  // État réel des MCP (`claude mcp list`, aucune requête au modèle) : en fond, un relevé à la fois, Mac calme.
   try {
-    if (MCP_CHECK && Date.now() >= nextMcpCheck) {
+    if (MCP_CHECK && Date.now() >= nextMcpCheck && calm()) {
       nextMcpCheck = Date.now() + MCP_CHECK_EVERY_MS;
       if (!mcp.healthState().running) mcp.checkHealth().catch((e) => console.error('[vigie] MCP :', clean(e)));
     }
@@ -1580,6 +1672,8 @@ function ensureWrapper() {
 server.listen(PORT, HOST, () => {
   console.log(`[vigie] http://${HOST}:${server.address().port}`);
   ensureWrapper();
+  vaultTick();
+  setInterval(vaultTick, VAULT_EVERY_MS);
   tick();
   setInterval(tick, 4000);
   setTimeout(updateTick, 60_000);
