@@ -30,11 +30,16 @@ const rj = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 // --- faux /usr/bin/security ---
 w(SEC, `#!${process.execPath}
 const fs = require('fs');
-const KC = ${JSON.stringify(KC)}, CTL = ${JSON.stringify(CTL)}, CALLS = ${JSON.stringify(CALLS)};
+const KC = ${JSON.stringify(KC)}, CTL = ${JSON.stringify(CTL)}, CALLS = ${JSON.stringify(CALLS)}, STAMPS = ${JSON.stringify(KC)} + '.dates';
 const ctl = (() => { try { return JSON.parse(fs.readFileSync(CTL, 'utf8')); } catch { return {}; } })();
 const load = () => { try { return JSON.parse(fs.readFileSync(KC, 'utf8')); } catch { return {}; } };
 const save = (db) => fs.writeFileSync(KC, JSON.stringify(db, null, 2));
+// dates de création et de modification, à la seconde (comme le vrai), une heure dans le passé
+const stamps = () => { try { return JSON.parse(fs.readFileSync(STAMPS, 'utf8')); } catch { return { n: 0 }; } };
+const stampOf = (k) => stamps()[k] || { c: 0, m: 0 };
+const iso = (n) => new Date(Date.UTC(2026, 9, 25, 10, 0, 0) + n * 1000).toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z';
 fs.appendFileSync(CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
+function bump(k, created) { const t = stamps(); t.n++; t[k] = { c: created || !t[k] ? t.n : t[k].c, m: t.n }; fs.writeFileSync(STAMPS, JSON.stringify(t)); }
 function opt(args, f) { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; }
 function run(args) {
   const cmd = args[0];
@@ -45,9 +50,13 @@ function run(args) {
     if (ctl.failRead) return 1;
     if (!key) return 44;
     if (args.includes('-w')) {
+      if (ctl.blockSecretMs) wait(ctl.blockSecretMs); // fenêtre de mot de passe restée ouverte
       const v = db[key];
       process.stdout.write((ctl.hexOut ? Buffer.from(v, 'utf8').toString('hex') : v) + '\\n');
-    } else process.stdout.write('keychain: "login.keychain-db"\\n');
+    } else {
+      const st = stampOf(key);
+      process.stdout.write('keychain: "login.keychain-db"\\nattributes:\\n    "cdat"<timedate>=0x00  "' + iso(st.c) + '\\\\000"\\n    "mdat"<timedate>=0x00  "' + iso(st.m) + '\\\\000"\\n');
+    }
     return 0;
   }
   if (cmd === 'add-generic-password') {
@@ -58,6 +67,7 @@ function run(args) {
     if (key) delete db[key];
     db[JSON.stringify([a, s])] = v;
     save(db);
+    bump(JSON.stringify([a, s]), !key);
     return 0;
   }
   if (cmd === 'delete-generic-password') { if (!key) return 44; delete db[key]; save(db); return 0; }
@@ -89,7 +99,9 @@ process.exit(run(argv));
 const setCtl = (o = {}) => wj(CTL, o);
 const kc = () => { try { return rj(KC); } catch { return {}; } };
 const kcGet = (service, account = 'alex') => kc()[JSON.stringify([account, service])];
-const kcSet = (service, value, account = 'alex') => { const db = kc(); db[JSON.stringify([account, service])] = typeof value === 'string' ? value : JSON.stringify(value); wj(KC, db); };
+// une écriture faite par une app : change la date de modification, comme le vrai trousseau
+const kcStamp = (k, created) => { let t; try { t = rj(`${KC}.dates`); } catch { t = { n: 0 }; } t.n++; t[k] = { c: created || !t[k] ? t.n : t[k].c, m: t.n }; wj(`${KC}.dates`, t); };
+const kcSet = (service, value, account = 'alex') => { const db = kc(); const k = JSON.stringify([account, service]); const created = !(k in db); db[k] = typeof value === 'string' ? value : JSON.stringify(value); wj(KC, db); kcStamp(k, created); };
 const kcDel = (service, account = 'alex') => { const db = kc(); delete db[JSON.stringify([account, service])]; wj(KC, db); };
 const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 setCtl();
@@ -449,4 +461,52 @@ test('plafond des remises gardé d\'un démarrage du moteur à l\'autre', async 
   assert.equal(rj(STATUS).accounts.travail1.restores.length, 1);
   clock += 3_600_000;
   assert.equal((await v.sync()).accounts.travail1.state, 'restored', 'une heure plus tard : perte toujours constatée, remise');
+});
+
+// --- moins de lectures du secret (2026-10-25 : chaque lecture peut ouvrir une fenêtre de mot de passe) ---
+const secretReads = (from) => calls().slice(from).filter((c) => c[0] === 'find-generic-password' && c.includes('-w') && String(c[c.indexOf('-s') + 1]).startsWith('Claude Code-credentials')).length;
+
+test('rien ne bouge dans le trousseau : le secret n\'est pas relu à chaque passage (seulement la date de l\'entrée)', async () => {
+  await resetVault();
+  await tick2();
+  let from = calls().length;
+  for (let i = 0; i < 5; i++) assert.equal((await tick2()).accounts.travail1.state, 'ok');
+  assert.equal(secretReads(from), 0, 'aucune lecture du secret quand l\'entrée n\'a pas changé');
+  assert.ok(calls().slice(from).some((c) => c[0] === 'find-generic-password' && !c.includes('-w')), 'la date de l\'entrée est bien regardée');
+  // Claude Code renouvelle la connexion : l'entrée change, elle est relue une fois et copiée
+  from = calls().length;
+  kcSet(ITEM_PRO, { claudeAiOauth: login('pro-renouvele') });
+  assert.equal((await tick2()).accounts.pro.state, 'ok');
+  assert.equal(secretReads(from), 1);
+  // la remise rend bien cette connexion-là
+  kcSet(ITEM_PRO, {});
+  await tick2();
+  await tick2();
+  assert.deepEqual(JSON.parse(kcGet(ITEM_PRO)).claudeAiOauth, login('pro-renouvele'));
+  // par prudence, relue au moins toutes les 10 min même sans changement
+  from = calls().length;
+  clock += 11 * 60_000;
+  await tick2();
+  assert.ok(secretReads(from) >= 1);
+});
+
+test('lecture du secret bloquée (fenêtre de mot de passe ouverte) : une tentative, puis plus rien pendant 15 min', async () => {
+  await resetVault();
+  const slowKc = createKeychain({ bin: SEC, user: 'alex', timeoutMs: 800 });
+  const B = createVault({ dataDir: DATA, home: HOME, accounts: () => ACCOUNTS, codexHome: null, keychain: slowKc, now: () => clock, log: (m) => logs.push(m), confirmMs: 15_000, lockWaitMs: 400 });
+  await B.sync();
+  kcSet(ITEM_T1, { claudeAiOauth: login('t1-z'), ...mcpPart }); // changée : il faudra la relire
+  setCtl({ blockSecretMs: 2000 });
+  let st = await B.sync();
+  assert.equal(st.accounts.travail1.state, 'unknown');
+  assert.ok(logs.some((l) => /mot de passe/.test(l)), logs.slice(-3).join('\n'));
+  const from = calls().length;
+  for (let i = 0; i < 5; i++) { clock += 20_000; st = await B.sync(); }
+  const t1Reads = calls().slice(from).filter((c) => c.includes('-w') && c[c.indexOf('-s') + 1] === ITEM_T1).length;
+  assert.equal(t1Reads, 0, 'plus aucune lecture de cette entrée : pas une fenêtre de plus');
+  assert.equal(st.accounts.pro.state, 'ok', 'les autres comptes continuent');
+  setCtl();
+  clock += 16 * 60_000;
+  st = await B.sync();
+  assert.equal(st.accounts.travail1.state, 'ok', 'un quart d\'heure plus tard : relue normalement');
 });
