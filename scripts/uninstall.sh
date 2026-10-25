@@ -80,6 +80,7 @@ if [ "${1:-}" = "--tout" ]; then
   if [ -z "$DRY" ]; then
     while security delete-generic-password -s "Vigie MCP" >/dev/null 2>&1; do :; done
     while security delete-generic-password -s "Vigie connexions" >/dev/null 2>&1; do :; done
+    while security delete-generic-password -s "0 Vigie - leurre - ne pas supprimer" >/dev/null 2>&1; do :; done
   fi
   run rm -f "$HOME/Library/Logs/Vigie-installation.log"
   case "$ROOT" in

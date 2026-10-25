@@ -510,3 +510,22 @@ test('lecture du secret bloquée (fenêtre de mot de passe ouverte) : une tentat
   st = await B.sync();
   assert.equal(st.accounts.travail1.state, 'ok', 'un quart d\'heure plus tard : relue normalement');
 });
+
+// --- leurre (2026-10-25) : une app qui cherche « l'entrée du compte <utilisateur> » sans préciser le service
+// (Nextcloud, dont l'utilisateur porte le même nom que la session) prend la première par ordre alphabétique du
+// service : celle de Claude Code. Le leurre passe devant.
+test('leurre devant les entrées de Claude Code : posé, recréé s\'il disparaît, jamais lu', async () => {
+  const { SHIELD_SERVICE } = await import('../lib/vault.mjs');
+  assert.ok(SHIELD_SERVICE < ITEM_T1 && SHIELD_SERVICE < ITEM_PRO, 'il passe avant dans l\'ordre alphabétique');
+  await resetVault();
+  assert.ok(kcGet(SHIELD_SERVICE) !== undefined, 'posé au compte de la session');
+  assert.ok(!kcGet(SHIELD_SERVICE).includes('acces-'), 'rien d\'utile dedans');
+  kcDel(SHIELD_SERVICE);
+  const from = calls().length;
+  await tick2();
+  assert.ok(kcGet(SHIELD_SERVICE) !== undefined, 'recréé');
+  await tick2();
+  assert.ok(!calls().slice(from).some((c) => c.includes('-w') && c[c.indexOf('-s') + 1] === SHIELD_SERVICE), 'son contenu n\'est jamais lu');
+  const writes = calls().slice(from).filter((c) => c[0] === '-i').length;
+  assert.equal(writes, 1, 'une seule écriture : il n\'est recréé que s\'il manque');
+});
