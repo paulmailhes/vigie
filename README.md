@@ -74,6 +74,8 @@ Les copies sont chiffrées (AES-256-GCM) dans `~/.vigie/data/coffre`. Leur clé 
 
 Au démarrage du Mac, Vigie attend que tout soit calme avant ses propres relevés (crédits, MCP), qui lancent eux aussi Claude Code. Il les fait alors un compte à la fois.
 
+Avec Nextcloud installé, Vigie pose aussi une entrée vide dans le trousseau, « 0 Vigie - leurre - ne pas supprimer ». Le client Nextcloud pour Mac a un bug ([nextcloud/desktop#10976](https://github.com/nextcloud/desktop/issues/10976)) : quand ton identifiant Nextcloud est ton nom de session, il écrase au démarrage la première entrée du trousseau à ton nom, celle de Claude Code. macOS te demande alors ton mot de passe à chaque lecture, puis la connexion se perd. Le leurre passe devant et c'est lui que Nextcloud prend. Sans Nextcloud, Vigie ne pose rien.
+
 ## Une conversation
 
 ![Une conversation](docs/images/conversation.png)

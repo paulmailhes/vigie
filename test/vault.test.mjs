@@ -106,8 +106,9 @@ const kcDel = (service, account = 'alex') => { const db = kc(); delete db[JSON.s
 const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 setCtl();
 
-// --- décor : Travail 1 (~/.claude) et un compte Pro dans son dossier ---
+// --- décor : Travail 1 (~/.claude) et un compte Pro dans son dossier ; Nextcloud installé (leurre nécessaire) ---
 fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
+fs.mkdirSync(path.join(HOME, 'Applications', 'Nextcloud.app'), { recursive: true });
 const PRO = path.join(ACC, 'pro');
 fs.mkdirSync(PRO, { recursive: true });
 const ITEM_T1 = keychainItem(null);
@@ -528,4 +529,17 @@ test('leurre devant les entrées de Claude Code : posé, recréé s\'il dispara�
   assert.ok(!calls().slice(from).some((c) => c.includes('-w') && c[c.indexOf('-s') + 1] === SHIELD_SERVICE), 'son contenu n\'est jamais lu');
   const writes = calls().slice(from).filter((c) => c[0] === '-i').length;
   assert.equal(writes, 1, 'une seule écriture : il n\'est recréé que s\'il manque');
+});
+
+test('leurre : rien sans Nextcloud, pas même un regard au trousseau', async () => {
+  const { SHIELD_SERVICE } = await import('../lib/vault.mjs');
+  kcDel(SHIELD_SERVICE);
+  const bare = createVault({ dataDir: path.join(TMP, 'data sans nextcloud'), home: path.join(TMP, 'maison vide'), accounts: () => [],
+    codexHome: null, keychain, now: () => clock, log: () => {}, appDirs: [path.join(TMP, 'maison vide', 'Applications')] });
+  const from = calls().length;
+  await bare.sync();
+  await bare.sync();
+  assert.equal(kcGet(SHIELD_SERVICE), undefined, 'pas de leurre');
+  assert.ok(!calls().slice(from).some((c) => c.includes(SHIELD_SERVICE) || (c[0] === '-i')), 'aucun appel pour le leurre');
+  await resetVault();
 });
