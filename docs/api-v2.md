@@ -186,6 +186,7 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
 | `POST /api/v2/mcp/disable` | `{ path, name, disabled: bool }` | coupe ou rallume un MCP pour un projet |
 | `POST /api/v2/accounts` | `{ action: "create", label }`, `{ action: "rename", id, label }`, `{ action: "setDefault", id }`, `{ action: "connect", id }`, `{ action: "wrapper", enable: bool }`, `{ action: "refresh", id? }` | gestion des comptes ; refresh relève l'usage (session, semaine) du compte (ou de tous) par une requête minimale, au plus une fois toutes les 10 min par compte |
 | `POST /api/v2/agents/launch` | `{ id, values: { "<champ>": "texte" }, folder, files?, surface?, session? }` | prépare le dossier d'un agent (fichiers joints copiés, consigne écrite) et l'ouvre dans VS Code ou l'app Claude (voir « Agents » plus bas) |
+| `POST /api/v2/agents/libraries` | `{ action: "add", url }`, `{ action: "update", id? }`, `{ action: "remove", id }` | bibliothèques d'agents (dépôts git partagés) : ajout (clonage, jusqu'à 90 s), mise à jour, retrait (voir « Bibliothèques d'agents » plus bas) |
 
 `config` d'un MCP : la forme de Claude Code, `{ "type": "stdio", "command": "…", "args": [], "env": {} }` ou `{ "type": "http", "url": "…", "headers": {} }`.
 
@@ -440,9 +441,10 @@ L'utilisateur refuse : `POST /api/v2/approvals` `{ approvalId, decision: "deny" 
 
 ## Agents (2026-10-26, `lib/agents.mjs`, `lib/opener.mjs`)
 
-Un agent est une recette rangée dans `<données du moteur>/agents/<id>/AGENT.md` (`~/.vigie/data/agents`), format décrit
-dans [agents.md](agents.md). Le moteur lit la bibliothèque à chaque appel (rien en cache) et crée le dossier des agents
-s'il manque.
+Un agent est une recette rangée dans `<données du moteur>/agents/<id>/AGENT.md` (`~/.vigie/data/agents`), ou dans une
+bibliothèque d'agents (un dépôt git partagé, copié dans `<données du moteur>/agent-libraries/<id>/`, voir
+« Bibliothèques d'agents » plus bas), format décrit dans [agents.md](agents.md). Le moteur lit les agents à chaque appel
+(rien en cache, jamais git) et crée le dossier des agents s'il manque.
 
 ### GET /api/v2/agents
 
@@ -464,11 +466,31 @@ s'il manque.
       ],
       "mcp": [ { "name": "figma-pro", "status": "connected" } ],    // MCP nécessaires et leur état pour ce compte
       "creates": ["Le dossier du projet et sa documentation", "Le fichier Figma du projet"],  // ce que l'agent crée ([] si absent)
-      "error": null                                   // ? phrase si AGENT.md est illisible : agent listé mais pas lançable
+      "error": null,                                  // ? phrase si AGENT.md est illisible : agent listé mais pas lançable
+      "source": { "kind": "local" }                   // ou { "kind": "library", "id": "agents", "name": "agents" }
+    }
+  ],
+  "libraries": [                                      // bibliothèques d'agents, dans l'ordre d'ajout ([] si aucune)
+    {
+      "id": "agents",                                 // tiré du nom du dépôt : /^[a-z0-9][a-z0-9-]{0,63}$/, unique (agents-2…)
+      "name": "agents",                               // nom du dépôt, tel que dans l'adresse
+      "url": "https://github.com/studio/agents",
+      "addedAt": "2026-10-27T09:12:00.000Z",
+      "updatedAt": "2026-10-27T10:12:00.000Z",        // ? dernière mise à jour réussie
+      "commit": "a1b2c3d",                            // ? version de la copie (7 caractères)
+      "status": "ok",                                 // ok | updating | error
+      "error": null,                                  // ? phrase : la dernière mise à jour a échoué (la copie d'avant sert toujours)
+      "agents": 3                                     // agents de la copie
     }
   ]
 }
 ```
+- `source` : d'où vient l'agent. `local` : son dossier dans `dir`. `library` : une bibliothèque (`id`, `name` : ceux de
+  `libraries`). L'`id` d'un agent de bibliothèque est le nom de son dossier en minuscules sans accents
+  (`Créer une page` → `creer-une-page`) ; s'il est déjà pris (agent local, ou bibliothèque ajoutée avant) :
+  `<bibliothèque>-<dossier>`, puis `-2`, `-3`… (64 caractères au plus). Un agent local n'est jamais remplacé. L'id sert
+  au lancement et au brief (`agent-<id>.md`) comme pour un agent local.
+- Moteur plus ancien : ni `source` ni `libraries` (l'app ne montre pas la section Bibliothèques).
 - `surfaces.available` : dans cet ordre, `vscode` si VS Code est installé (`/Applications` ou `~/Applications`,
   « Visual Studio Code.app ») avec l'extension Claude Code (`~/.vscode/extensions/anthropic.claude-code-…`, ou celles
   de VS Code Insiders, Cursor, Windsurf), et `claude-app` si l'app Claude est installée. `chosen` : la dernière surface
@@ -609,3 +631,73 @@ facultatifs).
 | 400 | `Champ manquant : <label>` (obligatoire vide ou fait d'espaces) ; `<label> : texte attendu.` ; `<label> : trop long (2 000 caractères au plus).` ; `Valeurs du formulaire illisibles.` ; dossier refusé (`Choisis le dossier du projet.`, `Dossier refusé : …`, `Dossier impossible à préparer : …`) ; fichier joint refusé (tableau plus haut) ; surface absente ou inconnue ; conversation à reprendre qui n'est plus dans ce dossier ; `Cet agent ne peut pas être lancé : <erreur de son AGENT.md>` |
 | 404 | `Agent introuvable.` (id invalide, dossier ou `AGENT.md` absent) |
 Comme toute écriture : `X-Vigie-Token` (401) et `X-Vigie: 1` (403) obligatoires.
+
+## Bibliothèques d'agents (2026-10-27, `lib/libraries.mjs`)
+
+Une bibliothèque est un dépôt git (GitHub ou autre) qui contient un dossier par agent (`<dossier>/AGENT.md` et ses
+fichiers), cloné dans `<données du moteur>/agent-libraries/<id>/` (`0700`) et tenu à jour toutes les heures. Liste :
+`<données du moteur>/agent-libraries.json` (`0600`), `[{ id, url, addedAt, updatedAt, checkedAt, commit, error }]`.
+Guide de l'auteur et de l'équipe, et détail de la sécurité : [agents.md](agents.md), « Partager des agents : les
+bibliothèques ». Les agents d'une bibliothèque arrivent dans `GET /api/v2/agents` avec leur `source`, et la
+bibliothèque dans `libraries` (plus haut).
+
+### POST /api/v2/agents/libraries
+
+Comme toute écriture : `X-Vigie-Token` (401) et `X-Vigie: 1` (403) obligatoires. Une opération à la fois : une demande
+attend la fin de la précédente (ou d'une mise à jour de fond).
+
+| Corps | Réponse (200) |
+|---|---|
+| `{ "action": "add", "url": "https://github.com/studio/agents" }` | `{ ok: true, library: { …comme dans libraries… }, message: "Bibliothèque ajoutée : 3 agents." }` (« 1 agent » ; aucun : « Bibliothèque ajoutée, sans agent pour l'instant : chaque agent est un dossier du dépôt avec son AGENT.md. ») |
+| `{ "action": "update", "id": "agents" }` | `{ ok: true, libraries: [ … ], message: "Bibliothèque à jour : 3 agents." }` |
+| `{ "action": "update" }` | toutes, l'une après l'autre : `{ ok: true, libraries, message: "Bibliothèques à jour." }` (une seule : « Bibliothèque à jour : N agents. » ; aucune : « Aucune bibliothèque à mettre à jour. ») |
+| `{ "action": "remove", "id": "agents" }` | `{ ok: true, message: "Bibliothèque retirée." }` : l'entrée, puis la copie |
+
+- **add** : l'adresse est vérifiée, puis git (jusqu'à 90 s : délai client long) : `git clone --depth 1 --no-tags
+  --single-branch --no-recurse-submodules -c core.symlinks=false -c protocol.file.allow=never -c submodule.recurse=false
+  -c core.hooksPath=/dev/null -- <url> <agent-libraries/.<id>.<hasard>.tmp>`, puis la copie est mise en place sous
+  `<id>/`. L'`id` vient du nom du dépôt (minuscules, chiffres, tirets ; `-2`, `-3`… s'il est pris). 20 bibliothèques au
+  plus.
+- **update** : `git fetch --depth 1 --no-tags --no-recurse-submodules origin`, puis `git reset --hard FETCH_HEAD` (la
+  copie est en lecture seule pour Vigie : aucun conflit). Copie absente ou abîmée : clonée de nouveau. Échec : la copie
+  d'avant reste utilisée, `error` est gardée dans la liste (`status: "error"`), `updatedAt` et `commit` ne changent pas.
+  Pendant la mise à jour : `status: "updating"`.
+- Après chaque extraction : 10 000 fichiers au plus, et les liens symboliques du dépôt (extraits comme de simples
+  fichiers, `core.symlinks=false`) sont retirés de la copie.
+- **Chaque commande git** : `/usr/bin/git` (`VIGIE_GIT_BIN` pour les essais), sans shell, avec des arguments, 90 s au
+  plus (puis arrêtée avec ce qu'elle a lancé), précédée de `-c core.hooksPath=/dev/null -c core.symlinks=false -c
+  core.fsmonitor=false -c core.protectHFS=true -c core.protectNTFS=true -c protocol.allow=never -c
+  protocol.https.allow=always -c protocol.ssh.allow=always -c protocol.file.allow=never -c submodule.recurse=false -c
+  transfer.fsckObjects=true -c gc.auto=0 -c maintenance.auto=false -c credential.interactive=false`. Sur une copie :
+  `-C <copie> --git-dir=<copie>/.git --work-tree=<copie>`. Environnement : celui du moteur sans aucune variable `GIT_*`,
+  plus `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=`, `SSH_ASKPASS=`, `GIT_SSH_COMMAND="ssh -o BatchMode=yes"`,
+  `GCM_INTERACTIVE=never`, `GIT_LFS_SKIP_SMUDGE=1`, `GIT_CEILING_DIRECTORIES=<données du moteur>`, `LC_ALL=C`. Les
+  identifiants du Mac (trousseau, `gh`, agent SSH) servent tels quels.
+- **git absent** : `/usr/bin/git` n'est qu'un relais qui ouvrirait la fenêtre d'installation d'Apple ; il n'est lancé
+  que si le dossier des outils qu'il utiliserait (`DEVELOPER_DIR`, sinon le choix de `xcode-select`, sinon Xcode puis
+  `/Library/Developer/CommandLineTools`) contient `usr/bin/git`. Vu sans rien lancer.
+- **Mise à jour de fond** : toutes les 10 min, si le Mac est calme, les bibliothèques relevées il y a plus d'une heure
+  (`checkedAt`), une à la fois, en priorité basse (`os.setPriority`, 15). Silencieuse : l'erreur reste dans la liste.
+  Pas pendant les essais (`VIGIE_NO_UPDATE`).
+
+Erreurs (`{ "ok": false, "error": "…" }` ; pour `update`, avec `libraries`) :
+
+| Statut | Cas | Phrase |
+|---|---|---|
+| 400 | `action` inconnue | `Action : add, update ou remove.` |
+| 400 | adresse absente, `file://`, chemin du Mac, `ext::`, `http://`, `git://`, option (« - » en tête), espaces, caractère de contrôle ou hors ASCII, plus de 2 048 caractères, hôte local ou IP privée (`localhost`, `*.local`, `10.…`, `192.168.…`, `127.…`, `169.254.…`…), hôte qui se lirait comme une IP (`1.2.3`, `0x7f.1`), IPv6, chemin vide ou avec `..`, requête, ancre ; ssh avec un autre utilisateur que `git` | `Adresse refusée : colle l'adresse du dépôt (https://github.com/… ou git@github.com:…).` |
+| 400 | identifiant dans l'adresse (`https://alex:jeton@…`, `https://jeton@…`, `ssh://git:mot-de-passe@…`) | `N'écris pas d'identifiant dans l'adresse : git utilise ceux de ton Mac.` |
+| 400 | même dépôt déjà ajouté (même hôte et chemin, avec ou sans `.git`, en https ou en ssh, majuscules comprises) | `Cette bibliothèque est déjà là.` |
+| 400 | git absent | `git n'est pas installé sur ton Mac : installe les outils de développement (xcode-select --install), puis réessaie.` |
+| 400 | clonage refusé (dépôt introuvable, pas d'accès) | `Dépôt introuvable, ou git n'a pas accès : vérifie l'adresse, et que tu peux le cloner (gh auth login, ou ta clé SSH).` suivi de ` Git : « <ligne utile de git> »` (sans jeton ni mot de passe, 200 caractères au plus) |
+| 400 | mise à jour refusée | `Mise à jour impossible : dépôt introuvable, ou git n'a pas accès. Vérifie l'adresse, et que tu peux le cloner (gh auth login, ou ta clé SSH).` (+ la ligne de git) ; toutes : `<nom> : <phrase>`, ou `N bibliothèques pas à jour. <nom> : <phrase>` |
+| 400 | pas de réseau | `Pas de connexion au serveur du dépôt : vérifie ta connexion à internet, puis réessaie.` (mise à jour : `… Vigie réessaiera dans une heure.`) |
+| 400 | pas de réponse en 90 s | `Le dépôt n'a pas répondu en 90 s : vérifie ta connexion à internet, puis réessaie.` (mise à jour : `… Vigie réessaiera dans une heure.`) |
+| 400 | plus de 10 000 fichiers | `Dépôt trop gros pour une bibliothèque : 10 000 fichiers au plus. Garde dans ce dépôt les agents et leurs fichiers seulement.` |
+| 400 | 20 bibliothèques déjà | `20 bibliothèques au plus : retires-en une, puis réessaie.` |
+| 400 | disque | `Bibliothèque impossible à enregistrer : <disque plein / droits insuffisants / disque en lecture seule>. Libère de la place ou vérifie les droits de ~/.vigie, puis réessaie.` |
+| 404 | `id` inconnu (update, remove) | `Bibliothèque introuvable : elle a déjà été retirée. Rouvre la page Agents.` |
+
+Dans `libraries`, une copie effacée à la main donne `status: "error"`, `error: "Copie de la bibliothèque absente :
+clique sur « Mettre à jour » pour la récupérer."` et `agents: 0` ; une entrée de la liste dont l'adresse ne passe plus
+la vérification garde l'erreur d'adresse et n'est jamais donnée à git (elle se retire).
