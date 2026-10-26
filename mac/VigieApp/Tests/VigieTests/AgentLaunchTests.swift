@@ -249,7 +249,7 @@ struct AgentFormTests {
                         "fields": [ { "id": "brief", "type": "longtext" } ] },
                       { "id": "ancien" } ] }
         """
-        let library = try JSONDecoder().decode(AgentLibrary.self, from: Data(json.utf8))
+        let library = try JSONDecoder().decode(AgentsPage.self, from: Data(json.utf8))
         // une valeur inconnue (moteur plus récent) ou en double est ignorée
         #expect(library.surfaces?.available == [.vscode, .claudeApp])
         #expect(library.surfaces?.chosen == .claudeApp)
@@ -258,7 +258,7 @@ struct AgentFormTests {
         #expect(agent.dropField?.id == "brief")
         #expect(library.agents[1].creates.isEmpty)
         // moteur plus ancien : ni surfaces ni creates, la feuille marche quand même
-        let old = try JSONDecoder().decode(AgentLibrary.self, from: Data(#"{ "agents": [ { "id": "a" } ] }"#.utf8))
+        let old = try JSONDecoder().decode(AgentsPage.self, from: Data(#"{ "agents": [ { "id": "a" } ] }"#.utf8))
         #expect(old.surfaces == nil)
         #expect(old.agents.first?.willCreate == [])
     }

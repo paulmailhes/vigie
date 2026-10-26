@@ -1,16 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// Agents : les recettes prêtes à lancer, une par dossier (<dossier des agents>/<id>/AGENT.md). Une rangée par agent :
-/// ce qu'il fait, les MCP dont il a besoin et leur état, et « Lancer… » qui ouvre son formulaire.
+/// Agents : les recettes prêtes à lancer, une par dossier (<dossier des agents>/<id>/AGENT.md, ou un dossier d'une
+/// bibliothèque). Une rangée par agent : ce qu'il fait, d'où il vient, les MCP dont il a besoin et leur état, et
+/// « Lancer… » qui ouvre son formulaire. En dessous, les bibliothèques : des dépôts git tenus à jour par Vigie.
 struct AgentsView: View {
     @Environment(VigieStore.self) private var store
     @State private var launching: AgentInfo?
+    @State private var addingLibrary = false
+    /// La bibliothèque à retirer, en attente de confirmation.
+    @State private var removal: AgentLibraryInfo?
 
     var body: some View {
         Group {
             if let state = store.agentsState {
-                if state.agents.isEmpty {
+                if state.agents.isEmpty && (state.libraries ?? []).isEmpty {
                     empty(state)
                 } else {
                     content(state)
@@ -41,26 +45,63 @@ struct AgentsView: View {
         .sheet(item: $launching) { agent in
             AgentLaunchSheet(agent: agent)
         }
+        .sheet(isPresented: $addingLibrary) { AgentLibraryAddSheet() }
+        .confirmationDialog(removal.map { "Retirer la bibliothèque « \($0.displayName) » ?" } ?? "",
+                            isPresented: Binding { removal != nil } set: { if !$0 { removal = nil } },
+                            titleVisibility: .visible, presenting: removal) { library in
+            Button("Retirer", role: .destructive) {
+                Task { await store.removeAgentLibrary(library) }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: { library in
+            Text(removalMessage(library))
+        }
         .task(id: store.windowVisible) { await store.followAgents() }
     }
 
-    private func content(_ state: AgentLibrary) -> some View {
+    private func content(_ state: AgentsPage) -> some View {
         Form {
             Section {
                 ForEach(state.agents) { agent in
                     AgentRecipeRow(agent: agent) { launching = agent }
                 }
+                if state.agents.isEmpty { EmptyRow(text: "Aucun agent pour l'instant") }
             } header: {
                 MCPSectionHeader(title: "Tes agents",
                                  text: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.")
             } footer: {
                 footer(state)
             }
+
+            // moteur plus ancien, sans bibliothèques : rien
+            if let libraries = state.libraries {
+                Section {
+                    ForEach(libraries) { library in
+                        AgentLibraryRow(library: library, count: state.agentCount(of: library)) { removal = library }
+                    }
+                    if libraries.isEmpty { EmptyRow(text: "Aucune bibliothèque pour l'instant") }
+                } header: {
+                    MCPSectionHeader(title: "Bibliothèques",
+                                     text: "Des agents partagés par un dépôt git. Vigie les récupère et les tient à jour toutes les heures.")
+                } footer: {
+                    Button("Ajouter une bibliothèque…", systemImage: "plus") { addingLibrary = true }
+                        .glassButton()
+                        .help("Colle l'adresse d'un dépôt git : un dossier par agent, avec son AGENT.md")
+                        .padding(.top, 4)
+                }
+            }
         }
         .pageForm()
     }
 
-    private func footer(_ state: AgentLibrary) -> some View {
+    /// « Ses 3 agents disparaissent de Vigie. … »
+    private func removalMessage(_ library: AgentLibraryInfo) -> String {
+        let count = store.agentsState?.agentCount(of: library) ?? 0
+        let agents = count == 0 ? "" : count == 1 ? "Son agent disparaît de Vigie. " : "Ses \(Fmt.int(count)) agents disparaissent de Vigie. "
+        return agents + "Le dépôt et tes projets ne sont pas touchés : tu pourras l'ajouter de nouveau."
+    }
+
+    private func footer(_ state: AgentsPage) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let account = state.account, let name = account.displayName {
                 HStack(spacing: 6) {
@@ -80,7 +121,7 @@ struct AgentsView: View {
         .padding(.top, 4)
     }
 
-    private func empty(_ state: AgentLibrary) -> some View {
+    private func empty(_ state: AgentsPage) -> some View {
         ContentUnavailableView {
             Label("Aucun agent pour l'instant", systemImage: Icon.recipe)
         } description: {
@@ -94,6 +135,11 @@ struct AgentsView: View {
             Button("Ouvrir le dossier des agents", systemImage: "folder") { openFolder() }
                 .glassButton(.primary)
                 .disabled(state.dir == nil)
+            if state.libraries != nil {
+                Button("Ajouter une bibliothèque…", systemImage: "plus") { addingLibrary = true }
+                    .glassButton()
+                    .help("Colle l'adresse d'un dépôt git : un dossier par agent, avec son AGENT.md")
+            }
         }
     }
 
@@ -108,8 +154,8 @@ struct AgentsView: View {
     }
 }
 
-/// Un agent : icône, nom, ce qu'il fait, ses MCP et leur état, « Lancer… ». Son AGENT.md est illisible : la raison
-/// en rouge, et rien à lancer.
+/// Un agent : icône, nom, ce qu'il fait, sa bibliothèque (rien pour un agent local), ses MCP et leur état,
+/// « Lancer… ». Son AGENT.md est illisible : la raison en rouge, et rien à lancer.
 struct AgentRecipeRow: View {
     @Environment(VigieStore.self) private var store
     let agent: AgentInfo
@@ -126,6 +172,14 @@ struct AgentRecipeRow: View {
                         Text(description)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let library = agent.libraryName {
+                        Label("Bibliothèque \(library)", systemImage: Icon.library)
+                            .labelStyle(CompactLabelStyle())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 1)
+                            .help("Vient d'une bibliothèque : Vigie le tient à jour avec son dépôt")
                     }
                 }
                 if let problem = agent.problem {

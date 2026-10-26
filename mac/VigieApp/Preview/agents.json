@@ -18,7 +18,8 @@
       "fields": [],
       "mcp": [],
       "creates": [],
-      "error": "AGENT.md illisible : il manque la ligne « --- » qui ferme l'en-tête. Ouvre le fichier et ajoute-la."
+      "error": "AGENT.md illisible : il manque la ligne « --- » qui ferme l'en-tête. Ouvre le fichier et ajoute-la.",
+      "source": { "kind": "library", "id": "studio-agents", "name": "studio-agents" }
     },
     {
       "id": "demarrer-projet",
@@ -45,7 +46,45 @@
         "Les captures des sites de référence",
         "Le fichier Figma du projet, monté sur le modèle du studio"
       ],
-      "error": null
+      "error": null,
+      "source": { "kind": "library", "id": "studio-agents", "name": "studio-agents" }
+    },
+    {
+      "id": "revue-seo",
+      "name": "Revue SEO d'un site",
+      "description": "Les pages, les titres et les liens passés en revue, avec la liste des corrections",
+      "icon": "magnifyingglass",
+      "folder": "/Users/alex/Code",
+      "fields": [
+        {
+          "id": "site",
+          "label": "Adresse du site",
+          "type": "url",
+          "required": true,
+          "help": null,
+          "placeholder": "https://exemple.fr"
+        }
+      ],
+      "mcp": [],
+      "creates": [
+        "Le rapport, page par page",
+        "La liste des corrections à faire"
+      ],
+      "error": null,
+      "source": { "kind": "local" }
+    }
+  ],
+  "libraries": [
+    {
+      "id": "studio-agents",
+      "name": "studio-agents",
+      "url": "https://github.com/studio/studio-agents",
+      "addedAt": "2026-10-12T09:30:00.000Z",
+      "updatedAt": "2026-10-19T21:05:00.000Z",
+      "commit": "4f2a9c1",
+      "status": "error",
+      "error": "Dépôt introuvable, ou git n'a pas accès : vérifie l'adresse, et que tu peux le cloner (gh auth login, ou ta clé SSH).",
+      "agents": 2
     }
   ]
 }

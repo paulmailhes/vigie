@@ -11,6 +11,8 @@ enum Icon {
     static let agent = "person.2"
     /// Un agent de la page Agents (recette à lancer), à ne pas confondre avec les assistants d'une conversation.
     static let recipe = "wand.and.stars"
+    /// Une bibliothèque d'agents (un dépôt git, un dossier par agent).
+    static let library = "books.vertical"
     static let workflow = "point.3.connected.trianglepath.dotted"
     static let test = "checkmark.seal"
     static let testFailed = "xmark.octagon"

@@ -444,6 +444,64 @@ extension VigieStore {
         return outcome
     }
 
+    // MARK: Bibliothèques d'agents
+
+    /// Ajoute une bibliothèque : le moteur clone le dépôt (jusqu'à 90 s, délai long), puis la liste se relit. nil :
+    /// ajoutée, la feuille se ferme et le toast dit combien d'agents elle apporte ; sinon la phrase du moteur, que la
+    /// feuille montre et qui la garde ouverte (le toast de la fenêtre serait caché derrière elle).
+    func addAgentLibrary(url: String) async -> String? {
+        if isDemo {
+            show(info: "Démonstration : rien n'a été ajouté")
+            return nil
+        }
+        switch await send(AgentLibraryInfo.route, ["action": "add", "url": .string(url)], patient: true) {
+        case .success(let result):
+            show(info: result.message ?? "Bibliothèque ajoutée.")
+            await refreshAgents()
+            return nil
+        case .failure(let error):
+            return error.message
+        }
+    }
+
+    /// Met à jour une bibliothèque tout de suite (sinon, toutes les heures) : « en cours » à l'écran pendant l'attente,
+    /// puis la liste relue. Une mise à jour ratée garde la dernière bonne copie : la rangée dit pourquoi, en orange.
+    func updateAgentLibrary(_ library: AgentLibraryInfo) async {
+        guard !isDemo else { return }
+        setLibraryStatus(library.id, .updating)
+        let answer = await send(AgentLibraryInfo.route, ["action": "update", "id": .string(library.id)], patient: true)
+        if case .failure(let error) = answer {
+            show(error: error.message)
+            // rien n'a été tenté (moteur injoignable, refus) : l'état d'avant, sans attendre la relecture
+            setLibraryStatus(library.id, library.status, error: library.error)
+        }
+        await refreshAgents()
+    }
+
+    /// Retire une bibliothèque : sa rangée et ses agents disparaissent tout de suite, et reviennent si le moteur refuse.
+    func removeAgentLibrary(_ library: AgentLibraryInfo) async {
+        let before = agentsState
+        removingLibraries.insert(library.id)
+        patchAgents { $0 = $0.hiding(libraries: [library.id]) }
+        guard !isDemo else { return }
+        let answer = await send(AgentLibraryInfo.route, ["action": "remove", "id": .string(library.id)], patient: true)
+        removingLibraries.remove(library.id)
+        if case .failure(let error) = answer {
+            show(error: error.message)
+            if let before { patchAgents { $0 = before } }
+        }
+        await refreshAgents()
+    }
+
+    /// L'état d'une bibliothèque à l'écran (`updating` à la place de son erreur, l'erreur seulement en échec).
+    private func setLibraryStatus(_ id: String, _ status: AgentLibraryInfo.Status, error: String? = nil) {
+        patchAgents { state in
+            guard let index = state.libraries?.firstIndex(where: { $0.id == id }) else { return }
+            state.libraries?[index].status = status
+            if status != .updating { state.libraries?[index].error = error }
+        }
+    }
+
     // MARK: Outils
 
     /// Le résumé vivant (vue d'ensemble, toutes les 3 s), complété par le détail (branche, début…).
