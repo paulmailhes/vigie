@@ -87,8 +87,11 @@ final class VigieStore {
     private(set) var details: [String: ConversationDetailModel] = [:]
     private(set) var mcp: MCPState?
     private(set) var accountsState: AccountsState?
-    /// Les agents (recettes à lancer) et le compte sur lequel ils partiraient.
-    private(set) var agentsState: AgentLibrary?
+    /// Les agents (recettes à lancer), leurs bibliothèques et le compte sur lequel ils partiraient.
+    private(set) var agentsState: AgentsPage?
+    /// Bibliothèques retirées à l'instant, le moteur n'a pas encore répondu : cachées, même par une lecture partie
+    /// pendant l'attente (une écriture patiente laisse passer les lectures).
+    @ObservationIgnored var removingLibraries: Set<String> = []
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
     /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
@@ -355,9 +358,9 @@ final class VigieStore {
         if isDemo, agentsState != nil { return }
         let started = ContinuousClock.now
         do {
-            let state = try await client.get("/api/v2/agents", as: AgentLibrary.self)
+            let state = try await client.get("/api/v2/agents", as: AgentsPage.self)
             guard isFresh(started) else { return }
-            update(\.agentsState, state)
+            update(\.agentsState, state.hiding(libraries: removingLibraries))
             update(\.agentsProblem, nil)
             readSucceeded()
         } catch ClientError.refused(let text) {
@@ -513,8 +516,9 @@ final class VigieStore {
     }
 
     /// POST vers le moteur, avec son erreur : pour choisir quoi faire selon la raison d'un refus. `patient` : la
-    /// réponse peut tarder (lancer un agent, jusqu'à 30 s) ; rien n'est changé d'avance à l'écran, les relevés
-    /// continuent donc pendant l'attente au lieu d'être écartés.
+    /// réponse peut tarder (lancer un agent, jusqu'à 30 s ; ajouter une bibliothèque, jusqu'à 90 s) ; les relevés
+    /// continuent pendant l'attente au lieu d'être écartés (ce qui est changé d'avance à l'écran s'en protège seul,
+    /// comme `removingLibraries`).
     func send(_ path: String, _ body: JSONValue, patient: Bool = false) async -> Result<WriteResult, ClientError> {
         if !patient { writesInFlight += 1 }
         defer {
@@ -621,5 +625,11 @@ final class VigieStore {
         guard var value = mcp else { return }
         change(&value)
         mcp = value
+    }
+
+    func patchAgents(_ change: (inout AgentsPage) -> Void) {
+        guard var value = agentsState else { return }
+        change(&value)
+        update(\.agentsState, value)
     }
 }

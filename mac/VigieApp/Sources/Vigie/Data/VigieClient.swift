@@ -95,12 +95,13 @@ struct VigieClient: Sendable {
         return URLSession(configuration: configuration)
     }()
 
-    /// Pour une écriture qui attend une fenêtre (lancer un agent : le moteur attend que VS Code soit prêt, 30 s au
-    /// plus, et copie les fichiers joints) : le délai court couperait la réponse en route.
+    /// Pour une écriture qui attend une fenêtre ou git (lancer un agent : le moteur attend que VS Code soit prêt, 30 s
+    /// au plus, et copie les fichiers joints ; ajouter une bibliothèque : il clone le dépôt, 90 s au plus) : le délai
+    /// court couperait la réponse en route. Un peu plus que les 90 s de git : sa réponse arrive après.
     private static let patientSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 120
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 150
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
         return URLSession(configuration: configuration)

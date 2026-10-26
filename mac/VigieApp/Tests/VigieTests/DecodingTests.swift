@@ -95,7 +95,7 @@ struct DecodingTests {
                 let accounts = try decoder.decode(AccountsState.self, from: data)
                 #expect(!accounts.accounts.isEmpty, "\(name)")
             case "agents.json":
-                let agents = try decoder.decode(AgentLibrary.self, from: data)
+                let agents = try decoder.decode(AgentsPage.self, from: data)
                 #expect(agents.dir != nil, "\(name)")
                 #expect(agents.agents.contains { $0.canLaunch && !$0.fields.isEmpty && !$0.mcp.isEmpty }, "\(name)")
                 #expect(agents.agents.contains { !$0.canLaunch }, "\(name)")
@@ -103,6 +103,15 @@ struct DecodingTests {
                 #expect(agents.agents.contains { $0.canLaunch && $0.fields.count == 1 && $0.dropField != nil && !$0.willCreate.isEmpty },
                         "\(name)")
                 #expect(agents.surfaces?.available == [.vscode, .claudeApp], "\(name)")
+                // les captures de la section Bibliothèques : une bibliothèque en erreur de mise à jour, ses agents
+                // (dont un illisible, et celui de la feuille), et un agent local
+                let library = try #require(agents.libraries?.first, "\(name)")
+                #expect(library.problem != nil && library.updatedAt != nil && library.commit != nil, "\(name)")
+                let fromLibrary = agents.agents.filter { $0.source?.libraryID == library.id }
+                #expect(fromLibrary.count == 2 && agents.agentCount(of: library) == 2, "\(name)")
+                #expect(fromLibrary.contains { !$0.canLaunch } && fromLibrary.contains { $0.canLaunch && $0.dropField != nil }, "\(name)")
+                #expect(agents.agents.first(where: \.canLaunch)?.libraryName == library.displayName, "\(name)")
+                #expect(agents.agents.contains { $0.libraryName == nil && $0.canLaunch }, "\(name)")
             case "agents-folder.json":
                 let folder = try decoder.decode(AgentFolderInfo.self, from: data)
                 #expect(folder.exists && folder.problem == nil, "\(name)")
@@ -173,7 +182,7 @@ struct DecodingTests {
             { "id": "casse", "fields": null, "mcp": null, "error": "AGENT.md illisible : il manque la ligne « --- »." },
             { "name": "sans id" } ] }
         """
-        let state = try JSONDecoder().decode(AgentLibrary.self, from: Data(json.utf8))
+        let state = try JSONDecoder().decode(AgentsPage.self, from: Data(json.utf8))
         #expect(state.dir == "/Users/alex/.vigie/data/agents")
         #expect(state.account == nil)
         #expect(state.agents.map(\.id) == ["demarrer-projet", "casse"])
@@ -194,7 +203,7 @@ struct DecodingTests {
         #expect(broken.displayName == "casse")
         #expect(broken.fields.isEmpty && broken.mcp.isEmpty)
 
-        let account = try JSONDecoder().decode(AgentLibrary.self, from: Data("""
+        let account = try JSONDecoder().decode(AgentsPage.self, from: Data("""
         { "account": { "id": "travail1", "label": "Travail 1" }, "agents": [] }
         """.utf8)).account
         #expect(account?.displayName == "Travail 1")

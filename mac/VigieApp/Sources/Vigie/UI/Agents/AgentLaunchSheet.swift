@@ -85,6 +85,7 @@ struct AgentLaunchSheet: View {
         height += 44 + CGFloat(attachments.items.count) * 26
         if let info, !info.resumable.isEmpty { height += 130 }
         if !agent.willCreate.isEmpty { height += 34 + CGFloat(agent.willCreate.count) * 22 }
+        if agent.libraryName != nil { height += 20 }
         return min(780, height)
     }
 
@@ -98,6 +99,13 @@ struct AgentLaunchSheet: View {
                     Text(description)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let library = agent.libraryName {
+                    Label("De la bibliothèque \(library)", systemImage: Icon.library)
+                        .labelStyle(CompactLabelStyle())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
                 }
             }
         }
