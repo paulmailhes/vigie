@@ -31,9 +31,13 @@ const FAKE = path.join(TMP, 'faux-claude.mjs');
 const FAKE_LOG = path.join(TMP, 'faux-claude.log');   // appels « mcp login » du faux claude
 const MAC_LOG = path.join(TMP, 'faux-mac.log');       // appels de open, osascript, pbcopy
 const FAKE_HOOK = path.join(TMP, 'faux-hook', 'hook.mjs');
+const APPS = path.join(TMP, 'Applications');             // faux /Applications (VIGIE_APPS_DIR)
+const IDE = path.join(CLAUDE, 'ide');                     // fenêtres VS Code où Claude Code a démarré
+const VSCODE_STARTS = path.join(TMP, 'vscode-demarre');   // présent : le faux open « démarre » la fenêtre VS Code
 
 const SID_A = 'b1b9b451-c53c-439e-b804-3689257268e3'; // ouverte (registre), garde-fou en attente
 const SID_B = '9ca55731-9c56-4174-ad2a-c63bef5f7c11'; // fermée
+const SID_APP = '6e2d8b9f-1a32-4e7c-8b4f-2c3d4e5f6a71'; // née dans l'app Claude (essai des agents)
 const ORG = '11111111-2222-4333-8444-555555555555';
 const ACC_UUID = '66666666-7777-4888-8999-000000000000';
 // Faux secrets : aucun ne doit ressortir du serveur.
@@ -170,15 +174,32 @@ else if (sub === 'remove') { if (!j.mcpServers[name]) { console.error('No MCP se
 else process.exit(2);
 fs.writeFileSync(file, JSON.stringify(j, null, 2));
 `, 0o755);
-  // Faux open, osascript, pbcopy : notent leurs arguments (et ce qu'on leur donne à lire) dans MAC_LOG.
+  // Faux open, osascript, pbcopy : notent leurs arguments (et ce qu'on leur donne à lire) dans MAC_LOG. Le faux open
+  // « démarre » une fenêtre VS Code si VSCODE_STARTS existe : il écrit son ~/.claude/ide/<port>.lock comme l'extension
+  // Claude Code (pid : le moteur qui l'a lancé, bien vivant).
   for (const name of ['open', 'osascript', 'pbcopy']) {
     w(path.join(TMP, 'faux-mac', name), `#!${process.execPath}
 import fs from 'node:fs';
 let input = '';
+const args = process.argv.slice(2);
 if (${JSON.stringify(name)} === 'pbcopy') { try { input = fs.readFileSync(0, 'utf8'); } catch {} }
-fs.appendFileSync(${JSON.stringify(MAC_LOG)}, JSON.stringify({ bin: ${JSON.stringify(name)}, args: process.argv.slice(2), input }) + '\\n');
+fs.appendFileSync(${JSON.stringify(MAC_LOG)}, JSON.stringify({ bin: ${JSON.stringify(name)}, args, input }) + '\\n');
+if (${JSON.stringify(name)} === 'open' && args[0] === '-a' && args[1] === 'Visual Studio Code' && fs.existsSync(${JSON.stringify(VSCODE_STARTS)})) {
+  fs.mkdirSync(${JSON.stringify(IDE)}, { recursive: true });
+  fs.writeFileSync(${JSON.stringify(IDE)} + '/' + (40000 + Math.floor(Math.random() * 20000)) + '.lock',
+    JSON.stringify({ pid: process.ppid, workspaceFolders: [args[2]], ideName: 'Visual Studio Code', transport: 'ws' }));
+}
 `, 0o755);
   }
+  // VS Code et son extension Claude Code, l'app Claude : installés (faux /Applications) ; la fenêtre VS Code de la
+  // conversation ouverte (SID_A) existe déjà.
+  fs.mkdirSync(path.join(APPS, 'Visual Studio Code.app'), { recursive: true });
+  fs.mkdirSync(path.join(APPS, 'Claude.app'), { recursive: true });
+  fs.mkdirSync(path.join(HOME, '.vscode', 'extensions', 'anthropic.claude-code-2.1.304-darwin-arm64'), { recursive: true });
+  wj(path.join(IDE, '51234.lock'), { pid: process.pid, workspaceFolders: [CWD], ideName: 'Visual Studio Code', transport: 'ws' });
+  // une conversation née dans l'app Claude (essai des agents) : son titre et son id local
+  wj(path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'compte', 'espace', 'local_9c1f.json'),
+    { cliSessionId: SID_APP, title: 'Charte du cabinet', isArchived: false });
 }
 
 // ---------- serveur ----------
@@ -192,6 +213,7 @@ before(async () => {
     VIGIE_QUOTA_FILE: path.join(TMP, 'quota.json'), VIGIE_CLAUDE_BIN: FAKE,
     VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même
     VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
+    VIGIE_APPS_DIR: APPS, VIGIE_IDE_WAIT_MS: '1500', // fenêtre VS Code attendue 1,5 s au plus (25 s pour de vrai)
   };
   child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', (d) => { logs += d; });
@@ -607,12 +629,22 @@ test('action sensible en attente : autoriser ou refuser depuis l\'app (decisions
   assert.equal(await waiting(), true);
 });
 
-test('ouvrir : la conversation dans VS Code (dossier puis onglet), rien d\'autre', async () => {
+test('ouvrir : la conversation dans VS Code (dossier, puis l\'onglet quand sa fenêtre est prête), rien d\'autre', async () => {
   fs.rmSync(MAC_LOG, { force: true });
   let r = await post('/api/v2/open', { kind: 'conversation', id: SID_A });
   assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.opened, 'full', 'fenêtre de son dossier déjà là');
   assert.equal(r.body.openUrl, `vscode://anthropic.claude-code/open?session=${SID_A}`);
   assert.deepEqual(macCalls().map((c) => [c.bin, c.args]), [['open', ['-a', 'Visual Studio Code', CWD]], ['open', [`vscode://anthropic.claude-code/open?session=${SID_A}`]]]);
+  // la fenêtre de son dossier ne répond pas : le lien ne part pas (il ouvrirait la conversation dans une autre fenêtre)
+  fs.rmSync(MAC_LOG, { force: true });
+  const t0 = Date.now();
+  r = await post('/api/v2/open', { kind: 'conversation', id: SID_B });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual([r.body.opened, r.body.openUrl], ['folder', null]);
+  assert.equal(r.body.message, 'VS Code est ouvert sur autre, mais Claude Code n\'a pas répondu à temps : ouvre la conversation depuis son panneau.');
+  assert.ok(Date.now() - t0 >= 1500, 'attendue jusqu\'au bout (VIGIE_IDE_WAIT_MS)');
+  assert.deepEqual(macCalls().map((c) => [c.bin, c.args]), [['open', ['-a', 'Visual Studio Code', OTHER]]]);
   assert.equal((await post('/api/v2/open', { kind: 'conversation', id: '00000000-0000-4000-8000-000000000000' })).status, 404);
   assert.equal((await post('/api/v2/open', { kind: 'conversation', id: '../..' })).status, 404);
   assert.equal((await post('/api/v2/open', { kind: 'fenêtre' })).status, 400);
@@ -975,13 +1007,21 @@ test('connexions : compte du Mac refusé = « à reconnecter » ; connexion remi
   fs.rmSync(CX);
 });
 
-// ---------- agents (lib/agents.mjs : data/agents/<id>/AGENT.md) ----------
+// ---------- agents (lib/agents.mjs : data/agents/<id>/AGENT.md ; lib/opener.mjs) ----------
+const SURFACE = oneOf('vscode', 'claude-app');
 const AgentsList = {
-  dir: 'string', account: opt({ id: 'string', label: 'string' }),
+  dir: 'string', account: opt({ id: 'string', label: 'string' }), surfaces: { available: arr(SURFACE), chosen: opt(SURFACE) },
   agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
     fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
-    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES) }), error: opt('string') }),
+    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES) }), creates: arr('string'), error: opt('string') }),
 };
+const AgentFolder = {
+  path: 'string', exists: 'bool', error: opt('string'),
+  conversations: arr({ id: 'string', title: opt('string'), lastActivity: opt(ISO), running: 'bool', surface: oneOf('vscode', 'claude-app', 'terminal') }),
+  sources: arr('string'),
+};
+const AgentLaunch = { ok: 'bool', folder: 'string', briefFile: 'string', prompt: 'string', surface: SURFACE, opened: oneOf('full', 'folder', 'no-prompt', 'none'),
+  copied: arr('string'), message: 'string' };
 test('agents : liste avec l\'état des MCP pour le compte des nouvelles conversations, lancement dans un dossier du dossier perso', async () => {
   const dir = path.join(DATA, 'agents');
   w(path.join(dir, 'demarrer-projet', 'AGENT.md'), `---
@@ -989,6 +1029,9 @@ name: Démarrer un projet client
 description: Brief et premier rendez-vous
 icon: wand.and.stars
 mcp: [figma-perso, inexistant, webflow-essai, notion-essai, Gmail]
+creates:
+  - Le dossier du projet et sa documentation
+  - Le fichier Figma du projet
 fields:
   - id: client
     label: Nom du client
@@ -1008,12 +1051,15 @@ Prépare le projet de {{client}}.
   assert.equal(r.status, 200, r.text);
   conforms(r.body, AgentsList);
   assert.equal(r.body.dir, dir);
+  assert.deepEqual(r.body.surfaces, { available: ['vscode', 'claude-app'], chosen: 'vscode' }, 'VS Code avec son extension, et l\'app Claude');
   const accounts = (await get('/api/v2/accounts')).body;
   assert.equal(r.body.account.id, accounts.defaultForNew);
   assert.equal(r.body.account.label, accounts.accounts.find((a) => a.id === accounts.defaultForNew).label);
   assert.deepEqual(r.body.agents.map((a) => [a.id, a.error === null]), [['casse', false], ['demarrer-projet', true]]);
   const a = r.body.agents[1];
   assert.equal(a.folder, CODE, 'dossier proposé : ~/Code du dossier perso du moteur');
+  assert.deepEqual(a.creates, ['Le dossier du projet et sa documentation', 'Le fichier Figma du projet']);
+  assert.deepEqual(r.body.agents[0].creates, []);
   assert.deepEqual(a.fields.map((f) => [f.id, f.type, f.required]), [['client', 'text', true], ['questionnaire', 'longtext', false]]);
   assert.deepEqual(a.mcp[0], { name: 'figma-perso', status: 'connected' }, 'relevé de l\'essai « état réel des MCP »');
   assert.deepEqual(a.mcp.slice(1), [{ name: 'inexistant', status: 'unknown' }, { name: 'webflow-essai', status: 'connected' }, { name: 'notion-essai', status: 'needs-auth' },
@@ -1038,25 +1084,170 @@ Prépare le projet de {{client}}.
   r = await launch({ id: 'demarrer-projet', values: { client: 'Atelier' }, folder: path.join(HOME, '.claude', 'x') });
   assert.equal(r.status, 400);
   assert.equal((await raw('GET', '/api/v2/agents/launch')).status, 405);
-  assert.equal(fs.existsSync(folder), false);
+  // surface inconnue, conversation à reprendre qui n'est pas dans ce dossier, fichier joint réservé : 400, rien de créé
+  const values = { client: 'Cabinet Martin', questionnaire: 'Q : vos couleurs ?\nR : bleu' };
+  r = await launch({ id: 'demarrer-projet', values, folder, surface: 'terminal' });
+  assert.deepEqual([r.status, r.body.error], [400, 'Où ouvrir l\'agent ? « vscode » ou « claude-app ».']);
+  const gone = 'Cette conversation n\'est plus dans ce dossier : relance en nouvelle conversation.';
+  for (const session of [SID_B, '../..', 42]) {
+    r = await launch({ id: 'demarrer-projet', values, folder, session });
+    assert.deepEqual([r.status, r.body.error], [400, gone], String(session));
+  }
+  r = await launch({ id: 'demarrer-projet', values, folder, files: [path.join(CLAUDE, '.credentials.json')] });
+  assert.deepEqual([r.status, r.body.error], [400, 'Fichier joint refusé : ~/.claude est réservé (réglages de Claude Code).']);
+  // l'app Claude absente : refusée avant de rien créer
+  fs.renameSync(path.join(APPS, 'Claude.app'), path.join(APPS, 'Claude.app.bak'));
+  r = await launch({ id: 'demarrer-projet', values, folder, surface: 'claude-app' });
+  assert.deepEqual([r.status, r.body.error], [400, 'L\'app Claude n\'est pas sur ton Mac : choisis VS Code, ou installe-la.']);
+  assert.deepEqual((await get('/api/v2/agents')).body.surfaces, { available: ['vscode'], chosen: 'vscode' });
+  fs.renameSync(path.join(APPS, 'Claude.app.bak'), path.join(APPS, 'Claude.app'));
+  fs.renameSync(path.join(APPS, 'Visual Studio Code.app'), path.join(APPS, 'VS.bak'));
+  r = await launch({ id: 'demarrer-projet', values, folder, surface: 'vscode' });
+  assert.deepEqual([r.status, r.body.error], [400, 'VS Code et son extension Claude Code ne sont pas sur ton Mac : choisis l\'app Claude, ou installe-les.']);
+  fs.renameSync(path.join(APPS, 'VS.bak'), path.join(APPS, 'Visual Studio Code.app'));
+  assert.equal(fs.existsSync(folder), false, 'refusé : rien de créé');
+  assert.ok(!macCalls().some((c) => c.args.some((x) => /cabinet-martin/.test(String(x)))), 'rien ouvert');
 
-  r = await launch({ id: 'demarrer-projet', values: { client: 'Cabinet Martin', questionnaire: 'Q : vos couleurs ?\nR : bleu' }, folder });
+  // le dossier du formulaire, avant le lancement
+  r = await get('/api/v2/agents/folder');
+  assert.deepEqual([r.status, r.body.error], [400, 'Indique un dossier.']);
+  assert.equal((await get('/api/v2/agents/folder?path=%20')).body.error, 'Indique un dossier.');
+  r = await get(`/api/v2/agents/folder?path=${encodeURIComponent('~/Code/cabinet-martin')}`);
+  conforms(r.body, AgentFolder);
+  assert.deepEqual(r.body, { path: folder, exists: false, error: null, conversations: [], sources: [] });
+  r = await get(`/api/v2/agents/folder?path=${encodeURIComponent('~/.ssh/client')}`);
+  assert.deepEqual(r.body, { path: '~/.ssh/client', exists: false, error: 'Dossier refusé : ~/.ssh est réservé (tes clés). Choisis un dossier ailleurs, dans ~/Code par exemple.', conversations: [], sources: [] });
+  assert.equal((await raw('GET', '/api/v2/agents/folder?path=~', { token: null })).status, 401);
+
+  // lancement dans VS Code, nouvelle conversation, deux fichiers joints : la fenêtre du dossier « démarre », puis le lien
+  const P = path.join(TMP, 'pièces');
+  w(path.join(P, 'charte.pdf'), 'charte');
+  w(path.join(P, 'brandbook', 'logo.svg'), '<svg/>');
+  fs.rmSync(MAC_LOG, { force: true });
+  w(VSCODE_STARTS, '');
+  r = await launch({ id: 'demarrer-projet', values, folder, files: [path.join(P, 'charte.pdf'), path.join(P, 'brandbook')] });
+  fs.rmSync(VSCODE_STARTS);
   assert.equal(r.status, 200, r.text);
-  assert.deepEqual(Object.keys(r.body).sort(), ['briefFile', 'folder', 'message', 'ok', 'openUrl', 'prompt']);
-  assert.equal(r.body.folder, folder);
+  conforms(r.body, AgentLaunch);
+  assert.deepEqual(Object.keys(r.body).sort(), ['briefFile', 'copied', 'folder', 'message', 'ok', 'opened', 'prompt', 'surface']);
+  assert.deepEqual([r.body.folder, r.body.surface, r.body.opened, r.body.copied], [folder, 'vscode', 'full', ['sources/charte.pdf', 'sources/brandbook/']]);
   assert.equal(r.body.briefFile, path.join(folder, '.vigie', 'agent-demarrer-projet.md'));
-  assert.equal(r.body.message, 'Dossier prêt : VS Code s\'ouvre, envoie le message préparé pour lancer l\'agent.');
+  assert.equal(r.body.message, 'VS Code s\'ouvre sur le projet, avec le message prêt dans Claude Code : envoie-le.');
+  assert.equal(r.body.prompt, `Lance l'agent « Démarrer un projet client » : lis le fichier ${r.body.briefFile} et suis ses consignes, dans le dossier ${folder}.`);
   assert.equal(fs.statSync(folder).mode & 0o777, 0o755, 'le moteur tourne en umask 077 : dossier remis lisible');
   assert.equal(fs.statSync(r.body.briefFile).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(path.join(folder, 'sources', 'brandbook', 'logo.svg'), 'utf8'), '<svg/>');
   const brief = fs.readFileSync(r.body.briefFile, 'utf8');
   assert.ok(brief.includes('Prépare le projet de Cabinet Martin.'));
   assert.ok(brief.includes('R : bleu'));
-  const q = r.body.openUrl.replace(/^vscode:\/\/anthropic\.claude-code\/open\?/, '');
-  assert.equal(new URLSearchParams(decodeURIComponent(q)).get('prompt'), r.body.prompt);
-  assert.ok(r.body.prompt.includes(r.body.briefFile));
-  assert.ok(!macCalls().some((c) => c.args.some((x) => String(x).includes('claude-code/open?prompt'))), 'le moteur n\'ouvre rien lui-même : c\'est l\'app');
+  assert.ok(brief.includes('Conversation : nouvelle\n'));
+  assert.ok(brief.includes('### Fichiers joints\n\n- sources/charte.pdf\n- sources/brandbook/\n'));
+  let calls = macCalls().map((c) => [c.bin, c.args]);
+  assert.equal(calls.length, 2, JSON.stringify(calls));
+  assert.deepEqual(calls[0], ['open', ['-a', 'Visual Studio Code', folder]]);
+  const link = calls[1][1][0];
+  assert.equal(calls[1][1].length, 1);
+  assert.ok(link.startsWith('vscode://anthropic.claude-code/open?prompt='), link);
+  assert.equal(new URLSearchParams(decodeURIComponent(link.slice(link.indexOf('?') + 1))).get('prompt'), r.body.prompt, 'le message survit aux deux décodages');
+  assert.equal(rj(path.join(DATA, 'state.json')).agentsSurface, 'vscode', 'surface retenue');
+
+  // la fenêtre ne répond jamais : le lien ne part pas, l'app copiera le message
+  fs.rmSync(MAC_LOG, { force: true });
+  fs.rmSync(IDE, { recursive: true, force: true });
+  wj(path.join(IDE, '51234.lock'), { pid: process.pid, workspaceFolders: [CWD], ideName: 'Visual Studio Code', transport: 'ws' }); // une autre fenêtre
+  r = await launch({ id: 'demarrer-projet', values, folder: path.join(CODE, 'autre-projet') });
+  assert.deepEqual([r.status, r.body.opened, r.body.message], [200, 'folder',
+    'VS Code est ouvert sur le projet, mais Claude Code n\'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le.']);
+  assert.deepEqual(macCalls().map((c) => c.args), [['-a', 'Visual Studio Code', path.join(CODE, 'autre-projet')]], 'aucun lien vscode:// envoyé');
+
+  // l'app Claude : nouvelle conversation, message prérempli ; surface retenue et proposée ensuite
+  fs.rmSync(MAC_LOG, { force: true });
+  r = await launch({ id: 'demarrer-projet', values, folder, surface: 'claude-app', files: [path.join(P, 'charte.pdf'), path.join(folder, 'sources', 'charte.pdf')] });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual([r.body.surface, r.body.opened, r.body.copied], ['claude-app', 'full', ['sources/charte (2).pdf']], 'déjà dans sources : pas recopié');
+  assert.equal(r.body.message, 'L\'app Claude s\'ouvre sur le projet, avec le message prêt : envoie-le.');
+  calls = macCalls().map((c) => c.args);
+  assert.equal(calls.length, 1);
+  const u = new URL(calls[0][0]);
+  assert.deepEqual([u.protocol, u.host, u.pathname, u.searchParams.get('folder'), u.searchParams.get('q'), u.searchParams.get('source')],
+    ['claude:', 'code', '/new', folder, r.body.prompt, 'vigie']);
+  assert.equal(rj(path.join(DATA, 'state.json')).agentsSurface, 'claude-app');
+  assert.equal((await get('/api/v2/agents')).body.surfaces.chosen, 'claude-app');
+  r = await get(`/api/v2/agents/folder?path=${encodeURIComponent(folder)}`);
+  assert.deepEqual([r.body.exists, r.body.error, r.body.sources], [true, null, ['brandbook', 'charte (2).pdf', 'charte.pdf']]);
   fs.rmSync(dir, { recursive: true, force: true });
-  fs.rmSync(folder, { recursive: true, force: true });
+});
+
+test('agents : conversations du dossier (triées, filtrées par dossier), reprise dans VS Code ou dans l\'app Claude', async () => {
+  const dir = path.join(DATA, 'agents');
+  w(path.join(dir, 'reprendre', 'AGENT.md'), '---\nname: Reprendre le projet\n---\nFais le point.');
+  const F = path.join(CODE, 'cabinet-durand');
+  fs.mkdirSync(path.join(F, 'docs'), { recursive: true });
+  // trois conversations dans ce dossier (VS Code, app Claude ouverte, une lue pour l'usage seulement : plus de 48 h),
+  // une dans un sous-dossier
+  const [S1, S2, S3, S4] = ['5d1c7a8e-0f21-4d6b-9a3e-1b2c3d4e5f60', '6e2d8b9f-1a32-4e7c-8b4f-2c3d4e5f6a71', '7f3e9c0a-2b43-4f8d-9c5a-3d4e5f6a7b82', '8a4f0d1b-3c54-4a9e-8d6b-4e5f6a7b8c93'];
+  const desk = (lines) => lines.flat().map((l) => ({ ...l, entrypoint: 'claude-desktop' }));
+  const M1 = mk(S1, F), M2 = mk(S2, F), M3 = mk(S3, path.join(F, 'docs')), M4 = mk(S4, F);
+  const at = (min) => new Date(Date.now() + min * 60_000).toISOString();
+  writeLines(path.join(PROJECTS, '-maison-Code-cabinet-durand', `${S1}.jsonl`), [M1.human('prépare le brief', at(-50)), M1.say('Le brief est prêt.', at(-40))]);
+  writeLines(path.join(PROJECTS, '-maison-Code-cabinet-durand', `${S2}.jsonl`), desk([M2.human('pose la charte', at(-20)), M2.say('C\'est fait.', at(-10))]));
+  writeLines(path.join(PROJECTS, '-maison-Code-cabinet-durand-docs', `${S3}.jsonl`), [M3.human('relis', at(-5)), M3.say('Relu.', at(-4))]);
+  const p4 = path.join(PROJECTS, '-maison-Code-cabinet-durand', `${S4}.jsonl`);
+  writeLines(p4, [M4.human('premier essai', at(-3 * 24 * 60)), M4.say('Essayé.', at(-3 * 24 * 60 + 1))]);
+  const old = new Date(Date.now() - 3 * 24 * 3600_000);
+  fs.utimesSync(p4, old, old);
+  // (son titre dans l'app Claude est écrit dès le départ, voir seed : l'app relit ses titres toutes les 30 s)
+  assert.equal(S2, SID_APP);
+  const sleeper = spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' });
+  const reg = path.join(SESSIONS, `${sleeper.pid}.json`);
+  wj(reg, { pid: sleeper.pid, sessionId: S2, cwd: F, startedAt: Date.now() - 60_000, status: 'idle', entrypoint: 'claude-desktop', name: 'cabinet' });
+  try {
+    let r;
+    for (let i = 0; i < 150; i++) {
+      r = await get(`/api/v2/agents/folder?path=${encodeURIComponent(F)}`);
+      if (r.body.conversations?.length === 3) break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    conforms(r.body, AgentFolder);
+    assert.deepEqual(r.body.conversations.map((c) => [c.id, c.title, c.running, c.surface]), [
+      [S2, 'Charte du cabinet', true, 'claude-app'],
+      [S1, null, false, 'vscode'],
+      [S4, null, false, 'vscode'],
+    ], 'ce dossier seulement, la plus récente d\'abord ; titre de l\'app Claude');
+    assert.ok(Date.parse(r.body.conversations[0].lastActivity) > Date.parse(r.body.conversations[1].lastActivity));
+    // la même chose par un lien vers le dossier
+    fs.symlinkSync(F, path.join(CODE, 'durand'));
+    assert.deepEqual((await get(`/api/v2/agents/folder?path=${encodeURIComponent('~/Code/durand')}`)).body.conversations.map((c) => c.id), [S2, S1, S4]);
+    // reprise dans l'app Claude d'une conversation née dans l'app : rouverte par son id local, sans message
+    const launch = (body) => post('/api/v2/agents/launch', body);
+    fs.rmSync(MAC_LOG, { force: true });
+    r = await launch({ id: 'reprendre', values: {}, folder: F, surface: 'claude-app', session: S2 });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual([r.body.opened, r.body.message], ['no-prompt', 'La conversation s\'ouvre dans l\'app Claude : le message est copié, colle-le (⌘V) et envoie-le.']);
+    assert.equal(r.body.prompt, `Lance l'agent « Reprendre le projet » dans cette conversation : lis le fichier ${r.body.briefFile} et suis ses consignes. Tiens compte de ce qu'on a déjà fait ici.`);
+    assert.ok(fs.readFileSync(r.body.briefFile, 'utf8').includes('Conversation : reprise (tu continues une conversation existante'));
+    assert.deepEqual(macCalls().map((c) => c.args), [['claude://code/continue?session=local_9c1f']]);
+    // née dans VS Code, reprise dans l'app : importée par son uuid
+    fs.rmSync(MAC_LOG, { force: true });
+    r = await launch({ id: 'reprendre', values: {}, folder: F, surface: 'claude-app', session: S1 });
+    assert.deepEqual(macCalls().map((c) => c.args), [[`claude://resume?session=${S1}`]]);
+    // reprise dans VS Code : la fenêtre du dossier existe déjà, le lien porte la conversation et le message
+    fs.rmSync(MAC_LOG, { force: true });
+    wj(path.join(IDE, '51235.lock'), { pid: process.pid, workspaceFolders: [F], ideName: 'Visual Studio Code', transport: 'ws' });
+    r = await launch({ id: 'reprendre', values: {}, folder: F, surface: 'vscode', session: S4 });
+    assert.deepEqual([r.status, r.body.opened], [200, 'full'], r.text);
+    const calls = macCalls().map((c) => c.args);
+    assert.deepEqual(calls[0], ['-a', 'Visual Studio Code', F]);
+    const q = new URLSearchParams(decodeURIComponent(calls[1][0].slice(calls[1][0].indexOf('?') + 1)));
+    assert.deepEqual([q.get('session'), q.get('prompt')], [S4, r.body.prompt]);
+    // une conversation d'un sous-dossier n'est pas « dans ce dossier »
+    r = await launch({ id: 'reprendre', values: {}, folder: F, session: S3 });
+    assert.deepEqual([r.status, r.body.error], [400, 'Cette conversation n\'est plus dans ce dossier : relance en nouvelle conversation.']);
+  } finally {
+    fs.rmSync(reg, { force: true });
+    sleeper.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('conversation jamais associée : affichée sur le compte des nouvelles conversations (comme le lanceur)', async () => {

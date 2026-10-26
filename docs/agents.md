@@ -1,8 +1,10 @@
 # Agents
 
-État (2026-10-26) : première version du moteur construite. Format `AGENT.md`, liste et lancement dans VS Code
-(`lib/agents.mjs`, `GET /api/v2/agents`, `POST /api/v2/agents/launch`, voir [api-v2.md](api-v2.md)). La réflexion du
-départ et les décisions à prendre restent plus bas.
+État (2026-10-26) : deuxième version du moteur. Format `AGENT.md` (avec `creates`), formulaire à un seul champ où
+l'on colle ce qu'on a et où l'on glisse des fichiers (copiés dans `sources/`), reprise d'une conversation déjà ouverte
+dans le dossier, ouverture dans VS Code ou dans l'app Claude par le moteur de Vigie, qui attend la fenêtre du projet
+(`lib/agents.mjs`, `lib/opener.mjs`, `GET /api/v2/agents`, `GET /api/v2/agents/folder`, `POST /api/v2/agents/launch`,
+voir [api-v2.md](api-v2.md)). La réflexion du départ et les décisions à prendre restent plus bas.
 
 ## L'idée
 
@@ -17,8 +19,10 @@ connaître les outils par cœur.
 
 ## Exemple : démarrer un projet client
 
-**Entrées (formulaire)** : nom du client ; site actuel (à refaire) ; questionnaire client déjà rempli (texte ou fichier) ;
-sites de référence (adresses) ; modèle Figma de l'agence ; espace Webflow ; dossier de code.
+**Entrées (formulaire)** : le dossier de code (`~/Code/<client>`), et un seul champ où coller ce qu'on a :
+questionnaire client déjà rempli, e-mail du client, site actuel (à refaire), sites de référence, notes ; ses fichiers
+y sont glissés (brandbook, PDF, images) et copiés dans `sources/`. Le modèle Figma et l'espace Webflow de l'agence
+sont connus de l'agent.
 
 **Étapes** :
 1. **Figma** : un fichier neuf, bien nommé, rangé dans le dossier projet de l'équipe, monté à partir du modèle.
@@ -61,37 +65,27 @@ description: Brief, références et préparation du premier rendez-vous
 icon: wand.and.stars
 mcp: [figma-pro]
 folder: ~/Code
+creates:
+  - Le dossier du projet et sa documentation (brief, questionnaire, références, premier rendez-vous)
+  - Les captures des sites de référence
+  - Le fichier Figma du projet, monté sur le modèle du studio
 fields:
-  - id: client
-    label: Nom du client
-    required: true
-    help: Il sert aussi à nommer le dossier du projet
-    placeholder: Cabinet Martin
-  - id: site
-    label: Site actuel
-    type: url
-    placeholder: https://studio-exemple.fr
-  - id: questionnaire
-    label: Questionnaire avant le premier rendez-vous
+  - id: brief
+    label: Ce que tu as
     type: longtext
-    help: Le résumé du questionnaire, tel quel
-  - id: references
-    label: Sites de référence
-    type: urls
-    help: Une adresse par ligne
-  - id: figma
-    label: Fichier Figma du projet
-    type: url
-    help: Duplique le modèle dans Figma, range-le dans le dossier des projets, puis colle son lien ici
+    required: true
+    help: Colle le questionnaire, l'e-mail du client, ses liens, tes notes ; glisse ses fichiers (PDF, brandbook, images)
 ---
-Tu prépares le premier rendez-vous avec {{client}}.
+Tu prépares le premier rendez-vous de ce projet, à partir de « Ce que tu as » et des fichiers joints (dans `sources/`).
 
 1. Dans ce dossier, crée `docs/` : `brief.md` (ce que le client veut, ce qu'il aime, ce qu'il n'aime pas, ses
    contraintes), `questionnaire.md` (les réponses rangées par thème), `references.md` (pour chaque site de
    référence : ce qu'il en dit, ce qu'on en garde).
-2. Lis le site actuel ({{site}}) et les sites de référence ; note ce qui marche et ce qui ne marche pas.
-3. Dans le fichier Figma ({{figma}}), sur la page « Début de mission » : le brief en quelques blocs, puis une carte
-   par site de référence (capture, ce que le client aime, ce qu'il n'aime pas). S'il n'y a pas de lien, demande-le.
+2. Lis le site actuel et les sites de référence cités ; capture chacun dans `docs/captures/` ; note ce qui marche
+   et ce qui ne marche pas.
+3. Crée le fichier Figma du projet avec les scripts de `{{dossier_agent}}/figma/`, puis, sur la page « Début de
+   mission » : le brief en quelques blocs, une carte par site de référence (capture, ce que le client aime, ce
+   qu'il n'aime pas).
 4. Termine par un compte rendu : les liens, et ce qui reste à faire à la main.
 ```
 
@@ -104,7 +98,12 @@ Tu prépares le premier rendez-vous avec {{client}}.
 | `icon` | non | nom de symbole SF (`wand.and.stars`) |
 | `mcp` | non | MCP nécessaires, par leur nom dans Claude Code (`figma-pro`, ou `Gmail` pour un connecteur claude.ai) ; la page montre leur état |
 | `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance »), sauf qu'il peut être le dossier perso lui-même (`~` : projets rangés en `~/<client>`) ; sinon l'agent est listé avec une erreur (« « folder » : ~/.ssh est réservé (tes clés). Change-le dans AGENT.md. ») et ne se lance pas |
-| `fields` | non | le formulaire : une liste de champs (30 au plus) |
+| `creates` | non | ce que l'agent crée, montré dans le formulaire (« Ce que l'agent va créer ») : des phrases courtes en lignes `- …` (ou une seule phrase), 12 au plus, 200 caractères chacune |
+| `fields` | non | le formulaire : une liste de champs (30 au plus). Souvent un seul, de type `longtext`, où l'on colle tout ce qu'on a |
+
+Une phrase de `creates` qui contient « : » (`- Figma : le fichier`) ou qui se lit comme un booléen (`- Oui`) se met
+entre guillemets ; sinon l'agent est listé avec une erreur (« « creates » : phrase 1 illisible. Mets-la entre
+guillemets… »).
 
 Chaque champ : `id` (minuscules, chiffres et `_`, commence par une lettre, unique), `label` (obligatoire), `type`
 (`text` par défaut, `longtext`, `url`, `urls` : une adresse par ligne), `required` (`true`/`false`), `help` (une aide
@@ -138,9 +137,21 @@ propres fichiers (scripts, images, modèles) et la consigne les cite par `{{doss
 
 1. Page **Agents** de l'app : une carte par agent, avec ses MCP nécessaires et leur état pour le compte des nouvelles
    conversations (celui sur lequel la conversation partira).
-2. **Lancer** ouvre le formulaire et le dossier du projet (proposé : `folder` + le nom du client).
-3. Vigie vérifie le formulaire (champs obligatoires, tailles) et le dossier : dans ton dossier perso, jamais le dossier
-   perso lui-même, ni un dossier réservé :
+2. **Lancer** ouvre le formulaire, dans cet ordre :
+   - **Projet** : le dossier, proposé d'après `folder` et ce qui est tapé (`~/Code/<nom>`). À chaque changement,
+     l'app demande au moteur de Vigie ce qu'il en pense (`GET /api/v2/agents/folder`) : « Nouveau dossier : Vigie le
+     crée. », « Dossier existant · N fichiers dans sources/ », ou la raison du refus (bouton grisé).
+   - **Conversation existante** : si une conversation Claude Code a été lancée dans ce dossier, l'app la montre (titre,
+     quand, où, si elle est ouverte) et propose de la **continuer** (par défaut, la plus récente) ou d'en ouvrir une
+     nouvelle. L'agent garde son historique et y ajoute ce qu'il doit créer.
+   - **Le champ** (ou les champs de l'agent) : un grand texte où coller ce qu'on a (questionnaire, e-mail du client,
+     liens, notes), et où **glisser des fichiers** (PDF, Word, brandbook, images, dossiers) ou les ajouter avec
+     « Ajouter des fichiers… ». Ils seront copiés dans `sources/` du projet.
+   - **Ce que l'agent va créer** : la liste `creates` de son `AGENT.md`.
+   - **Ouvrir dans** : VS Code ou l'app Claude (seulement ce qui est installé), puis **Lancer** (ou **Continuer**).
+3. Le moteur de Vigie vérifie **tout avant de rien créer** : le formulaire (champs obligatoires, tailles), le dossier,
+   les fichiers joints, l'outil choisi (installé ?) et la conversation à reprendre (toujours dans ce dossier ?). Le
+   dossier doit être dans ton dossier perso, jamais le dossier perso lui-même, ni un dossier réservé :
 
    | Dossier réservé | Raison affichée |
    |---|---|
@@ -157,23 +168,89 @@ propres fichiers (scripts, images, modèles) et la consigne les cite par `{{doss
    vers l'un d'eux ou vers un dossier qu'il contient est refusé aussi : `~/Dropbox`, qui mène à
    `~/Library/CloudStorage/Dropbox`, par exemple. Le refus dit pourquoi et où aller (« Dossier refusé : ~/.ssh est
    réservé (tes clés). Choisis un dossier ailleurs, dans ~/Code par exemple. »).
-4. Vigie crée le dossier s'il manque, et y écrit `.vigie/agent-<id>.md` : le nom de l'agent, la date, ce que tu as
-   saisi, puis la consigne remplie. Le dossier `.vigie` a toujours son `.gitignore` : le brief (questionnaire du
-   client…) ne part jamais dans git. Il est ajouté s'il manque. Déjà là, il est gardé s'il ignore le brief (une ligne
-   `*`, par exemple) ; sinon Vigie n'écrit pas le brief et te dit quoi faire selon le cas : ajouter la ligne `*` à la
-   fin ; le remplacer par un fichier qui la contient s'il dépasse 64 Ko ou n'est pas un fichier ordinaire ; le rendre
-   lisible s'il ne l'est pas.
-5. L'app ouvre VS Code sur le dossier, puis un onglet Claude Code avec le message prêt (« Lance l'agent … : lis le
-   fichier … et suis ses consignes ») : tu l'envoies, la conversation lit le brief et le suit.
+4. Vigie crée le dossier s'il manque, copie les fichiers joints dans `sources/`, et écrit `.vigie/agent-<id>.md` : le
+   nom de l'agent, la date, le dossier, « Conversation : nouvelle » ou « Conversation : reprise (…) », ce que tu as
+   saisi, la liste des fichiers joints (`sources/…`), puis la consigne remplie. Le dossier `.vigie` a toujours son
+   `.gitignore` : le brief (questionnaire du client…) ne part jamais dans git. Il est ajouté s'il manque. Déjà là, il
+   est gardé s'il ignore le brief (une ligne `*`, par exemple) ; sinon Vigie n'écrit rien et te dit quoi faire selon
+   le cas : ajouter la ligne `*` à la fin ; le remplacer par un fichier qui la contient s'il dépasse 64 Ko ou n'est
+   pas un fichier ordinaire ; le rendre lisible s'il ne l'est pas.
+5. Le moteur de Vigie ouvre VS Code ou l'app Claude, avec le message prêt (« Lance l'agent … : lis le fichier … et
+   suis ses consignes ») : tu l'envoies, la conversation lit le brief et le suit. Quand le message n'a pas pu être
+   prérempli, l'app le copie : tu le colles (⌘V) et tu l'envoies.
 
-Dans l'app, le formulaire vérifie le dossier comme le moteur de Vigie, avant le clic : le bouton
-« Lancer dans VS Code » reste grisé et la raison s'affiche sous le dossier. Un refus du moteur de Vigie s'affiche en
-bas du formulaire, qui reste ouvert. Sans VS Code, rien n'est créé. Si VS Code ne s'ouvre pas, le formulaire propose
-de copier le message.
+Un refus du moteur de Vigie s'affiche en bas du formulaire, qui reste ouvert ; rien n'est créé, rien ne s'ouvre.
 
 Rien de nouveau à surveiller : c'est une conversation comme les autres, avec ses actions sensibles et sa consommation
 dans Vigie. Le brief est lisible par la conversation, mais le modifier passe par toi : Vigie protège tous les dossiers
 `.vigie` (garde-fou « réglages de Vigie »).
+
+### Fichiers joints
+
+Glissés dans le champ, ou ajoutés avec « Ajouter des fichiers… » : des fichiers ou des dossiers, 50 au plus, 1 Go et
+5 000 fichiers au plus en tout (dossiers parcourus). L'app dépose les pièces glissées depuis Mail ou Safari (fichiers
+« promis ») dans un dossier temporaire à elle, puis donne ce chemin.
+
+- **Copiés** dans `<dossier>/sources/` (créé en `0755`, fichiers en `0644`, date d'origine gardée), sous leur nom ; si
+  le nom est pris, « nom (2).ext », « nom (3).ext »… : rien n'est jamais écrasé. Un fichier déjà dans `sources/`
+  n'est pas recopié. Un dossier joint est recopié avec ses sous-dossiers ; les liens symboliques et les fichiers
+  spéciaux (tubes) qu'il contient sont laissés de côté.
+- **Refusés**, avant toute copie (un seul refus, et rien n'est copié) : un chemin introuvable (« Fichier joint
+  introuvable : charte.pdf. »), un lien symbolique (« Fichier joint refusé : raccourci.pdf est un lien. Joins le
+  fichier lui-même. »), un fichier ou un dossier dans un dossier réservé, par son chemin, par un lien dans le chemin
+  ou dans une autre casse (« Fichier joint refusé : ~/.ssh est réservé (tes clés). »), un dossier qui est ou contient
+  ton dossier perso ou le dossier du projet, un fichier qui a un autre nom ailleurs sur le disque (lien physique :
+  ce pourrait être une clé), un fichier illisible (« … macOS ne laisse pas Vigie le lire : copie-le ailleurs… » quand
+  macOS refuse l'accès au Bureau, aux Documents ou aux Téléchargements), ou plus que les limites (« Fichiers joints
+  trop gros : 1 Go au plus. »).
+- **Permis** : hors du dossier perso (clé USB, `/Volumes/…`), et les dossiers temporaires du système (`/tmp`,
+  `/private/var/folders/…`, celui du moteur), même s'ils étaient rangés sous un dossier réservé.
+- Le moteur de Vigie n'écrit que dans `<dossier>/sources` et `<dossier>/.vigie` (et crée `<dossier>` s'il manque) :
+  un `sources` qui n'est pas un dossier ordinaire (un lien, par exemple) est refusé. Chaque fichier est rouvert sans
+  suivre de lien et doit être celui qui a été vérifié (même numéro sur le disque) : remplacé entre-temps, il n'est
+  pas copié (« Fichier joint modifié pendant la copie : … Relance l'agent. »). Si une copie échoue (disque plein),
+  ce lancement retire ce qu'il avait déjà copié.
+
+### Reprendre une conversation
+
+Le formulaire montre les conversations Claude Code (pas Codex) lancées dans ce dossier exactement (chemin réel :
+liens résolus, majuscules sans importance), connues de Vigie (7 derniers jours), la plus récente d'abord, 5 au plus ;
+leur titre est celui de l'app Claude s'il existe. Continuer l'une d'elles : le brief dit « Conversation : reprise (tu
+continues une conversation existante : tiens compte de ce qui a déjà été fait, ne refais pas ce qui existe). » et le
+message devient « Lance l'agent « … » dans cette conversation : lis le fichier … et suis ses consignes. Tiens compte
+de ce qu'on a déjà fait ici. » Si la conversation n'est plus dans ce dossier au moment du lancement : « Cette
+conversation n'est plus dans ce dossier : relance en nouvelle conversation. »
+
+### Dans VS Code ou dans l'app Claude
+
+`Ouvrir dans` propose ce qui est installé : VS Code (dans `/Applications` ou `~/Applications`, avec l'extension Claude
+Code) et l'app Claude. Le dernier choix est retenu. C'est le moteur de Vigie qui ouvre (`/usr/bin/open`, avec des
+arguments, jamais par un shell ; chaque valeur des liens encodée) :
+
+| Où | Nouvelle conversation | Reprise |
+|---|---|---|
+| VS Code | `open -a "Visual Studio Code" <dossier>`, puis, quand la fenêtre est prête, `vscode://anthropic.claude-code/open?prompt=…` | le même lien avec `&session=<uuid>` |
+| App Claude | `claude://code/new?folder=…&q=…&source=vigie` (message prérempli, 2 592 caractères au plus ; plus long : sans `q`, l'app copie le message) | `claude://code/continue?session=local_<id>` si la conversation est née dans l'app, sinon `claude://resume?session=<uuid>` ; aucun ne prend de message : l'app le copie |
+
+**Attente de la fenêtre de VS Code.** VS Code envoie un lien `vscode://` à sa dernière fenêtre active : ouvert trop
+tôt (l'ancienne attente fixe de 2,5 s), le message partait dans la fenêtre d'un autre projet. Chaque fenêtre où
+l'extension Claude Code démarre écrit `~/.claude/ide/<port>.lock` (`pid`, `workspaceFolders`). Le moteur de Vigie
+attend donc la fenêtre **du projet** : un `.lock` dont `workspaceFolders` contient le dossier (chemin réel, casse
+pliée) et dont le `pid` est vivant. Déjà là avant l'ouverture : 800 ms (le temps qu'elle passe devant). Sinon :
+sondage toutes les 300 ms, 25 s au plus, puis 1,5 s (le temps que l'extension écoute). Pas prête à temps : le lien
+n'est **pas** envoyé (il partirait ailleurs) ; VS Code est ouvert sur le projet et l'app copie le message. L'attente
+passe par des minuteries : le moteur répond aux autres demandes pendant ce temps (le lancement peut durer ~30 s).
+« Ouvrir une conversation » (vue d'ensemble) attend la fenêtre de la même façon.
+
+La réponse dit ce qui s'est ouvert (`opened`), et l'app affiche le message :
+
+| `opened` | Message |
+|---|---|
+| `full` (VS Code) | VS Code s'ouvre sur le projet, avec le message prêt dans Claude Code : envoie-le. |
+| `full` (app Claude) | L'app Claude s'ouvre sur le projet, avec le message prêt : envoie-le. |
+| `folder` | VS Code est ouvert sur le projet, mais Claude Code n'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le. |
+| `no-prompt` | La conversation s'ouvre dans l'app Claude : le message est copié, colle-le (⌘V) et envoie-le. |
+| `none` | Le dossier est prêt, mais rien ne s'est ouvert : le message est copié, colle-le dans Claude Code. |
 
 ## Ce qui reste
 
@@ -183,6 +260,11 @@ dans Vigie. Le brief est lisible par la conversation, mais le modifier passe par
 - **Garde-fous** : publier un site, supprimer, envoyer un e-mail restent des actions sensibles. Il faudra ajouter la
   publication Webflow (`publish_site`) aux règles.
 - **Aucun secret dans un agent** : les connexions passent par la passerelle MCP de Vigie.
+- **Fichiers joints et accès de macOS** : le moteur de Vigie ne lit pas le Bureau, les Documents ni les
+  Téléchargements tant que macOS ne le lui permet pas ; l'app pourra copier ces fichiers dans son dossier temporaire
+  avant de les joindre, comme elle le fait pour les pièces de Mail.
+- **Fichiers sensibles hors des dossiers réservés** (`~/.claude.json`, `~/.aws`, `~/.gnupg`…) : joints seulement si
+  tu les choisis toi-même (cachés dans le Finder) ; à ajouter aux dossiers réservés si le besoin se présente.
 
 ## Encore à décider
 
@@ -200,5 +282,7 @@ ouvert.
 
 1. **Première version** : format `AGENT.md`, page Agents, lancement dans VS Code (fait côté moteur le 2026-10-26),
    et un premier agent « Démarrer un projet client » avec un modèle Figma en bibliothèque et un site Webflow modèle.
-2. **Ensuite** : lancement en fond et compte rendu dans Vigie, captures des sites de référence par un navigateur.
-3. **Puis** : bibliothèque d'équipe partagée, et lancements planifiés si on en a besoin.
+2. **Deuxième version** (moteur, 2026-10-26) : un seul champ et des fichiers joints, `creates`, reprise d'une
+   conversation, VS Code ou app Claude, ouverture par le moteur qui attend la fenêtre du projet.
+3. **Ensuite** : lancement en fond et compte rendu dans Vigie, captures des sites de référence par un navigateur.
+4. **Puis** : bibliothèque d'équipe partagée, et lancements planifiés si on en a besoin.
