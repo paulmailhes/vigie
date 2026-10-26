@@ -10,12 +10,13 @@ struct AgentFolderRuleTests {
         let path: String
         let outside: String
 
-        init() throws {
+        /// `without` : des dossiers de départ à ne pas créer (« .ssh » pour qui n'a pas de clés).
+        init(without: Set<String> = []) throws {
             let base = FileManager.default.temporaryDirectory.path(percentEncoded: false)
             let root = (base as NSString).appendingPathComponent("vigie-essai-\(UUID().uuidString)")
             path = (root as NSString).appendingPathComponent("maison")
             outside = (root as NSString).appendingPathComponent("disque-externe")
-            for dir in ["Code/depot", ".claude", ".ssh", ".vigie/data", "Library/LaunchAgents"] {
+            for dir in ["Code/depot", ".claude", ".ssh", ".vigie/data", "Library/LaunchAgents"] where !without.contains(dir) {
                 try FileManager.default.createDirectory(atPath: path + "/" + dir, withIntermediateDirectories: true)
             }
             try FileManager.default.createDirectory(atPath: outside, withIntermediateDirectories: true)
@@ -23,6 +24,13 @@ struct AgentFolderRuleTests {
 
         /// Le disque du Mac ne distingue pas les majuscules (le cas par défaut) : .CLAUDE mène à .claude.
         var caseInsensitive: Bool { FileManager.default.fileExists(atPath: path + "/.CLAUDE") }
+
+        /// Son chemin réel (« /private/var/folders/… » pour le dossier temporaire).
+        var real: String {
+            guard let resolved = realpath(path, nil) else { return path }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
 
         func link(_ name: String, to target: String) throws {
             try FileManager.default.createSymbolicLink(atPath: path + "/" + name, withDestinationPath: target)
@@ -36,8 +44,10 @@ struct AgentFolderRuleTests {
     }
 
     private static let outsideHome = "Dossier refusé : il doit être dans ton dossier perso."
+    private static let homeItself = "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
+    private static let unreadable = "Dossier refusé : chemin trop long ou illisible. Choisis un autre dossier avec « Choisir… »."
     private static func reserved(_ name: String) -> String {
-        "Dossier refusé : ~/\(name) est réservé (Vigie, réglages du Mac, Claude Code ou clés)."
+        "Dossier refusé : ~/\(name) est réservé (Vigie, réglages du Mac, Claude Code ou clés), choisis un autre dossier."
     }
 
     @Test func expandsLikeTheEngine() {
@@ -64,8 +74,8 @@ struct AgentFolderRuleTests {
         let home = try FakeHome()
         #expect(home.issue("  ") == "Indique le dossier du projet.")
         #expect(home.issue("Code/martin") == "Indique un chemin complet, par exemple ~/Code/cabinet-martin.")
-        #expect(home.issue("~/Code/mar\ttin") == "Dossier refusé : chemin trop long ou illisible.")
-        #expect(home.issue("~/" + String(repeating: "a", count: 1100)) == "Dossier refusé : chemin trop long ou illisible.")
+        #expect(home.issue("~/Code/mar\ttin") == Self.unreadable)
+        #expect(home.issue("~/" + String(repeating: "a", count: 1100)) == Self.unreadable)
     }
 
     @Test func refusesOutsideHome() throws {
@@ -122,6 +132,19 @@ struct AgentFolderRuleTests {
             == "Choisis un dossier rien que pour ce projet, pas ~/Cod\u{0065}\u{0301} lui-même.")
     }
 
+    /// Le disque plie les majuscules comme Unicode, pas seulement comme les minuscules : « ſ » (s long) y est « s ».
+    /// Un dossier réservé pas encore créé (pas de clés SSH) n'a pas de chemin réel pour rattraper l'écart.
+    @Test func foldsCaseLikeTheDisk() throws {
+        let home = try FakeHome(without: [".ssh"])
+        #expect(home.issue("~/.SSH/x") == Self.reserved(".ssh"))
+        #expect(home.issue("~/.\u{017F}\u{017F}h/x") == Self.reserved(".ssh"))
+        #expect(home.issue("~/.claude-compte\u{017F}/x") == Self.reserved(".claude-comptes"))
+        // ce qui doit passer passe encore
+        #expect(home.issue("~/Code/Stra\u{00DF}e") == nil)
+        #expect(home.issue("~/.claude-notes/x") == nil)
+        #expect(home.issue("~/Library2/x") == nil)
+    }
+
     /// Un lien d'un dépôt (partagé, cloné) vers un dossier réservé ou vers le dossier perso : son chemin réel compte.
     @Test func followsSymbolicLinks() throws {
         let home = try FakeHome()
@@ -131,18 +154,36 @@ struct AgentFolderRuleTests {
         #expect(home.issue("~/Code/depot/cl") == Self.reserved(".claude"))
         #expect(home.issue("~/Code/depot/cl/projet") == Self.reserved(".claude"))
         #expect(home.issue("~/Code/depot/cles/x") == Self.reserved(".ssh"))
-        #expect(home.issue("~/Code/depot/maison")
-            == "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même.")
+        #expect(home.issue("~/Code/depot/maison") == Self.homeItself)
         #expect(home.issue("~/Code/depot/maison/Library/x") == Self.reserved("Library"))
 
         if home.caseInsensitive {
             try home.link("Code/depot/cl2", to: "../../.CLAUDE")
             try home.link("Code/depot/chez-moi", to: home.path.uppercased())
             #expect(home.issue("~/Code/depot/cl2/x") == Self.reserved(".claude"))
-            #expect(home.issue("~/Code/depot/chez-moi")
-                == "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même.")
+            #expect(home.issue("~/Code/depot/chez-moi") == Self.homeItself)
             #expect(home.issue("~/Code/depot/chez-moi/.VIGIE") == Self.reserved(".vigie"))
         }
+    }
+
+    /// /System/Volumes/Data<dossier perso> est le dossier perso (le volume des données du Mac), mais son chemin réel
+    /// garde ce début : c'est le dossier lui-même qui compte, pas son chemin.
+    @Test func seesTheSameFolderThroughTheDataVolume() throws {
+        let home = try FakeHome()
+        let data = "/System/Volumes/Data" + home.real
+        // ce volume existe sur tout Mac récent : l'essai ne doit pas passer à vide
+        try #require(FileManager.default.fileExists(atPath: data + "/.ssh"))
+        try home.link("Code/depot/fh", to: data)
+        try home.link("Code/depot/fl", to: data + "/.ssh")
+        #expect(home.issue("~/Code/depot/fh") == Self.homeItself)
+        #expect(home.issue("~/Code/depot/fh/.ssh/x") == Self.reserved(".ssh"))
+        #expect(home.issue("~/Code/depot/fh/Library/LaunchAgents") == Self.reserved("Library"))
+        #expect(home.issue("~/Code/depot/fl/x") == Self.reserved(".ssh"))
+        // pas encore créé, ou écrit autrement
+        #expect(home.issue("~/Code/depot/fh/.codex/p") == Self.reserved(".codex"))
+        #expect(home.issue("~/Code/depot/fh/.\u{017F}sh") == Self.reserved(".ssh"))
+        // un vrai projet par ce chemin reste accepté
+        #expect(home.issue("~/Code/depot/fh/Code/martin") == nil)
     }
 }
 

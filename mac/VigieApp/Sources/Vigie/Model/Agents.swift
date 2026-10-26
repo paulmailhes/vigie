@@ -155,9 +155,9 @@ enum AgentSlug {
 
 /// Le dossier d'un projet, vérifié dans la feuille comme le moteur le vérifiera au lancement (lib/agents.mjs,
 /// projectFolder) : dans le dossier perso mais pas lui-même, hors des dossiers de Vigie, du Mac, de Claude Code et des
-/// clés. Le chemin écrit et son chemin réel (liens résolus) comptent tous les deux, sans tenir compte des majuscules
-/// ni de la façon d'écrire les accents : le disque du Mac ne les distingue pas. Le moteur reste l'arbitre ; ceci grise
-/// le bouton avant le clic.
+/// clés. Le chemin écrit compte, sans tenir compte des majuscules ni de la façon d'écrire les accents (le disque du Mac
+/// ne les distingue pas), et le dossier où il mène aussi, reconnu sur le disque quel que soit le chemin pris (lien,
+/// /System/Volumes/Data…). Le moteur reste l'arbitre ; ceci grise le bouton avant le clic.
 enum AgentFolderRule {
     /// Sous le dossier perso (FORBIDDEN dans lib/agents.mjs).
     static let reserved = [".vigie", "Library", ".claude", ".claude-comptes", ".ssh", ".codex"]
@@ -188,40 +188,56 @@ enum AgentFolderRule {
         guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Indique le dossier du projet." }
         let path = expanded(raw, home: home)
         if path.utf16.count > maxLength || path.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) {
-            return "Dossier refusé : chemin trop long ou illisible."
+            return "Dossier refusé : chemin trop long ou illisible. Choisis un autre dossier avec « Choisir… »."
         }
         guard path.hasPrefix("/") else { return "Indique un chemin complet, par exemple ~/Code/cabinet-martin." }
         guard within(path, home) else { return "Dossier refusé : il doit être dans ton dossier perso." }
         if same(path, home) || same(path, expanded(parent, home: home)) {
             return "Choisis un dossier rien que pour ce projet, pas \(tilde(path, home: home)) lui-même."
         }
-        let realHome = realPath(home)
-        let real = realPath(path)
-        if same(real, realHome) {
-            return "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
+        // le chemin écrit, même là où rien n'est encore créé
+        if let bad = reserved.first(where: { within(path, join(home, $0)) }) { return reservedIssue(bad) }
+        return diskIssue(path, home: home)
+    }
+
+    /// Le dossier où mène le chemin, tel que le disque le voit. Un lien peut mener au dossier perso ou à un dossier
+    /// réservé sans que le chemin le dise, et le chemin réel ne ramène pas tout au chemin habituel
+    /// (/System/Volumes/Data/Users/… reste tel quel) : chaque début du chemin déjà là est donc comparé à ces dossiers
+    /// par son identité sur le disque. Juste après le dossier perso, le nom suivant compte aussi, pour un dossier
+    /// réservé pas encore créé.
+    private static func diskIssue(_ path: String, home: String) -> String? {
+        guard let homeID = DiskID(home) else { return nil }
+        let reservedIDs = reserved.compactMap { name in DiskID(join(home, name)).map { (name: name, id: $0) } }
+        let parts = path.split(separator: "/").map(String.init)
+        var prefix = ""
+        for (index, part) in parts.enumerated() {
+            prefix += "/" + part
+            guard let id = DiskID(prefix) else { return nil } // la suite n'existe pas encore
+            if let hit = reservedIDs.first(where: { $0.id == id }) { return reservedIssue(hit.name) }
+            guard id == homeID else { continue }
+            guard index + 1 < parts.count else {
+                return "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
+            }
+            let next = fold(parts[index + 1])
+            if let bad = reserved.first(where: { fold($0) == next }) { return reservedIssue(bad) }
         }
-        let bad = reserved.first { name in
-            [join(home, name), join(realHome, name), realPath(join(home, name))]
-                .contains { within(path, $0) || within(real, $0) }
-        }
-        if let bad { return "Dossier refusé : ~/\(bad) est réservé (Vigie, réglages du Mac, Claude Code ou clés)." }
         return nil
     }
 
-    /// Chemin réel : le plus proche parent existant, résolu (liens compris, avec la casse du disque), plus la suite
-    /// qui n'existe pas encore.
-    static func realPath(_ path: String) -> String {
-        var tail: [String] = []
-        var current = path
-        while true {
-            if let resolved = realpath(current, nil) {
-                defer { free(resolved) }
-                return tail.reversed().reduce(String(cString: resolved), join)
-            }
-            let up = (current as NSString).deletingLastPathComponent
-            guard !up.isEmpty, up != current else { return path }
-            tail.append((current as NSString).lastPathComponent)
-            current = up
+    private static func reservedIssue(_ name: String) -> String {
+        "Dossier refusé : ~/\(name) est réservé (Vigie, réglages du Mac, Claude Code ou clés), choisis un autre dossier."
+    }
+
+    /// Un dossier sur le disque (volume et numéro), quel que soit le chemin qui y mène ; nil s'il n'est pas là.
+    private struct DiskID: Equatable {
+        let device: dev_t
+        let inode: ino_t
+
+        init?(_ path: String) {
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            device = info.st_dev
+            inode = info.st_ino
         }
     }
 
@@ -234,8 +250,11 @@ enum AgentFolderRule {
 
     private static func same(_ a: String, _ b: String) -> Bool { fold(a).utf8.elementsEqual(fold(b).utf8) }
 
-    /// Comme le disque du Mac : « .SSH » est « .ssh », « é » s'écrit d'une seule façon.
-    private static func fold(_ path: String) -> String { path.lowercased().precomposedStringWithCanonicalMapping }
+    /// Comme le disque du Mac, qui plie les majuscules à la façon d'Unicode et pas seulement en minuscules : « .SSH »
+    /// et « .ſſh » (s long) sont « .ssh », « é » s'écrit d'une seule façon.
+    private static func fold(_ path: String) -> String {
+        path.folding(options: .caseInsensitive, locale: nil).precomposedStringWithCanonicalMapping
+    }
 
     private static func join(_ base: String, _ name: String) -> String {
         base.hasSuffix("/") ? base + name : base + "/" + name
