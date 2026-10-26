@@ -104,11 +104,12 @@ Les MCP que le service refuse de faire passer par Vigie (Figma) restent branché
 
 ## Agents
 
-Un **agent** est une recette préparée à l'avance, par exemple « Démarrer un projet client » : un petit formulaire (nom du client, questionnaire, sites de référence…), les MCP dont il a besoin, puis une consigne pour Claude.
+Un **agent** est une recette préparée à l'avance, par exemple « Démarrer un projet client » : un champ où coller ce que tu as (questionnaire, e-mail du client, liens, notes) et glisser ses fichiers, les MCP dont il a besoin, ce qu'il va créer, puis une consigne pour Claude.
 
 - Chaque agent est un fichier `AGENT.md`, rangé dans `~/.vigie/data/agents/<nom>/`. Son format est dans [docs/agents.md](docs/agents.md).
 - La page Agents montre chaque agent et l'état de ses MCP.
-- **Lancer** : tu remplis le formulaire et tu choisis le dossier du projet. Vigie crée le dossier et y écrit la consigne remplie (`.vigie/agent-<nom>.md`, hors de git). VS Code s'ouvre ensuite avec le message prêt : tu l'envoies, et la conversation suit la recette.
+- **Lancer** : tu choisis le dossier du projet et tu remplis le champ. Vigie crée le dossier, copie les fichiers glissés dans `sources/`, et y écrit la consigne remplie (`.vigie/agent-<nom>.md`, hors de git). Si une conversation existe déjà dans ce dossier, l'agent la reprend (son historique reste), ou en ouvre une nouvelle si tu préfères.
+- **Dans VS Code ou dans l'app Claude**, au choix : Vigie ouvre le projet avec le message prêt, tu l'envoies, et la conversation suit la recette. Dans VS Code, Vigie attend que la fenêtre du projet soit prête avant d'y envoyer le message.
 
 ## Codex (OpenAI)
 
