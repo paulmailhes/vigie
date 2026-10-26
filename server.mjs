@@ -7,7 +7,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { Indexer, actionKind, maskSecrets } from './lib/indexer.mjs';
 import { createCodex } from './lib/codex.mjs';
 import { createConversations } from './lib/conversations.mjs';
@@ -21,7 +20,8 @@ import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
-import { createAgents } from './lib/agents.mjs';
+import { createAgents, folderConversations } from './lib/agents.mjs';
+import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -68,8 +68,9 @@ const conv = createConversations(indexer);
 const codex = createCodex({ dataDir: DATA });
 const accounts = createAccounts();
 const updater = createUpdater({ root: ROOT, dataDir: DATA });
-// Apps de bureau (Claude, ChatGPT/Codex) : titres de l'app Claude, outils installés (lib/desktop.mjs).
-const desktop = createDesktop({ home: accounts.paths.home });
+// Apps de bureau (Claude, ChatGPT/Codex) : titres de l'app Claude, outils installés (lib/desktop.mjs). VIGIE_APPS_DIR :
+// un faux /Applications pour les essais.
+const desktop = createDesktop({ home: accounts.paths.home, apps: process.env.VIGIE_APPS_DIR || '/Applications' });
 // Passerelle MCP : une autorisation par service pour tous les comptes (lib/gateway.mjs). Port lu au moment voulu
 // (les tests lancent le moteur sur un port libre).
 const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`) });
@@ -120,8 +121,13 @@ const mcp = createMcp({
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
-// Agents : recettes rangées dans data/agents/<id>/AGENT.md, lancées dans une conversation de VS Code (lib/agents.mjs).
+// Agents : recettes rangées dans data/agents/<id>/AGENT.md, lancées dans une conversation de VS Code ou de l'app
+// Claude (lib/agents.mjs).
 const agents = createAgents({ dir: path.join(DATA, 'agents'), home: HOME });
+// Ouvreur : VS Code (le lien part quand la fenêtre du dossier est prête) ou l'app Claude (lib/opener.mjs).
+// VIGIE_IDE_WAIT_MS : attente maximale de la fenêtre (25 s ; plus courte dans les essais).
+const IDE_WAIT_MS = Number(process.env.VIGIE_IDE_WAIT_MS);
+const opener = createOpener({ home: HOME, openBin: OPEN_BIN, timing: Number.isFinite(IDE_WAIT_MS) && IDE_WAIT_MS >= 0 ? { max: IDE_WAIT_MS } : {} });
 
 // ---------- petits outils ----------
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -1212,20 +1218,11 @@ function postDismiss(raw) {
   return [200, { ok: true, id }];
 }
 
-// Lance un programme du Mac sans shell ; résultat { ok, code }. La sortie n'est jamais journalisée.
-function runBin(bin, args, { input = null, timeoutMs = 15_000 } = {}) {
-  return new Promise((resolve) => {
-    let child;
-    try { child = spawn(bin, args, { stdio: [input === null ? 'ignore' : 'pipe', 'ignore', 'ignore'] }); } catch { return resolve({ ok: false, code: null }); }
-    const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* déjà fini */ } }, timeoutMs);
-    child.on('error', () => { clearTimeout(t); resolve({ ok: false, code: null }); });
-    child.on('close', (code) => { clearTimeout(t); resolve({ ok: code === 0, code }); });
-    if (input !== null) { child.stdin.on('error', () => {}); child.stdin.end(input); }
-  });
-}
+// runBin (lib/opener.mjs) lance un programme du Mac sans shell.
 
-// { kind: "conversation", id } : VS Code s'ouvre sur le dossier de la conversation, puis sur la conversation
-// elle-même (lien de l'extension Claude Code : rien n'est envoyé, la saisie reste vide).
+// { kind: "conversation", id } : VS Code s'ouvre sur le dossier de la conversation, puis, quand sa fenêtre est prête,
+// sur la conversation elle-même (lien de l'extension Claude Code : rien n'est envoyé, la saisie reste vide). Fenêtre
+// pas prête à temps : le lien ne part pas (il ouvrirait la conversation dans la fenêtre d'un autre projet).
 // L'app de bureau qui porte la conversation : pas de lien vers une conversation précise (non documenté), l'app
 // s'ouvre et la conversation est dans sa liste.
 async function openApp(bundleId, name, message) {
@@ -1251,10 +1248,14 @@ async function openConversation(id) {
   const dir = launchDirOf(id);
   if (!dir) return bad('Conversation introuvable : elle date sans doute de plus de 7 jours.', 404);
   if (!isDir(dir)) return bad('Le dossier de cette conversation n\'existe plus.', 404);
-  if (!(await runBin(OPEN_BIN, ['-a', 'Visual Studio Code', dir])).ok) return bad('VS Code ne s\'est pas ouvert.');
-  const openUrl = `vscode://anthropic.claude-code/open?session=${id}`;
-  const tab = await runBin(OPEN_BIN, [openUrl]);
-  return [200, { ok: true, message: tab.ok ? `Conversation ouverte dans VS Code (${path.basename(dir)}).` : `VS Code est ouvert sur ${path.basename(dir)}.`, openUrl }];
+  const openUrl = vscodeLink({ session: id });
+  const opened = await opener.vscode(dir, openUrl);
+  if (opened === 'none') return bad('VS Code ne s\'est pas ouvert : vérifie qu\'il est installé, puis réessaie.');
+  if (opened === 'folder') {
+    return [200, { ok: true, opened, openUrl: null,
+      message: `VS Code est ouvert sur ${path.basename(dir)}, mais Claude Code n'a pas répondu à temps : ouvre la conversation depuis son panneau.` }];
+  }
+  return [200, { ok: true, opened, message: `Conversation ouverte dans VS Code (${path.basename(dir)}).`, openUrl }];
 }
 
 // La commande exacte d'un garde-fou : l'app ne reçoit que le texte masqué (clés remplacées par ••••).
@@ -1514,18 +1515,69 @@ function agentsView() {
       return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
     } catch { return 'unknown'; }
   };
+  const available = desktop.agentSurfaces();
   return [200, {
     dir: agents.dir,
     account: acc ? { id: acc.id, label: acc.label || acc.id } : null,
+    // où un agent peut s'ouvrir, et celui proposé (le dernier utilisé s'il est encore là)
+    surfaces: { available, chosen: chooseSurface(available, readState().agentsSurface) },
     agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map((name) => ({ name, status: status(name) })) })),
   }];
 }
-// POST /api/v2/agents/launch { id, values, folder } : dossier créé, consigne écrite, message préparé ; l'app ouvre
-// VS Code sur le dossier puis openUrl (le message pré-rempli, que l'utilisateur envoie).
-function postAgentLaunch(body) {
-  const r = agents.launch({ id: body.id, values: body.values, folder: body.folder });
+
+// Conversations Claude Code lancées dans ce dossier, connues de l'indexeur (lib/agents.mjs, folderConversations).
+// limit 0 : toutes (pour vérifier une conversation à reprendre, même si d'autres l'ont poussée hors des 5 montrées).
+function conversationsIn(target, limit = 5) {
+  return folderConversations(target, {
+    sessions: indexer.sessions, light: indexer.light, live: indexer.live, app: desktop.claudeSessions(), surfaceOf,
+    launchDir: (s) => (s.light ? launchCwd(s) || s.cwd : launchDirOf(s.id)),
+  }, limit);
+}
+
+// GET /api/v2/agents/folder?path=… : ce que le formulaire montre pour le dossier choisi (docs/api-v2.md).
+function agentFolder(url) {
+  const raw = url.searchParams.get('path');
+  if (raw === null || !raw.trim()) return bad('Indique un dossier.');
+  const f = agents.folder(raw);
+  return [200, { path: f.path, exists: f.exists, error: f.error, conversations: f.error ? [] : conversationsIn(f.path), sources: f.sources }];
+}
+
+// POST /api/v2/agents/launch { id, values, folder, files?, surface?, session? } : tout est vérifié (surface installée,
+// conversation à reprendre dans ce dossier) avant de rien créer ; puis dossier créé, fichiers joints copiés, consigne
+// écrite, message préparé, et le moteur ouvre VS Code ou l'app Claude (lib/opener.mjs). Jusqu'à ~30 s : l'attente de
+// la fenêtre de VS Code passe par des minuteries, le moteur répond aux autres requêtes pendant ce temps.
+const SURFACE_MISSING = {
+  vscode: 'VS Code et son extension Claude Code ne sont pas sur ton Mac : choisis l\'app Claude, ou installe-les.',
+  'claude-app': 'L\'app Claude n\'est pas sur ton Mac : choisis VS Code, ou installe-la.',
+};
+const NO_SURFACE = 'Ni VS Code (avec son extension Claude Code) ni l\'app Claude ne sont sur ton Mac : installe l\'un des deux, puis relance l\'agent.';
+const SESSION_GONE = 'Cette conversation n\'est plus dans ce dossier : relance en nouvelle conversation.';
+async function postAgentLaunch(body) {
+  const available = desktop.agentSurfaces();
+  const surface = body.surface ?? chooseSurface(available, readState().agentsSurface);
+  if (surface === null) return bad(NO_SURFACE);
+  if (!Object.hasOwn(SURFACE_MISSING, surface)) return bad('Où ouvrir l\'agent ? « vscode » ou « claude-app ».');
+  const session = body.session ?? null;
+  if (session !== null && (typeof session !== 'string' || !UUID.test(session))) return bad(SESSION_GONE);
+  const r = agents.launch({
+    id: body.id, values: body.values, folder: body.folder, files: body.files, session,
+    // après toutes les vérifications du dossier et des fichiers, avant la première écriture
+    before: (target) => {
+      if (!available.length) return { error: NO_SURFACE };
+      if (!available.includes(surface)) return { error: SURFACE_MISSING[surface] };
+      if (session && !conversationsIn(target, 0).some((c) => c.id === session)) return { error: SESSION_GONE };
+      return null;
+    },
+  });
   if (!r.ok) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
-  return [200, { ok: true, folder: r.folder, briefFile: r.briefFile, openUrl: r.openUrl, prompt: r.prompt, message: r.message }];
+  try {
+    const s = readState();
+    if (s.agentsSurface !== surface) { s.agentsSurface = surface; writeState(s); }
+  } catch (e) { console.error('[vigie] surface des agents :', clean(e)); }
+  const localId = session && surface === 'claude-app' ? desktop.claudeSessions().get(session)?.localId ?? null : null;
+  let opened = 'none';
+  try { opened = await opener.launch({ surface, folder: r.folder, prompt: r.prompt, session, localId }); } catch (e) { console.error('[vigie] ouverture de l\'agent :', clean(e)); }
+  return [200, { ok: true, folder: r.folder, briefFile: r.briefFile, prompt: r.prompt, surface, opened, copied: r.copied, message: launchMessage(opened, surface) }];
 }
 
 function postQuestionReview(raw, body) {
@@ -1603,6 +1655,7 @@ const ROUTES = [
   ['POST', /^\/api\/v2\/mcp\/connect$/, (_, b) => postMcpConnect(b)],
   ['POST', /^\/api\/v2\/accounts$/, (_, b) => postAccounts(b)],
   ['GET', /^\/api\/v2\/agents$/, () => agentsView()],
+  ['GET', /^\/api\/v2\/agents\/folder$/, (_, __, url) => agentFolder(url)],
   ['POST', /^\/api\/v2\/agents\/launch$/, (_, b) => postAgentLaunch(b)],
   ['POST', new RegExp(`^/api/v2/pending/${S}$`), ([id], b) => postPending(id, b)],
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],

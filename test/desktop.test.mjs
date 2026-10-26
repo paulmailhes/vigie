@@ -30,7 +30,8 @@ test('app Claude : titres lus par identifiant de conversation ; outils installé
   fs.writeFileSync(path.join(dir, 'scheduled-tasks.json'), '[]');
   const apps = path.join(TMP, 'Applications');
   const d = createDesktop({ home, apps });
-  assert.deepEqual([...d.claudeSessions()], [['aaaa-1', { title: 'Centralisateur de communications', archived: false }]]);
+  assert.deepEqual([...d.claudeSessions()], [['aaaa-1', { title: 'Centralisateur de communications', archived: false, localId: 'local_1' }]],
+    'id local : le nom du fichier, pour rouvrir la conversation dans l\'app');
   assert.deepEqual(d.tools(), { claudeVSCode: false, claudeApp: false, codexVSCode: false, codexApp: false });
   fs.mkdirSync(path.join(home, '.vscode/extensions/anthropic.claude-code-2.1.304-darwin-arm64'), { recursive: true });
   fs.mkdirSync(path.join(apps, 'Claude.app'), { recursive: true });
@@ -38,4 +39,20 @@ test('app Claude : titres lus par identifiant de conversation ; outils installé
   assert.deepEqual(d.tools(), { claudeVSCode: true, claudeApp: true, codexVSCode: false, codexApp: false }, 'ancienne app ChatGPT : pas de Codex');
   fs.mkdirSync(path.join(apps, 'ChatGPT.app/Contents/Resources/codex-cli/bin'), { recursive: true });
   assert.equal(d.tools().codexApp, true);
+});
+
+test('où un agent peut s\'ouvrir : VS Code avec son extension Claude Code, l\'app Claude', () => {
+  const home = path.join(TMP, 'home-surfaces');
+  const apps = path.join(TMP, 'Applications-surfaces');
+  const d = createDesktop({ home, apps });
+  assert.deepEqual(d.agentSurfaces(), []);
+  fs.mkdirSync(path.join(apps, 'Visual Studio Code.app'), { recursive: true });
+  assert.deepEqual(d.agentSurfaces(), [], 'VS Code sans l\'extension Claude Code : pas de lancement');
+  fs.mkdirSync(path.join(home, '.vscode/extensions/anthropic.claude-code-2.1.304-darwin-arm64'), { recursive: true });
+  assert.deepEqual(d.agentSurfaces(), ['vscode']);
+  fs.rmSync(path.join(apps, 'Visual Studio Code.app'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'Applications', 'Visual Studio Code.app'), { recursive: true });
+  assert.deepEqual(d.agentSurfaces(), ['vscode'], 'VS Code rangé dans ~/Applications');
+  fs.mkdirSync(path.join(apps, 'Claude.app'), { recursive: true });
+  assert.deepEqual(d.agentSurfaces(), ['vscode', 'claude-app']);
 });
