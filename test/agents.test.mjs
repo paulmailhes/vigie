@@ -27,6 +27,12 @@ function random(seed) {
   };
 }
 const ms = (f) => { const t = performance.now(); f(); return performance.now() - t; };
+// Raison affichée pour chaque dossier réservé (mêmes mots dans l'app) ; la phrase du lancement ajoute où aller.
+const REASONS = {
+  '.vigie': 'dossier de Vigie', 'Library': 'réglages du Mac et des apps, iCloud Drive et Dropbox compris', '.claude': 'réglages de Claude Code',
+  '.claude-comptes': 'comptes Claude Code de Vigie', '.ssh': 'tes clés', '.codex': 'réglages de Codex',
+};
+const refusedLaunch = (d) => `Dossier refusé : ~/${d} est réservé (${REASONS[d]}). Choisis un dossier ailleurs, dans ~/Code par exemple.`;
 const w = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };
 let n = 0;
 // Un monde neuf par essai : dossier perso, dossier des agents.
@@ -326,15 +332,18 @@ test('bibliothèque : le « folder » d\'un AGENT.md suit la règle du lancement
   const H = W.home;
   fs.mkdirSync(path.join(H, '.ssh'));
   fs.symlinkSync(path.join(H, '.ssh'), path.join(H, 'Code', 'raccourci'));
-  const reserved = (d) => `« folder » : ~/${d} est réservé (Vigie, réglages du Mac, Claude Code ou clés), choisis un autre dossier.`;
+  // la raison seule, puis où corriger : la carte n'a pas de dossier à choisir, c'est AGENT.md qui le nomme
+  const reserved = (d) => `« folder » : ~/${d} est réservé (${REASONS[d]}). Change-le dans AGENT.md.`;
+  const outside = '« folder » : il doit être dans ton dossier perso. Change-le dans AGENT.md.';
   const cases = {
-    'hors-maison': ['/Volumes/Projets', '« folder » : il doit être dans ton dossier perso.'],
-    'temporaire': [path.join(W.root, 'ailleurs'), '« folder » : il doit être dans ton dossier perso.'],
-    'au-dessus': ['~/..', '« folder » : il doit être dans ton dossier perso.'],
+    'hors-maison': ['/Volumes/Projets', outside],
+    'temporaire': [path.join(W.root, 'ailleurs'), outside],
+    'au-dessus': ['~/..', outside],
     'cles': ['~/.ssh/clients', reserved('.ssh')],
     'cles-casse': ['~/.SSH', reserved('.ssh')],
     'mac': ['~/Library/Projets', reserved('Library')],
     'vigie': ['~/.vigie/data', reserved('.vigie')],
+    'codex': ['~/.codex', reserved('.codex')],
     'lien': ['~/Code/raccourci', reserved('.ssh')],
   };
   const add = (id, folder) => W.add(id, `---\nname: Agent ${id}\nicon: star\nfolder: ${folder}\nfields:\n  - id: client\n    label: Client\n---\nConsigne.`);
@@ -363,6 +372,14 @@ test('bibliothèque : le « folder » d\'un AGENT.md suit la règle du lancement
     assert.ok(fs.statSync(path.join(H, ...(id === 'ok' ? ['Code', 'clients'] : []), `atelier-${id}`, '.vigie', 'agent-' + id + '.md')).isFile());
   }
   assert.equal(parseAgent('---\nname: Essai\nfolder: ~/.ssh\n---\nConsigne.').error, null, 'parseAgent ne connaît pas le dossier perso : la vue vérifie');
+  // « ẞ » (U+1E9E, eszett majuscule) : ~/.ẞh est ~/.ssh pour le disque du Mac. Sans ~/.ssh sur le disque, rien ne
+  // rattrape l'écart : seul le pliage (ẞ → ß → SS → ss) le refuse
+  const V = world();
+  V.add('eszett', '---\nname: Eszett\nfolder: ~/.ẞh\n---\nConsigne.');
+  const e = V.agents.list().find((x) => x.id === 'eszett');
+  assert.deepEqual([e.error, e.folder], [reserved('.ssh'), path.join(V.home, 'Code')], '~/.ẞh listé avec son erreur');
+  assert.equal(V.agents.launch({ id: 'eszett', values: {}, folder: '~/Code/x' }).ok, false);
+  assert.deepEqual(fs.readdirSync(V.home), ['Code'], 'rien de créé');
 });
 
 // ---------- lancement ----------
@@ -472,31 +489,57 @@ test('lancement : le .gitignore de .vigie toujours là, même si .vigie existait
   assert.equal(r.ok, true, r.error);
   assert.deepEqual(fs.readdirSync(path.join(W.home, 'Code', 'plein', '.vigie')).sort(), ['.gitignore', 'agent-r.md']);
   assert.equal(fs.readFileSync(ignoreOf('plein'), 'utf8'), '*\n');
-  // un .gitignore déjà là qui ne protège pas le brief (vide, autre contenu, « ! » qui le réintègre, dossier, lien que
-  // git ne suit pas) : pas de brief, une phrase qui dit quoi faire ; le .gitignore n'est pas touché
-  const prep = {
-    'vide': (f) => fs.writeFileSync(f, ''),
-    'autre': (f) => fs.writeFileSync(f, '# brouillons\nnotes.txt\n*.tmp\n'),
-    'reintegre': (f) => fs.writeFileSync(f, '*\n!agent-*.md\n'),
-    'reintegre-nom': (f) => fs.writeFileSync(f, '*\n!/AGENT-R.md\n'),
-    'tabulation': (f) => fs.writeFileSync(f, '*\t\n'),
-    'retrait': (f) => fs.writeFileSync(f, ' *\n'),
-    'commentaire': (f) => fs.writeFileSync(f, '#*\n'),
-    'dossier': (f) => fs.mkdirSync(f),
-    'lien': (f) => fs.symlinkSync('/nexiste/pas', f),
-    'lien-ok': (f) => { w(path.join(W.root, 'ignore-partage'), '*\n'); fs.symlinkSync(path.join(W.root, 'ignore-partage'), f); },
+  // un .gitignore déjà là qui ne protège pas le brief : pas de brief, une phrase qui dit quoi faire selon le cas ; le
+  // .gitignore n'est pas touché. Le contenu (vide, autre, « ! » qui le réintègre) : ajouter « * » à la fin suffit,
+  // même après un « ! ». Plus de 64 Ko : il n'est pas lu, ajouter n'y change rien. Dossier, lien que git ne suit pas :
+  // pas un fichier. Fichier fermé (droits, ou macOS qui refuse) : il faut le rendre lisible.
+  const phrase = {
+    content: (f) => `Dossier refusé : ${f} laisserait la consigne de l'agent partir dans git. Ajoute à la fin la ligne « * », ou choisis un autre dossier.`,
+    big: (f) => `Dossier refusé : ${f} est trop gros pour être vérifié (64 Ko au plus). Remplace-le par un fichier avec la ligne « * », ou choisis un autre dossier.`,
+    notFile: (f) => `Dossier refusé : ${f} n'est pas un fichier, git ne le lit pas. Remplace-le par un fichier avec la ligne « * », ou choisis un autre dossier.`,
+    closed: (f) => `Dossier refusé : ${f} est illisible. Rends-le lisible, ou remplace-le par un fichier avec la ligne « * ».`,
   };
-  for (const [d, make] of Object.entries(prep)) {
+  const root = process.getuid?.() === 0; // root lit même un fichier en 000
+  const open = fs.openSync;
+  const prep = {
+    'vide': ['content', (f) => fs.writeFileSync(f, '')],
+    'autre': ['content', (f) => fs.writeFileSync(f, '# brouillons\nnotes.txt\n*.tmp\n')],
+    'reintegre': ['content', (f) => fs.writeFileSync(f, '*\n!agent-*.md\n')],
+    'reintegre-nom': ['content', (f) => fs.writeFileSync(f, '*\n!/AGENT-R.md\n')],
+    'reintegre-json': ['content', (f) => fs.writeFileSync(f, '*\n!*.json\n')],
+    'tabulation': ['content', (f) => fs.writeFileSync(f, '*\t\n')],
+    'retrait': ['content', (f) => fs.writeFileSync(f, ' *\n')],
+    'commentaire': ['content', (f) => fs.writeFileSync(f, '#*\n')],
+    'gros': ['big', (f) => fs.writeFileSync(f, `*\n${'# commentaire\n'.repeat(5000)}*\n`)],
+    'dossier': ['notFile', (f) => fs.mkdirSync(f)],
+    'lien': ['notFile', (f) => fs.symlinkSync('/nexiste/pas', f)],
+    'lien-ok': ['notFile', (f) => { w(path.join(W.root, 'ignore-partage'), '*\n'); fs.symlinkSync(path.join(W.root, 'ignore-partage'), f); }],
+    ...(root ? {} : { 'ferme': ['closed', (f) => { fs.writeFileSync(f, '*\n'); fs.chmodSync(f, 0o000); }] }),
+    'refuse': ['closed', (f) => {
+      fs.writeFileSync(f, '*\n');
+      // seulement la lecture du moteur (drapeaux en nombre) : writeFileSync passe aussi par openSync, avec « wx »
+      fs.openSync = (p, flags, ...rest) => {
+        if (p === f && typeof flags === 'number') throw Object.assign(new Error('opération non permise'), { code: 'EPERM' });
+        return open(p, flags, ...rest);
+      };
+    }],
+  };
+  for (const [d, [kind, make]] of Object.entries(prep)) {
     fs.mkdirSync(path.join(W.home, 'Code', d, '.vigie'), { recursive: true });
     make(ignoreOf(d));
     const before = fs.lstatSync(ignoreOf(d));
-    r = W.agents.launch({ id: 'r', values: {}, folder: `~/Code/${d}` });
-    const file = ['dossier', 'lien', 'lien-ok'].includes(d);
-    assert.deepEqual([r.ok, r.status, r.error], [false, 400, file
-      ? `Dossier refusé : ${ignoreOf(d)} n'est pas un fichier, git ne le lit pas. Remplace-le par un fichier avec la ligne « * », ou choisis un autre dossier.`
-      : `Dossier refusé : ${ignoreOf(d)} ne protège pas le brief de git. Ajoute-y la ligne « * », ou choisis un autre dossier.`], d);
+    try { r = W.agents.launch({ id: 'r', values: {}, folder: `~/Code/${d}` }); } finally { fs.openSync = open; }
+    assert.deepEqual([r.ok, r.status, r.error], [false, 400, phrase[kind](ignoreOf(d))], d);
     assert.deepEqual(fs.readdirSync(path.join(W.home, 'Code', d, '.vigie')), ['.gitignore'], `${d} : pas de brief`);
     assert.equal(fs.lstatSync(ignoreOf(d)).mtimeMs, before.mtimeMs, `${d} : .gitignore pas touché`);
+  }
+  // le geste proposé corrige bien : « * » ajouté à la fin, après le « ! » ; le gros remplacé par « * »
+  fs.appendFileSync(ignoreOf('reintegre-json'), '*\n');
+  fs.writeFileSync(ignoreOf('gros'), '*\n');
+  if (!root) fs.chmodSync(ignoreOf('ferme'), 0o644);
+  for (const d of ['reintegre-json', 'gros', ...(root ? [] : ['ferme'])]) {
+    r = W.agents.launch({ id: 'r', values: {}, folder: `~/Code/${d}` });
+    assert.equal(r.ok, true, `${d} corrigé : ${r.error}`);
   }
   // ce que git lit comme « tout ignorer », ou le brief ignoré : accepté
   const good = { 'crlf': '*\r\n', 'bom': `${BOM}*\n`, 'espaces': '*  \n', 'garde-soi': '# Vigie\n*\n!.gitignore\n', 'autre-reintegre': '*\n!notes.txt\n',
@@ -647,6 +690,14 @@ test('lancement refusé : formulaire, dossier hors du dossier perso ou réservé
   assert.ok(fs.readFileSync(ticks.briefFile, 'utf8').includes('```text\n`'), 'bloc de trois, un de plus que le plus long du texte');
   // dossier
   const H = W.home;
+  // « ẞ » (U+1E9E) avant que ~/.ssh n'existe : le disque du Mac le prend pour ~/.ssh, le pliage aussi (ẞ → ß → SS → ss)
+  assert.equal(go({ folder: '~/.ẞh/x' }).error, refusedLaunch('.ssh'));
+  assert.deepEqual(fs.readdirSync(H), ['Code'], '~/.ẞh refusé : rien de créé');
+  // la raison de chaque dossier réservé, puis où aller ; le dossier perso lui-même ; un chemin trop long
+  for (const d of Object.keys(REASONS)) assert.equal(go({ folder: `~/${d}/projet` }).error, refusedLaunch(d), d);
+  assert.equal(go({ folder: '~' }).error, 'Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même.');
+  assert.equal(go({ folder: `~/${'x'.repeat(1030)}` }).error, 'Dossier refusé : chemin trop long ou illisible. Choisis un autre dossier.');
+  assert.deepEqual(fs.readdirSync(H), ['Code'], 'aucun dossier réservé créé');
   w(path.join(H, 'Code', 'un-fichier'), 'x');
   fs.mkdirSync(path.join(H, 'Code', 'meta-fichier'));
   w(path.join(H, 'Code', 'meta-fichier', '.vigie'), 'x');
@@ -724,4 +775,23 @@ test('lancement refusé : formulaire, dossier hors du dossier perso ou réservé
   assert.deepEqual([c.ok, c.status], [false, 400]);
   assert.match(c.error, /^Cet agent ne peut pas être lancé : Ligne 2 : crochet non fermé\.$/);
   assert.deepEqual(W.agents.launch(), { ok: false, status: 404, error: 'Agent introuvable.' });
+});
+
+test('lancement refusé : iCloud Drive et Dropbox restent sous ~/Library, et la raison le dit', () => {
+  const W = world();
+  const H = W.home;
+  const icloud = path.join(H, 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
+  const dropbox = path.join(H, 'Library', 'CloudStorage', 'Dropbox');
+  fs.mkdirSync(icloud, { recursive: true });
+  fs.mkdirSync(dropbox, { recursive: true });
+  fs.symlinkSync(dropbox, path.join(H, 'Dropbox')); // ce que Dropbox pose dans le dossier perso sur un macOS récent
+  W.add('r', '---\nname: R\n---\nFais le point.');
+  W.add('partage', '---\nname: Partagé\nfolder: ~/Dropbox/Clients\n---\nFais le point.');
+  for (const folder of [path.join(icloud, 'Clients', 'martin'), '~/Dropbox/Clients/martin', '~/Dropbox']) {
+    const r = W.agents.launch({ id: 'r', values: {}, folder });
+    assert.deepEqual([r.ok, r.error], [false, refusedLaunch('Library')], folder);
+  }
+  assert.equal(W.agents.list().find((a) => a.id === 'partage').error,
+    `« folder » : ~/Library est réservé (${REASONS.Library}). Change-le dans AGENT.md.`);
+  assert.deepEqual([fs.readdirSync(icloud), fs.readdirSync(dropbox)], [[], []], 'rien écrit dans iCloud Drive ni dans Dropbox');
 });

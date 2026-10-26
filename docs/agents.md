@@ -103,7 +103,7 @@ Tu prépares le premier rendez-vous avec {{client}}.
 | `description` | non | une phrase sous le nom |
 | `icon` | non | nom de symbole SF (`wand.and.stars`) |
 | `mcp` | non | MCP nécessaires, par leur nom dans Claude Code (`figma-pro`, ou `Gmail` pour un connecteur claude.ai) ; la page montre leur état |
-| `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance »), sauf qu'il peut être le dossier perso lui-même (`~` : projets rangés en `~/<client>`) ; sinon l'agent est listé avec une erreur et ne se lance pas |
+| `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance »), sauf qu'il peut être le dossier perso lui-même (`~` : projets rangés en `~/<client>`) ; sinon l'agent est listé avec une erreur (« « folder » : ~/.ssh est réservé (tes clés). Change-le dans AGENT.md. ») et ne se lance pas |
 | `fields` | non | le formulaire : une liste de champs (30 au plus) |
 
 Chaque champ : `id` (minuscules, chiffres et `_`, commence par une lettre, unique), `label` (obligatoire), `type`
@@ -140,19 +140,36 @@ propres fichiers (scripts, images, modèles) et la consigne les cite par `{{doss
    conversations (celui sur lequel la conversation partira).
 2. **Lancer** ouvre le formulaire et le dossier du projet (proposé : `folder` + le nom du client).
 3. Vigie vérifie le formulaire (champs obligatoires, tailles) et le dossier : dans ton dossier perso, jamais le dossier
-   perso lui-même, ni `~/.vigie`, `~/Library`, `~/.claude`, `~/.claude-comptes`, `~/.ssh`, `~/.codex`. Les
-   majuscules ne comptent pas, comme pour le disque du Mac : `~/.SSH` est `~/.ssh`. Un lien, ou un autre chemin du
-   même disque (`/System/Volumes/Data/…`), vers l'un d'eux est refusé aussi.
+   perso lui-même, ni un dossier réservé :
+
+   | Dossier réservé | Raison affichée |
+   |---|---|
+   | `~/.vigie` | dossier de Vigie |
+   | `~/Library` | réglages du Mac et des apps, iCloud Drive et Dropbox compris |
+   | `~/.claude` | réglages de Claude Code |
+   | `~/.claude-comptes` | comptes Claude Code de Vigie |
+   | `~/.ssh` | tes clés |
+   | `~/.codex` | réglages de Codex |
+
+   `~/Library` l'est en entier, avec iCloud Drive (`~/Library/Mobile Documents`) et Dropbox
+   (`~/Library/CloudStorage`). Les majuscules et les variantes d'une lettre ne comptent pas, comme pour le disque
+   du Mac : `~/.SSH` et `~/.ßh` sont `~/.ssh`. Un lien, ou un autre chemin du même disque (`/System/Volumes/Data/…`),
+   vers l'un d'eux ou vers un dossier qu'il contient est refusé aussi : `~/Dropbox`, qui mène à
+   `~/Library/CloudStorage/Dropbox`, par exemple. Le refus dit pourquoi et où aller (« Dossier refusé : ~/.ssh est
+   réservé (tes clés). Choisis un dossier ailleurs, dans ~/Code par exemple. »).
 4. Vigie crée le dossier s'il manque, et y écrit `.vigie/agent-<id>.md` : le nom de l'agent, la date, ce que tu as
    saisi, puis la consigne remplie. Le dossier `.vigie` a toujours son `.gitignore` : le brief (questionnaire du
    client…) ne part jamais dans git. Il est ajouté s'il manque. Déjà là, il est gardé s'il ignore le brief (une ligne
-   `*`, par exemple) ; sinon Vigie n'écrit pas le brief et te dit quoi y ajouter.
+   `*`, par exemple) ; sinon Vigie n'écrit pas le brief et te dit quoi faire selon le cas : ajouter la ligne `*` à la
+   fin ; le remplacer par un fichier qui la contient s'il dépasse 64 Ko ou n'est pas un fichier ordinaire ; le rendre
+   lisible s'il ne l'est pas.
 5. L'app ouvre VS Code sur le dossier, puis un onglet Claude Code avec le message prêt (« Lance l'agent … : lis le
    fichier … et suis ses consignes ») : tu l'envoies, la conversation lit le brief et le suit.
 
-Dans l'app, la feuille vérifie le dossier comme le moteur, avant le clic : le bouton reste grisé et la raison
-s'affiche sous le dossier. Un refus du moteur s'affiche en bas de la feuille, qui reste ouverte. Sans VS Code, rien
-n'est créé. Si VS Code ne s'ouvre pas, la feuille propose de copier le message.
+Dans l'app, le formulaire vérifie le dossier comme le moteur de Vigie, avant le clic : le bouton
+« Lancer dans VS Code » reste grisé et la raison s'affiche sous le dossier. Un refus du moteur de Vigie s'affiche en
+bas du formulaire, qui reste ouvert. Sans VS Code, rien n'est créé. Si VS Code ne s'ouvre pas, le formulaire propose
+de copier le message.
 
 Rien de nouveau à surveiller : c'est une conversation comme les autres, avec ses actions sensibles et sa consommation
 dans Vigie. Le brief est lisible par la conversation, mais le modifier passe par toi : Vigie protège tous les dossiers
