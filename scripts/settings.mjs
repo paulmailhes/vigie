@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ROOT, STATE_FILE, DEFAULT_STATE, writeState } from '../lib/state.mjs';
+import { ROOT, STATE_FILE, DEFAULT_STATE, DEFAULT_GUARDS, writeState } from '../lib/state.mjs';
 
 const SETTINGS = process.env.VIGIE_CLAUDE_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json');
 // Le Node.js choisi par l'installateur (VIGIE_NODE), sinon celui de Homebrew (chemin stable d'une mise à jour à
@@ -16,11 +16,15 @@ const HOOK = path.join(ROOT, 'hook.mjs');
 const COMMAND = `"${NODE}" "${HOOK}" --vigie`;
 const ours = (c) => /\s--vigie\b/.test(c) || c.includes('auto-accept/hook.mjs') || c.includes(HOOK);
 
+// Outils MCP : seulement ceux que visent les garde-fous (paiement, e-mail, réseaux sociaux, suppression en ligne).
+// Avant, le hook démarrait avant CHAQUE appel MCP (Webflow, Figma…), pour rien : ~0,1 s de calcul à chaque fois.
+// « .* » au bout : la même forme convient que Claude Code ancre le motif ou non.
+const MCP_GUARDED = DEFAULT_GUARDS.filter((r) => !r.match && /mcp__/.test(r.tool || '')).map((r) => `(?:${r.tool}).*`).join('|');
 const WANTED = {
   // 7300 s : au-delà de l'attente maximale réglable (120 min) ; le hook s'arrête seul juste avant.
   PermissionRequest: { matcher: '*', timeout: 7300 },
   // Questions, et actions sensibles : la fenêtre de la conversation s'affiche (permissionDecision « ask »).
-  PreToolUse: { matcher: 'AskUserQuestion|ExitPlanMode|Bash|Monitor|PowerShell|Write|Edit|MultiEdit|NotebookEdit|mcp__.*', timeout: 7300 },
+  PreToolUse: { matcher: `AskUserQuestion|ExitPlanMode|Bash|Monitor|PowerShell|Write|Edit|MultiEdit|NotebookEdit|${MCP_GUARDED}`, timeout: 7300 },
   PermissionDenied: { matcher: '*', timeout: 30 },
 };
 

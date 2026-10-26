@@ -42,6 +42,9 @@ struct ConversationDetailModel: Equatable, Sendable {
     let milestones: [Row<Milestone>]
     /// Les documents que la conversation tient à jour (retours.md, ETAT.md, un plan…) : souvent sa feuille de route.
     let trackingDocs: [FileItem]
+    /// Fil « ses actions et leur résultat » : les décisions de Vigie, plus ce que Claude Code a validé lui-même (mode
+    /// auto) : commandes, fichiers modifiés, outils, agents ; sans les lectures. Calculé une fois par détail.
+    let feed: [Row<AcceptedItem>]
 
     init(_ detail: ConversationDetail) {
         raw = detail
@@ -75,6 +78,25 @@ struct ConversationDetailModel: Equatable, Sendable {
             }
             .sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
             .prefix(3))
+        feed = Self.feed(accepted: accepted, activity: detail.activity)
+    }
+
+    private static func feed(accepted: [Row<AcceptedItem>], activity: [ActivityItem]) -> [Row<AcceptedItem>] {
+        let skip = ["Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
+        // décisions de Vigie, par sorte d'action et par seconde : une action vue à ±4 s y est déjà
+        var decided = Set<String>()
+        for row in accepted { if let ts = row.value.ts { decided.insert("\(row.value.itemKind)|\(Int(ts.timeIntervalSince1970))") } }
+        var extra: [AcceptedItem] = []
+        for action in activity {
+            guard let ts = action.ts, let title = action.title else { continue }
+            if skip.contains(where: { title.hasPrefix($0) }) { continue }
+            let kind = ItemKind(raw: action.kind)
+            let second = Int(ts.timeIntervalSince1970)
+            if (-4...4).contains(where: { decided.contains("\(kind)|\(second + $0)") }) { continue }
+            extra.append(AcceptedItem(ts: ts, kind: action.kind, title: title, detail: action.detail, decision: "auto", agent: action.agent))
+        }
+        let all = (accepted.map(\.value) + extra).sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
+        return RowIDs.make(all) { "\(RowIDs.stamp($0.ts))|\($0.kind ?? "")|\($0.title ?? "")" }
     }
 
     static func == (lhs: ConversationDetailModel, rhs: ConversationDetailModel) -> Bool {

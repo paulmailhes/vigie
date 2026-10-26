@@ -141,7 +141,7 @@ struct ConversationView: View {
                 }
             }
         }
-        .task(id: conversationID) {
+        .task(id: "\(conversationID)|\(store.windowVisible)") {
             await store.follow(conversation: conversationID)
         }
     }
@@ -483,26 +483,8 @@ struct AcceptedSection: View {
     @State private var showAll = false
     private static let shown = 12
 
-    /// Les décisions de Vigie, plus ce que Claude Code a validé lui-même (mode auto) : commandes, fichiers
-    /// modifiés, outils, agents. Les lectures (fichiers, recherches) n'y sont pas.
-    private var feed: [Row<AcceptedItem>] {
-        let vigie = model.accepted
-        let skip = ["Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
-        var extra: [AcceptedItem] = []
-        for action in model.raw.activity {
-            guard let ts = action.ts, let title = action.title else { continue }
-            if skip.contains(where: { title.hasPrefix($0) }) { continue }
-            let kind = ItemKind(raw: action.kind)
-            // déjà dans les décisions de Vigie (même moment, même sorte d'action)
-            if vigie.contains(where: { $0.value.itemKind == kind && abs(($0.value.ts ?? .distantPast).timeIntervalSince(ts)) < 4 }) { continue }
-            extra.append(AcceptedItem(ts: ts, kind: action.kind, title: title, detail: action.detail, decision: "auto", agent: action.agent))
-        }
-        let all = (vigie.map(\.value) + extra).sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
-        return RowIDs.make(all) { "\(RowIDs.stamp($0.ts))|\($0.kind ?? "")|\($0.title ?? "")" }
-    }
-
     var body: some View {
-        let feed = feed
+        let feed = model.feed
         let rows = showAll ? feed : Array(feed.prefix(Self.shown))
         CardSection {
             ForEach(rows) { row in

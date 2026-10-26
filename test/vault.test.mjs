@@ -524,11 +524,31 @@ test('leurre devant les entrées de Claude Code : posé, recréé s\'il dispara�
   kcDel(SHIELD_SERVICE);
   const from = calls().length;
   await tick2();
+  assert.equal(kcGet(SHIELD_SERVICE), undefined, 'revu toutes les 10 min seulement, pas à chaque passage');
+  assert.ok(!calls().slice(from).some((c) => c.includes(SHIELD_SERVICE)), 'aucun appel pour lui entre-temps');
+  clock += 10 * 60_000;
+  await tick2();
   assert.ok(kcGet(SHIELD_SERVICE) !== undefined, 'recréé');
+  clock += 10 * 60_000;
   await tick2();
   assert.ok(!calls().slice(from).some((c) => c.includes('-w') && c[c.indexOf('-s') + 1] === SHIELD_SERVICE), 'son contenu n\'est jamais lu');
   const writes = calls().slice(from).filter((c) => c[0] === '-i').length;
   assert.equal(writes, 1, 'une seule écriture : il n\'est recréé que s\'il manque');
+});
+
+test('connexions.json : réécrit quand un état change, sinon toutes les 5 min ; passages espacés quand tout est en ordre', async () => {
+  await resetVault();
+  await tick2();
+  assert.equal(V.settled(), true, 'tout est en ordre');
+  const at = () => fs.statSync(STATUS).mtimeMs;
+  const before = at();
+  await new Promise((r) => setTimeout(r, 20));
+  await tick2();
+  assert.equal(at(), before, 'rien n\'a changé : pas réécrit');
+  clock += 5 * 60_000;
+  await tick2();
+  assert.ok(at() > before, 'réécrit au bout de 5 min (le lanceur le croit frais 15 min)');
+  assert.ok(rj(STATUS).checkedAtEpoch >= Math.floor(clock / 1000) - 1);
 });
 
 test('leurre : rien sans Nextcloud, pas même un regard au trousseau', async () => {

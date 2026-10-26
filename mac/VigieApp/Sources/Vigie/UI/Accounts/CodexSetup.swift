@@ -7,6 +7,8 @@ struct CodexSetupSteps: View {
     let account: Account?
     /// Outils cochés dans l'accueil : les instructions pour VS Code, pour l'app ChatGPT, ou les deux.
     var tools: ToolsChoice? = nil
+    /// Relit les comptes elle-même (accueil) ; la page Comptes le fait déjà.
+    var polls = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -58,8 +60,9 @@ struct CodexSetupSteps: View {
             }
         }
         // l'état change hors de Vigie (navigateur, Codex) : relu toutes les 3 s tant que c'est à l'écran
-        .task {
-            while !Task.isCancelled {
+        .task(id: store.windowVisible) {
+            guard polls else { return }
+            while !Task.isCancelled && store.windowVisible {
                 try? await Task.sleep(for: .seconds(3))
                 await store.refreshAccounts()
             }

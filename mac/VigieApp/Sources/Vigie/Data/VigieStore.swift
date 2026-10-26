@@ -24,7 +24,41 @@ final class VigieStore {
     private var settledReview: [String: Date] = [:]
     private(set) var reports: [Row<Report>] = []
     private(set) var accounts: [Account] = []
+    /// Conversations telles qu'affichées : remplacées seulement quand ce qui se voit change (voir `screenKey`).
     private(set) var conversations: [ConversationSummary] = []
+    /// Les mêmes, à jour à chaque relevé (dernière activité exacte…), sans redessiner l'interface.
+    @ObservationIgnored private(set) var latestConversations: [ConversationSummary] = []
+    /// Ce que montre l'icône de la barre des menus. AppKit la redessine pour chaque écran à chaque changement :
+    /// elle ne lit que ces deux valeurs, pas toute la liste « À regarder » ni tous les réglages.
+    private(set) var reviewBadge = 0
+    private(set) var autoAcceptBadge = false
+    /// Fenêtre principale à l'écran (ni réduite, ni cachée, ni recouverte, écran allumé) : les pages ne sont relues
+    /// que là ; sinon la vue d'ensemble l'est toutes les 15 s (60 s écran en veille), pour la barre des menus et les
+    /// notifications.
+    private(set) var windowVisible = true
+    @ObservationIgnored var menuPanelOpen = false { didSet { if menuPanelOpen { Task { await refreshOverview() } } } }
+    @ObservationIgnored private var screensAsleep = false
+
+    /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, la part de la semaine,
+    /// les tokens relus et les compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit
+    /// change au-delà de ce qui s'affiche : comparés sans eux (débit arrondi), ils ne redessinent plus toute la fenêtre
+    /// toutes les 3 s.
+    static func screenKey(_ list: [ConversationSummary]) -> [ConversationSummary] {
+        list.map { conversation in
+            var c = conversation
+            c.lastActivity = nil
+            c.weekPct = nil
+            c.contextTokens = nil
+            c.accepted = nil
+            if var rate = c.rate {
+                rate.weekPctPerHour = rate.weekPctPerHour.map { ($0 * 10).rounded() / 10 }
+                rate.tokensPerMin = rate.tokensPerMin.map { ($0 / 1000).rounded() }
+                rate.spark = rate.spark.map { ($0 * 20).rounded() / 20 }
+                c.rate = rate
+            }
+            return c
+        }
+    }
 
     static func stableOrder(_ list: [ConversationSummary]) -> [ConversationSummary] {
         let open = list.filter(\.isOpen).sorted {
@@ -116,7 +150,8 @@ final class VigieStore {
 
     // MARK: Sondage
 
-    /// Démarre le sondage de la vue d'ensemble (toutes les 3 s ; une seule lecture en démonstration).
+    /// Démarre le sondage de la vue d'ensemble : toutes les 3 s à l'écran, 15 s fenêtre cachée, 60 s écran en veille
+    /// (une seule lecture en démonstration).
     func start() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
@@ -124,9 +159,21 @@ final class VigieStore {
                 guard let self else { return }
                 await self.refreshOverview()
                 if self.isDemo && self.loadedOnce { return }
-                try? await Task.sleep(for: .seconds(3))
+                let seconds = self.windowVisible || self.menuPanelOpen ? 3 : self.screensAsleep ? 60 : 15
+                try? await Task.sleep(for: .seconds(seconds), tolerance: .seconds(seconds / 3 + 1))
             }
         }
+    }
+
+    func setWindowVisible(_ visible: Bool) {
+        guard visible != windowVisible else { return }
+        windowVisible = visible
+        if visible { Task { await refreshOverview() } }
+    }
+
+    func setScreensAsleep(_ asleep: Bool) {
+        screensAsleep = asleep
+        if !asleep { Task { await refreshOverview() } }
     }
 
     func refreshOverview() async {
@@ -142,12 +189,22 @@ final class VigieStore {
         }
     }
 
-    /// Suit une conversation affichée (toutes les 4 s), jusqu'à ce que la vue disparaisse.
+    /// Suit une conversation affichée, jusqu'à ce que la vue disparaisse ou que la fenêtre se cache : son détail
+    /// (des centaines de Ko) n'est relu que quand elle a avancé (dernière activité, vue d'ensemble), au plus toutes
+    /// les 4 s, et toutes les 30 s sinon.
     func follow(conversation id: String) async {
+        var seen: Date?
+        var readAt = ContinuousClock.now - .seconds(60)
         while !Task.isCancelled {
-            await refreshConversation(id)
+            guard windowVisible || isDemo else { return }
+            let activity = latestConversations.first { $0.id == id }?.lastActivity
+            if details[id] == nil || activity != seen || ContinuousClock.now - readAt >= .seconds(30) {
+                seen = activity
+                readAt = .now
+                await refreshConversation(id)
+            }
             if isDemo { return }
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(4), tolerance: .seconds(1))
         }
     }
 
@@ -159,7 +216,8 @@ final class VigieStore {
             let detail = try await client.get("/api/v2/conversation/\(encoded)", as: ConversationDetail.self)
             guard isFresh(started) else { return }
             if details[id]?.raw != detail {
-                details[id] = ConversationDetailModel(detail)
+                details[id] = await Task.detached(priority: .userInitiated) { ConversationDetailModel(detail) }.value
+                keepDetails(around: id)
             }
             readSucceeded()
         } catch {
@@ -167,38 +225,18 @@ final class VigieStore {
         }
     }
 
-    /// Complète les cartes de la vue d'ensemble quand le moteur ne fournit pas encore leurs champs
-    /// (avancement, tests, acceptations, artefacts, fil) : lit le détail des conversations ouvertes, toutes les 30 s.
-    func followCardDetails() async {
-        while !Task.isCancelled {
-            let feedMissing = recentAccepted.isEmpty
-            for conversation in conversations where conversation.isOpen {
-                let complete = conversation.progress != nil && conversation.tests != nil
-                    && conversation.accepted != nil && conversation.artifacts != nil
-                if complete && !feedMissing { continue }
-                if Task.isCancelled { return }
-                await refreshCardDetail(conversation.id)
-            }
-            if isDemo { return }
-            try? await Task.sleep(for: .seconds(30))
-        }
-    }
-
-    /// Lecture discrète d'un détail pour une carte : une erreur ne s'affiche pas.
-    private func refreshCardDetail(_ id: String) async {
-        if isDemo, details[id] != nil { return }
-        let started = ContinuousClock.now
-        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        guard let detail = try? await client.get("/api/v2/conversation/\(encoded)", as: ConversationDetail.self),
-              isFresh(started) else { return }
-        if details[id]?.raw != detail {
-            details[id] = ConversationDetailModel(detail)
-        }
+    /// Détails gardés en mémoire : la conversation lue à l'instant et les 3 précédentes.
+    @ObservationIgnored private var detailOrder: [String] = []
+    private func keepDetails(around id: String) {
+        detailOrder.removeAll { $0 == id }
+        detailOrder.append(id)
+        while detailOrder.count > 4 { details[detailOrder.removeFirst()] = nil }
     }
 
     /// Suit le graphique de consommation affiché (toutes les 30 s).
     func followUsage(_ span: UsageSpan) async {
         while !Task.isCancelled {
+            guard windowVisible || isDemo else { return }
             await refreshUsageSeries(span)
             if isDemo { return }
             try? await Task.sleep(for: .seconds(30))
@@ -219,6 +257,7 @@ final class VigieStore {
 
     func followMCP() async {
         while !Task.isCancelled {
+            guard windowVisible || isDemo else { return }
             await refreshMCP()
             if isDemo { return }
             try? await Task.sleep(for: .seconds(5))
@@ -240,6 +279,7 @@ final class VigieStore {
 
     func followAccounts() async {
         while !Task.isCancelled {
+            guard windowVisible || isDemo else { return }
             await refreshAccounts()
             if isDemo { return }
             try? await Task.sleep(for: .seconds(4))
@@ -264,15 +304,19 @@ final class VigieStore {
     private func apply(_ overview: Overview) {
         if isDemo { update(\.engineNow, overview.now) }
         update(\.settings, overview.settings)
+        update(\.autoAcceptBadge, overview.settings?.autoAccept ?? false)
         update(\.since, overview.since)
         update(\.sinceSummary, overview.sinceSummary)
         settledReview = settledReview.filter { Date.now.timeIntervalSince($0.value) < 15 }
         update(\.toReview, overview.toReview.filter { settledReview[$0.id] == nil })
+        update(\.reviewBadge, toReview.count)
         update(\.reports, RowIDs.make(overview.reports) { $0.stableKey })
         update(\.accounts, overview.accounts)
         // Ordre STABLE (L'utilisateur : « les conversations passent les unes devant les autres ») : ouvertes d'abord,
         // puis par nom de projet ; les fermées de la plus récente à la plus ancienne. L'activité ne déplace plus rien.
-        update(\.conversations, Self.stableOrder(overview.conversations))
+        let ordered = Self.stableOrder(overview.conversations)
+        latestConversations = ordered
+        if Self.screenKey(ordered) != Self.screenKey(conversations) { conversations = ordered }
         update(\.recentAccepted, overview.recentAccepted)
         update(\.engineInfo, overview.engine)
         if let status = overview.update { setUpdateStatus(status) }
@@ -441,6 +485,7 @@ final class VigieStore {
         guard var value = settings else { return }
         change(&value)
         settings = value
+        update(\.autoAcceptBadge, value.autoAccept ?? false)
     }
 
     func patchConversation(_ id: String, _ change: (inout ConversationSummary) -> Void) {
@@ -453,6 +498,7 @@ final class VigieStore {
     func removeReview(_ id: String) {
         toReview.removeAll { $0.id == id }
         settledReview[id] = .now
+        update(\.reviewBadge, toReview.count)
     }
 
     /// L'action n'a pas abouti : l'élément revient à sa place.
@@ -460,6 +506,7 @@ final class VigieStore {
         settledReview[item.id] = nil
         guard !toReview.contains(where: { $0.id == item.id }) else { return }
         toReview.insert(item, at: 0)
+        update(\.reviewBadge, toReview.count)
     }
 
     func patchAccountsState(_ change: (inout AccountsState) -> Void) {

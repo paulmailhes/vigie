@@ -20,7 +20,7 @@ struct UsageSection: View {
         } header: {
             header
         }
-        .task(id: spanRaw) { await store.followUsage(span) }
+        .task(id: "\(spanRaw)|\(store.windowVisible)") { await store.followUsage(span) }
     }
 
     private var header: some View {

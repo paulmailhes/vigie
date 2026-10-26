@@ -25,11 +25,11 @@ struct HistoryView: View {
                     .inspectorColumnWidth(min: 300, ideal: 360, max: 480)
             }
         }
-        // relu toutes les 5 s, et tout de suite quand un filtre change
-        .task(id: filterKey) {
-            while !Task.isCancelled {
+        // relu toutes les 15 s fenêtre à l'écran, et tout de suite quand un filtre change ou qu'elle revient
+        .task(id: "\(filterKey)|\(store.windowVisible)") {
+            while !Task.isCancelled && store.windowVisible {
                 await store.refreshHistory()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(15), tolerance: .seconds(3))
             }
         }
     }

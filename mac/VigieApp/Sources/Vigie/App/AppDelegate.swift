@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         EngineBootstrap.registerLoginItem()
         Notifier.shared.start(store: store)
+        WindowVisibility.start(store: store)
         store.start()
     }
 

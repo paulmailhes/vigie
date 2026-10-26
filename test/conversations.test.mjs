@@ -428,6 +428,24 @@ test('lecture par morceaux : ligne ignorée à cheval sur deux morceaux, message
   fs.rmSync(path.dirname(p), { recursive: true });
 });
 
+test('très gros transcript : lu par tranches de 16 Mo en rendant la main, sans rien perdre à la coupure', async () => {
+  const sid = 'b2b2b2b2-0000-4000-8000-000000000007';
+  const B = mk(sid);
+  const p = path.join(PROJECTS, '-Users-alex-Code-gros', `${sid}.jsonl`);
+  const lines = [];
+  for (let i = 0; i < 9; i++) lines.push(B.human(`demande ${i}`, T(i)), B.call('Read', { file_path: `/x${i}` }, { ts: T(i), content: 'w'.repeat(2_500_000) }));
+  write(p, lines);
+  assert.ok(fs.statSync(p).size > 20 * 1024 * 1024);
+  const ix = newIndexer();
+  let turns = 0;
+  const ticker = setInterval(() => { turns++; }, 0);
+  await ix.refresh();
+  clearInterval(ticker);
+  assert.deepEqual(ix.sessions.get(sid).chapters.map((c) => c.prompt), lines.filter((_, i) => i % 2 === 0).map((_, i) => `demande ${i}`));
+  assert.ok(turns >= 1, 'le moteur a eu la main pendant la lecture');
+  fs.rmSync(path.dirname(p), { recursive: true });
+});
+
 test('fichier réécrit : la conversation est relue sans doublons', async () => {
   const sid = 'd0d0d0d0-0000-4000-8000-000000000002';
   const R = mk(sid);

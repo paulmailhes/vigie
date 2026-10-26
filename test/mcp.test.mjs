@@ -839,7 +839,7 @@ const log = (o) => fs.appendFileSync(${JSON.stringify(LOG2)}, JSON.stringify({ .
   cwd: process.cwd(), enable: process.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? null, terminal: process.env.FAKE_FROM_TERMINAL ?? null, tty: process.stdin.isTTY ? '1' : null }) + '\\n');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (args[0] === 'mcp' && args[1] === 'list') {
-  log({ ev: 'start', t: Date.now() });
+  log({ ev: 'start', t: Date.now(), nice: (await import('node:os')).getPriority() });
   if (process.env.FAKE_HANG) {
     const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
     fs.writeFileSync(${JSON.stringify(PIDS)}, JSON.stringify({ self: process.pid, child: c.pid }));
@@ -1019,6 +1019,29 @@ describe('état réel des MCP (claude mcp list, faux binaire)', () => {
       let cur = 0, max = 0;
       for (const [, d] of ev) { cur += d; max = Math.max(max, cur); }
       assert.ok(max <= 2, `parallélisme ${max}`);
+    } finally { delete process.env.FAKE_SLEEP_MS; }
+  });
+
+  test('relevé de fond : un seul Claude Code à la fois, en priorité basse, et un dossier seulement pour les comptes de ses conversations', async () => {
+    seedHome();
+    const { ALPHA, BACK } = seedLists();
+    process.env.FAKE_SLEEP_MS = '60';
+    try {
+      const mcp = mk({ checkPaths: () => [{ path: ALPHA, accounts: ['perso'] }, BACK], checkConcurrency: 2 });
+      await mcp.checkHealth({ background: true });
+      await waitFor(() => !mcp.healthState().running);
+      const starts = calls().filter((c) => c.ev === 'start');
+      const ends = calls().filter((c) => c.ev === 'end');
+      assert.deepEqual(starts.filter((c) => c.cwd === ALPHA).map((c) => c.id), ['perso'], 'alpha : seulement le compte de sa conversation');
+      assert.equal(starts.filter((c) => c.cwd === BACK).length, 2, 'dossier sans compte précisé : tous');
+      assert.ok(starts.every((c) => c.nice === 15), `priorité basse : ${starts.map((c) => c.nice)}`);
+      const ev = [...starts.map((x) => [x.t, 1]), ...ends.map((e) => [e.t, -1])].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      let cur = 0, max = 0;
+      for (const [, d] of ev) { cur += d; max = Math.max(max, cur); }
+      assert.equal(max, 1, 'un seul à la fois');
+      fs.rmSync(LOG2, { force: true });
+      await mcp.checkHealth({ accounts: ['perso'], paths: [ALPHA] });
+      assert.ok(calls().filter((c) => c.ev === 'start').every((c) => c.nice === 0), 'demandé par l\'utilisateur : priorité normale');
     } finally { delete process.env.FAKE_SLEEP_MS; }
   });
 

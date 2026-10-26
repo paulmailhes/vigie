@@ -19,11 +19,6 @@ struct CardData: Equatable {
     var testsLastTitle: String?
     var failures: [Failure] = []
 
-    var acceptedToday: Int?
-    var acceptedSince: Int?
-    /// Compte tiré du détail, limité à 300 lignes : « 300+ ».
-    var acceptedCapped = false
-
     var artifactsCount: Int?
     var lastArtifact: String?
     var lastArtifactURL: String?
@@ -33,7 +28,6 @@ struct CardData: Equatable {
     init(summary: ConversationSummary, detail: ConversationDetail?, since: Date?, now: Date) {
         fillProgress(summary.progress, detail: detail)
         fillTests(summary.tests, detail: detail, now: now)
-        fillAccepted(summary.accepted, detail: detail, since: since, now: now)
         fillArtifacts(summary.artifacts, detail: detail)
     }
 
@@ -105,26 +99,6 @@ struct CardData: Equatable {
         testsLastTitle = run.title
     }
 
-    private mutating func fillAccepted(_ accepted: CardAccepted?, detail: ConversationDetail?, since: Date?, now: Date) {
-        if let accepted {
-            acceptedToday = accepted.today
-            acceptedSince = accepted.sinceSeen
-            return
-        }
-        guard let items = detail?.accepted else { return }
-        let calendar = Calendar.current
-        let kept = items.filter { item in
-            switch item.decisionKind {
-            case .auto, .you, .unknown: true
-            case .blocked, .waiting, .denied: false
-            }
-        }
-        let today = kept.count { $0.ts.map { calendar.isDate($0, inSameDayAs: now) } ?? false }
-        acceptedToday = today
-        if let since { acceptedSince = kept.count { ($0.ts ?? .distantPast) > since } }
-        acceptedCapped = items.count >= 300 && today == kept.count
-    }
-
     private mutating func fillArtifacts(_ artifacts: CardArtifacts?, detail: ConversationDetail?) {
         if let artifacts {
             artifactsCount = artifacts.count
@@ -157,9 +131,14 @@ struct FeedItem: Identifiable, Equatable {
         let titles = Dictionary(store.conversations.map { ($0.id, $0.shortTitle) }, uniquingKeysWith: { first, _ in first })
         var items: [FeedItem] = []
         if !store.recentAccepted.isEmpty {
-            for (index, item) in store.recentAccepted.prefix(limit).enumerated() {
+            // identifiants tirés de l'élément lui-même : une acceptation qui arrive en tête ne recrée pas les autres lignes
+            let rows = RowIDs.make(Array(store.recentAccepted.prefix(limit))) {
+                "e|\(RowIDs.stamp($0.ts))|\($0.conversationId ?? "")|\($0.title ?? "")"
+            }
+            for row in rows {
+                let item = row.value
                 let name = item.conversationId.flatMap { titles[$0] } ?? item.conversationTitle ?? "Conversation"
-                items.append(FeedItem(id: "e\(index)|\(RowIDs.stamp(item.ts))", ts: item.ts, kind: item.itemKind,
+                items.append(FeedItem(id: row.id, ts: item.ts, kind: item.itemKind,
                                       title: item.title ?? "Action", detail: item.detail,
                                       conversationId: item.conversationId, conversationTitle: name, service: item.service))
             }

@@ -53,6 +53,21 @@ struct Pill: View {
 }
 
 /// Icône d'une rangée : SF Symbol monochrome, alignée sur une colonne fixe.
+/// Repère fixe « en cours ». Une roue animée en continu fait redessiner l'écran à chaque image (jusqu'à 120 fois par
+/// seconde) tant qu'un agent travaille, parfois des heures ; la durée affichée à côté dit déjà que ça avance.
+struct RunningMark: View {
+    var size: CGFloat = 8
+    var width: CGFloat = 22
+
+    var body: some View {
+        Circle()
+            .fill(Theme.live)
+            .frame(width: size, height: size)
+            .frame(width: width)
+            .accessibilityLabel("En cours")
+    }
+}
+
 struct RowIcon: View {
     let symbol: String
     var alert = false

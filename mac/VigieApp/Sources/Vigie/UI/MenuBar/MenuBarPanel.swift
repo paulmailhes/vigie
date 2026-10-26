@@ -5,9 +5,9 @@ struct MenuBarLabel: View {
     let store: VigieStore
 
     var body: some View {
-        let count = store.toReviewCount
+        let count = store.reviewBadge
         HStack(spacing: 3) {
-            Image(systemName: store.autoAccept ? "binoculars.fill" : "binoculars")
+            Image(systemName: store.autoAcceptBadge ? "binoculars.fill" : "binoculars")
             if count > 0 {
                 Text("\(count)")
                     .monospacedDigit()
@@ -146,6 +146,9 @@ struct MenuBarPanel: View {
         }
         .padding(16)
         .frame(width: 380)
+        // ouvert : relu tout de suite, puis toutes les 3 s (fenêtre cachée, la vue d'ensemble l'est moins souvent)
+        .onAppear { store.menuPanelOpen = true }
+        .onDisappear { store.menuPanelOpen = false }
     }
 
     private func open(_ route: Route?) {

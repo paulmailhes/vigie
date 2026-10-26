@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Barre latérale (verre automatique) : Vue d'ensemble, Conversations, Comptes, MCP.
+/// Barre latérale (verre automatique) : Vue d'ensemble, Conversations, Comptes, puis les outils (MCP, Historique).
 struct SidebarView: View {
     @Environment(VigieStore.self) private var store
     @State private var showClosed = false
@@ -59,12 +59,12 @@ struct SidebarView: View {
             }
 
             Section("Outils") {
-                SidebarLabel("Historique", symbol: "clock.arrow.circlepath")
-                    .tag(Route.history)
-                    .standInHighlight(standIn && store.route == .history)
                 SidebarLabel("MCP", symbol: "puzzlepiece.extension")
                     .tag(Route.mcp)
                     .standInHighlight(standIn && store.route == .mcp)
+                SidebarLabel("Historique", symbol: "clock.arrow.circlepath")
+                    .tag(Route.history)
+                    .standInHighlight(standIn && store.route == .history)
             }
         }
         .listStyle(.sidebar)

@@ -63,7 +63,7 @@ struct AccountsView: View {
             }
         }
         .sheet(isPresented: $showAddAccount) { AddAccountSheet() }
-        .task { await store.followAccounts() }
+        .task(id: store.windowVisible) { await store.followAccounts() }
     }
 
     private var accounts: [Account] {
@@ -96,7 +96,7 @@ struct AccountCard: View {
             header
             // Codex : connexion puis approbation du hook, tant que ce n'est pas fait
             if account.isCodex && !(account.isConnected && account.hook?.trusted == true) {
-                CodexSetupSteps(account: account)
+                CodexSetupSteps(account: account, polls: false)
             }
             if account.wrongAccount == true {
                 Label {

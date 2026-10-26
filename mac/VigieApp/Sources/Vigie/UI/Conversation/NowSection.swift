@@ -156,8 +156,7 @@ struct NowSection: View {
 
     private func runningLine(symbol: String, title: String, detail: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            ProgressView().controlSize(.mini)
-                .frame(width: 14)
+            RunningMark(size: 6, width: 14)
             Image(systemName: symbol)
                 .foregroundStyle(.secondary)
                 .imageScale(.small)

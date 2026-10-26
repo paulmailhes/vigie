@@ -87,7 +87,7 @@ struct MCPView: View {
         } message: { removal in
             Text(removal.projectPath == nil ? "Il sera retiré de tous tes comptes." : "Il sera retiré du .mcp.json du projet (sauvegarde gardée).")
         }
-        .task { await store.followMCP() }
+        .task(id: store.windowVisible) { await store.followMCP() }
     }
 
     private var subtitle: String {

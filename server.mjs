@@ -36,12 +36,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_BIN = process.env.VIGIE_OPEN_BIN || '/usr/bin/open';
 const OSASCRIPT = process.env.VIGIE_OSASCRIPT || '/usr/bin/osascript';
 const PBCOPY = process.env.VIGIE_PBCOPY || '/usr/bin/pbcopy';
-// État réel des MCP (`claude mcp list`) : premier relevé quand le Mac est calme (voir calm), puis toutes les 20 min.
-// Chaque relevé lance un Claude Code par compte et par dossier, qui peut renouveler des jetons : pas plus souvent.
+// État réel des MCP (`claude mcp list`) : premier relevé quand le Mac est calme (voir calm), puis toutes les heures.
+// Chaque relevé lance un Claude Code par compte et par dossier, qui démarre tous les MCP du compte (Python, npx…) et
+// peut renouveler des jetons (2026-10-26 : 21 lancements toutes les 20 min, jusqu'à 520 Mo d'un coup) : en fond, un
+// seul à la fois, en priorité basse, et seulement pour les conversations ouvertes et leurs comptes.
 const MCP_CHECK = process.env.VIGIE_MCP_CHECK !== '0';
-const MCP_CHECK_EVERY_MS = 20 * 60_000, MCP_CHECK_FIRST_MS = 20_000;
-// Coffre des connexions (lib/vault.mjs) : passage toutes les 20 s.
-const VAULT_EVERY_MS = 20_000;
+const MCP_CHECK_EVERY_MS = 60 * 60_000, MCP_CHECK_FIRST_MS = 20_000;
+// Coffre des connexions (lib/vault.mjs) : passage toutes les 20 s au démarrage, au réveil et tant qu'une connexion
+// est à remettre ou inconnue ; toutes les 60 s quand tout est en ordre.
+const VAULT_EVERY_MS = 20_000, VAULT_CALM_MS = 60_000;
 
 process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée :', clean(e)));
 
@@ -428,18 +431,20 @@ function launchDirOf(id) {
   return launchCwd(s) || s.cwd || null;
 }
 
-// Dossiers où relever l'état réel des MCP : conversations ouvertes, puis fermées depuis moins de 48 h,
-// les plus récentes d'abord (lib/mcp.mjs n'en garde que ceux qui ont des MCP propres, 12 au plus).
+// Dossiers où relever l'état réel des MCP : ceux des conversations ouvertes, les plus récentes d'abord, chacun avec
+// les comptes de ses conversations (lib/mcp.mjs n'en garde que ceux qui ont des MCP propres, 12 au plus). Une
+// conversation fermée n'a pas besoin d'un relevé : elle relira ses MCP en rouvrant.
 function mcpCheckPaths() {
-  const out = [];
-  const add = (p) => { if (typeof p === 'string' && path.isAbsolute(p) && !out.includes(p)) out.push(p); };
+  const out = new Map();
+  const model = accounts.load();
   const live = [...indexer.live.values()].sort((a, b) => Number(b.updatedAt || b.startedAt || 0) - Number(a.updatedAt || a.startedAt || 0));
-  for (const v of live) add(launchDirOf(v.sessionId));
-  const cutoff = new Date(Date.now() - 48 * HOUR).toISOString();
-  const closed = [...indexer.sessions.values()].filter((s) => !indexer.live.has(s.id) && String(s.lastTs || '') >= cutoff && !conv.isThrowaway(s.id))
-    .sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')));
-  for (const s of closed) add(launchDirOf(s.id));
-  return out;
+  for (const v of live) {
+    const p = launchDirOf(v.sessionId);
+    if (typeof p !== 'string' || !path.isAbsolute(p)) continue;
+    if (!out.has(p)) out.set(p, new Set());
+    out.get(p).add(chosenAccount(model, v.sessionId));
+  }
+  return [...out].map(([p, ids]) => ({ path: p, accounts: [...ids] }));
 }
 
 // ---------- vues v2 ----------
@@ -1645,11 +1650,12 @@ function calm() {
   return true;
 }
 // Coffre des connexions : un passage à la fois, le premier dès le démarrage (c'est là que les connexions se perdent).
-let vaultBusy = false;
+let vaultBusy = false, vaultAt = 0;
 async function vaultTick() {
   if (!vault || vaultBusy) return;
+  if (Date.now() - vaultAt < VAULT_CALM_MS - 1000 && vault.settled() && calm()) return;
   vaultBusy = true;
-  try { await vault.sync(); } catch (e) { console.error('[vigie] coffre :', clean(e)); } finally { vaultBusy = false; }
+  try { await vault.sync(); } catch (e) { console.error('[vigie] coffre :', clean(e)); } finally { vaultBusy = false; vaultAt = Date.now(); }
 }
 let healthNotices = [];
 let switchNotices = []; // bascules appliquées : L'utilisateur doit envoyer un message pour relancer la conversation
@@ -1683,7 +1689,7 @@ async function tick() {
   try {
     if (MCP_CHECK && Date.now() >= nextMcpCheck && calm()) {
       nextMcpCheck = Date.now() + MCP_CHECK_EVERY_MS;
-      if (!mcp.healthState().running) mcp.checkHealth().catch((e) => console.error('[vigie] MCP :', clean(e)));
+      if (!mcp.healthState().running) mcp.checkHealth({ background: true }).catch((e) => console.error('[vigie] MCP :', clean(e)));
     }
   } catch (e) { console.error('[vigie] MCP :', clean(e)); }
   finally { ticking = false; }

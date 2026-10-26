@@ -58,7 +58,6 @@ struct OverviewView: View {
                 laterSection
             }
         }
-        .task { await store.followCardDetails() }
     }
 
     /// En haut, en entier : ce qui attend ta décision hors d'une conversation ouverte (elle l'affiche sous elle),

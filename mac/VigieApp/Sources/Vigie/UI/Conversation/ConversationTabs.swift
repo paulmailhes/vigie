@@ -226,10 +226,7 @@ struct AgentRow: View {
     private var statusIcon: some View {
         switch agent.status {
         case "running":
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 22)
-                .accessibilityLabel("En cours")
+            RunningMark()
         case "failed":
             RowIcon(symbol: "xmark.octagon")
         case "killed":
@@ -397,10 +394,7 @@ struct TestRow: View {
     private var outcomeIcon: some View {
         switch test.outcome {
         case .pending:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 22)
-                .accessibilityLabel("En cours")
+            RunningMark()
         case .passed:
             RowIcon(symbol: Theme.icon(for: test.testKind))
         case .expectedFail:
