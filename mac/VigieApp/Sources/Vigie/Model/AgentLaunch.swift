@@ -210,10 +210,16 @@ struct AgentAttachment: Equatable, Sendable, Identifiable {
         return AgentAttachment(path: path, size: size, isFolder: isFolder.boolValue, isCopy: isCopy)
     }
 
-    /// Un fichier de ~/Library (iCloud Drive, Dropbox, téléchargements de Mail) : le moteur refuse ce dossier réservé,
-    /// Vigie en fait donc une copie à lui, tout de suite. Pas un dossier entier : il peut être énorme.
-    static func needsCopy(_ path: String, isFolder: Bool, home: String = AgentFolderRule.home) -> Bool {
-        !isFolder && AgentFolderRule.within(path, home + "/Library")
+    /// Dossiers que macOS protège app par app (Bureau, Documents, Téléchargements…) ou que le moteur refuse (~/Library :
+    /// iCloud Drive, Dropbox, pièces jointes de Mail).
+    static let protectedFolders = ["Desktop", "Documents", "Downloads", "Library", "Pictures", "Movies", "Music", "Public"]
+
+    /// Ce que le moteur de Vigie ne pourrait sans doute pas lire lui-même : un dossier protégé, un disque externe, tout
+    /// ce qui est hors du dossier perso. C'est à l'app que tu l'as confié (glissé, choisi) : elle en fait une copie à
+    /// elle, tout de suite (instantanée sur le même disque). Le reste du dossier perso (~/Code…) part tel quel.
+    static func needsCopy(_ path: String, isFolder _: Bool, home: String = AgentFolderRule.home) -> Bool {
+        guard AgentFolderRule.within(path, home) else { return true }
+        return protectedFolders.contains { AgentFolderRule.within(path, home + "/" + $0) }
     }
 }
 

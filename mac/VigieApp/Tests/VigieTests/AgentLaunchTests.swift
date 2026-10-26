@@ -489,13 +489,18 @@ struct AgentAttachmentsTests {
 
     /// iCloud Drive, Dropbox et les téléchargements de Mail sont dans ~/Library, que le moteur refuse : Vigie en copie
     /// les fichiers ; pas un dossier entier.
-    @Test func copiesOnlyFilesFromLibrary() {
+    /// Ce que macOS protège ou que le moteur refuse est copié par l'app ; le reste du dossier perso part tel quel.
+    @Test func copiesWhatTheEngineCannotRead() {
         let home = "/Users/alex"
         #expect(AgentAttachment.needsCopy("/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/brief.pdf", isFolder: false, home: home))
         #expect(AgentAttachment.needsCopy("/Users/alex/library/CloudStorage/Dropbox/charte.pdf", isFolder: false, home: home))
-        #expect(!AgentAttachment.needsCopy("/Users/alex/Library/CloudStorage/Dropbox/Clients", isFolder: true, home: home))
-        #expect(!AgentAttachment.needsCopy("/Users/alex/Downloads/brief.pdf", isFolder: false, home: home))
-        #expect(!AgentAttachment.needsCopy("/Volumes/Cle/brief.pdf", isFolder: false, home: home))
+        #expect(AgentAttachment.needsCopy("/Users/alex/Library/CloudStorage/Dropbox/Clients", isFolder: true, home: home))
+        #expect(AgentAttachment.needsCopy("/Users/alex/Downloads/brief.pdf", isFolder: false, home: home))
+        #expect(AgentAttachment.needsCopy("/Users/alex/Desktop/plaquette.pdf", isFolder: false, home: home))
+        #expect(AgentAttachment.needsCopy("/Users/alex/Documents/Clients/Martin", isFolder: true, home: home))
+        #expect(AgentAttachment.needsCopy("/Volumes/Cle/brief.pdf", isFolder: false, home: home))
+        #expect(!AgentAttachment.needsCopy("/Users/alex/Code/cabinet-martin/brand/logo.svg", isFolder: false, home: home))
+        #expect(!AgentAttachment.needsCopy("/Users/alex/Code/cabinet-martin/brand", isFolder: true, home: home))
     }
 
     /// Un vrai fichier et un vrai dossier, lus dans le dossier temporaire.

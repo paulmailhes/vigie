@@ -142,7 +142,8 @@ private final class FileDropTextView: NSTextView {
 /// Les fichiers joints d'une feuille, reçus d'un glissé ou de « Ajouter des fichiers… ». Ceux du Finder gardent leur
 /// chemin (le moteur les copie au lancement). Ceux que Mail ou Safari promettent n'existent pas encore : l'app d'origine
 /// les écrit tout de suite dans un dossier à Vigie (sous le dossier temporaire du Mac, un sous-dossier par dépôt, nom
-/// d'origine gardé). Un fichier de ~/Library (iCloud Drive, Dropbox), que le moteur refuse, y est copié aussi.
+/// d'origine gardé). Ce que le moteur ne pourrait pas lire lui-même (Bureau, Documents, Téléchargements, iCloud Drive,
+/// Dropbox, disque externe : AgentAttachment.needsCopy) y est copié aussi.
 /// Le dossier est effacé quand la feuille se ferme : le moteur a déjà tout copié dans sources/.
 @MainActor
 final class AgentDropBox {
@@ -189,7 +190,7 @@ final class AgentDropBox {
         }
     }
 
-    /// Des fichiers choisis ou glissés du Finder ; ceux de ~/Library sont copiés d'abord (hors de l'app, un gros
+    /// Des fichiers choisis ou glissés du Finder ; ceux que le moteur ne pourrait pas lire sont copiés d'abord (hors de l'app, un gros
     /// fichier ne fige rien).
     func attach(_ urls: [URL]) async -> [AgentAttachment] {
         var items: [AgentAttachment] = []
