@@ -21,6 +21,7 @@ import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
+import { createAgents } from './lib/agents.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -119,6 +120,8 @@ const mcp = createMcp({
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
+// Agents : recettes rangées dans data/agents/<id>/AGENT.md, lancées dans une conversation de VS Code (lib/agents.mjs).
+const agents = createAgents({ dir: path.join(DATA, 'agents'), home: HOME });
 
 // ---------- petits outils ----------
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -1494,6 +1497,37 @@ function postAccounts(body) {
   const r = accounts.apply(body);
   return r.ok ? [200, r] : [400, { ...r, ok: false, error: r.error || 'Ça n\'a pas marché : réessaie dans un instant.' }];
 }
+
+// ---------- agents (lib/agents.mjs) ----------
+// GET /api/v2/agents : la bibliothèque, avec l'état de chaque MCP nécessaire pour le compte des nouvelles
+// conversations (celui sur lequel partira la conversation de l'agent, comme le lanceur). MCP de la passerelle : prêt
+// s'il est autorisé ; les autres : dernier relevé de `claude mcp list` pour ce compte, MCP du Mac (dossier perso), et
+// à défaut le connecteur claude.ai de ce nom (« Gmail » comme « claude.ai Gmail »).
+function agentsView() {
+  const model = accounts.load();
+  const accountId = chosenAccount(model, null);
+  const acc = model.accounts.find((a) => a.id === accountId);
+  const status = (name) => {
+    try {
+      if (gateway.has(name)) return gateway.ready(name) ? 'connected' : 'needs-auth';
+      const s = mcp.statusFor(name, { accountId, cwd: HOME });
+      return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
+    } catch { return 'unknown'; }
+  };
+  return [200, {
+    dir: agents.dir,
+    account: acc ? { id: acc.id, label: acc.label || acc.id } : null,
+    agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map((name) => ({ name, status: status(name) })) })),
+  }];
+}
+// POST /api/v2/agents/launch { id, values, folder } : dossier créé, consigne écrite, message préparé ; l'app ouvre
+// VS Code sur le dossier puis openUrl (le message pré-rempli, que l'utilisateur envoie).
+function postAgentLaunch(body) {
+  const r = agents.launch({ id: body.id, values: body.values, folder: body.folder });
+  if (!r.ok) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
+  return [200, { ok: true, folder: r.folder, briefFile: r.briefFile, openUrl: r.openUrl, prompt: r.prompt, message: r.message }];
+}
+
 function postQuestionReview(raw, body) {
   let id;
   try { id = decodeURIComponent(raw); } catch { return bad('Question introuvable.', 404); }
@@ -1568,6 +1602,8 @@ const ROUTES = [
   ['POST', /^\/api\/v2\/mcp\/check$/, (_, b) => postMcpCheck(b)],
   ['POST', /^\/api\/v2\/mcp\/connect$/, (_, b) => postMcpConnect(b)],
   ['POST', /^\/api\/v2\/accounts$/, (_, b) => postAccounts(b)],
+  ['GET', /^\/api\/v2\/agents$/, () => agentsView()],
+  ['POST', /^\/api\/v2\/agents\/launch$/, (_, b) => postAgentLaunch(b)],
   ['POST', new RegExp(`^/api/v2/pending/${S}$`), ([id], b) => postPending(id, b)],
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],
   ['POST', /^\/api\/v2\/review\/([^/]{1,400})\/dismiss$/, ([id]) => postDismiss(id)],

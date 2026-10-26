@@ -975,6 +975,90 @@ test('connexions : compte du Mac refusé = « à reconnecter » ; connexion remi
   fs.rmSync(CX);
 });
 
+// ---------- agents (lib/agents.mjs : data/agents/<id>/AGENT.md) ----------
+const AgentsList = {
+  dir: 'string', account: opt({ id: 'string', label: 'string' }),
+  agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
+    fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
+    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES) }), error: opt('string') }),
+};
+test('agents : liste avec l\'état des MCP pour le compte des nouvelles conversations, lancement dans un dossier du dossier perso', async () => {
+  const dir = path.join(DATA, 'agents');
+  w(path.join(dir, 'demarrer-projet', 'AGENT.md'), `---
+name: Démarrer un projet client
+description: Brief et premier rendez-vous
+icon: wand.and.stars
+mcp: [figma-perso, inexistant, webflow-essai, notion-essai, Gmail]
+fields:
+  - id: client
+    label: Nom du client
+    required: oui
+  - id: questionnaire
+    label: Questionnaire
+    type: longtext
+---
+Prépare le projet de {{client}}.
+`);
+  w(path.join(dir, 'casse', 'AGENT.md'), '---\nname: "Cassé\n---\nx');
+  // deux MCP de la passerelle : l'un ouvert (prêt), l'autre jamais autorisé
+  const GW = path.join(DATA, 'gateway.json');
+  const gw = (open) => ({ url: 'https://mcp.example.com/mcp', key: 'a'.repeat(48), profiles: [], active: null, addedAt: iso(-10), open });
+  wj(GW, { servers: { 'webflow-essai': gw(true), 'notion-essai': gw(false) }, clients: {} });
+  let r = await get('/api/v2/agents');
+  assert.equal(r.status, 200, r.text);
+  conforms(r.body, AgentsList);
+  assert.equal(r.body.dir, dir);
+  const accounts = (await get('/api/v2/accounts')).body;
+  assert.equal(r.body.account.id, accounts.defaultForNew);
+  assert.equal(r.body.account.label, accounts.accounts.find((a) => a.id === accounts.defaultForNew).label);
+  assert.deepEqual(r.body.agents.map((a) => [a.id, a.error === null]), [['casse', false], ['demarrer-projet', true]]);
+  const a = r.body.agents[1];
+  assert.equal(a.folder, CODE, 'dossier proposé : ~/Code du dossier perso du moteur');
+  assert.deepEqual(a.fields.map((f) => [f.id, f.type, f.required]), [['client', 'text', true], ['questionnaire', 'longtext', false]]);
+  assert.deepEqual(a.mcp[0], { name: 'figma-perso', status: 'connected' }, 'relevé de l\'essai « état réel des MCP »');
+  assert.deepEqual(a.mcp.slice(1), [{ name: 'inexistant', status: 'unknown' }, { name: 'webflow-essai', status: 'connected' }, { name: 'notion-essai', status: 'needs-auth' },
+    { name: 'Gmail', status: 'needs-auth' }], 'passerelle : prête si autorisée ; connecteur claude.ai sous son nom court');
+  fs.rmSync(GW);
+  assert.equal((await raw('GET', '/api/v2/agents', { token: null })).status, 401);
+
+  const folder = path.join(CODE, 'cabinet-martin');
+  const launch = (body, headers) => post('/api/v2/agents/launch', body, headers);
+  assert.equal((await launch({ id: 'demarrer-projet', values: { client: 'Atelier' }, folder }, { 'Content-Type': 'application/json' })).status, 403, 'X-Vigie obligatoire');
+  assert.equal((await raw('POST', '/api/v2/agents/launch', { body: { id: 'demarrer-projet', values: { client: 'Atelier' }, folder }, headers: { 'X-Vigie': '1' }, token: null })).status, 401);
+  assert.equal(fs.existsSync(folder), false, 'rien de créé sans jeton ni en-tête');
+  r = await launch({ id: 'demarrer-projet', values: { client: '' }, folder });
+  assert.deepEqual([r.status, r.body], [400, { ok: false, error: 'Champ manquant : Nom du client' }]);
+  r = await launch({ id: 'inconnu', values: {}, folder });
+  assert.deepEqual([r.status, r.body], [404, { ok: false, error: 'Agent introuvable.' }]);
+  r = await launch({ id: 'casse', values: {}, folder });
+  assert.equal(r.status, 400);
+  r = await launch({ id: 'demarrer-projet', values: { client: 'Atelier' }, folder: path.join(TMP, 'hors-maison') });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /dossier perso/);
+  r = await launch({ id: 'demarrer-projet', values: { client: 'Atelier' }, folder: path.join(HOME, '.claude', 'x') });
+  assert.equal(r.status, 400);
+  assert.equal((await raw('GET', '/api/v2/agents/launch')).status, 405);
+  assert.equal(fs.existsSync(folder), false);
+
+  r = await launch({ id: 'demarrer-projet', values: { client: 'Cabinet Martin', questionnaire: 'Q : vos couleurs ?\nR : bleu' }, folder });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(Object.keys(r.body).sort(), ['briefFile', 'folder', 'message', 'ok', 'openUrl', 'prompt']);
+  assert.equal(r.body.folder, folder);
+  assert.equal(r.body.briefFile, path.join(folder, '.vigie', 'agent-demarrer-projet.md'));
+  assert.equal(r.body.message, 'Dossier prêt : VS Code s\'ouvre, envoie le message préparé pour lancer l\'agent.');
+  assert.equal(fs.statSync(folder).mode & 0o777, 0o755, 'le moteur tourne en umask 077 : dossier remis lisible');
+  assert.equal(fs.statSync(r.body.briefFile).mode & 0o777, 0o600);
+  const brief = fs.readFileSync(r.body.briefFile, 'utf8');
+  assert.ok(brief.includes('Prépare le projet de Cabinet Martin.'));
+  assert.ok(brief.includes('R : bleu'));
+  const q = r.body.openUrl.replace(/^vscode:\/\/anthropic\.claude-code\/open\?/, '');
+  assert.equal(new URLSearchParams(decodeURIComponent(q)).get('prompt'), r.body.prompt);
+  assert.ok(r.body.prompt.includes(r.body.briefFile));
+  assert.ok(!macCalls().some((c) => c.args.some((x) => String(x).includes('claude-code/open?prompt'))), 'le moteur n\'ouvre rien lui-même : c\'est l\'app');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(folder, { recursive: true, force: true });
+});
+
 test('conversation jamais associée : affichée sur le compte des nouvelles conversations (comme le lanceur)', async () => {
   let other = (await get('/api/v2/accounts')).body.accounts.find((a) => a.id !== 'travail1');
   if (!other) other = (await post('/api/v2/accounts', { action: 'create', label: 'Compte essai' })).body.account;
