@@ -329,7 +329,8 @@ struct AgentLaunchSheet: View {
                 Button("Ajouter des fichiers…", systemImage: "paperclip", action: chooseFiles)
                     .glassButton()
                     .help("Des fichiers ou des dossiers : PDF, Word, brandbook, images…")
-                Text(attachments.isEmpty && agent.dropField != nil
+                Text(box.copying > 0 ? "Copie des fichiers en cours…"
+                     : attachments.isEmpty && agent.dropField != nil
                      ? "Ou glisse-les dans le champ. Ils seront copiés dans sources/ du projet."
                      : "Ils seront copiés dans sources/ du projet.")
                     .font(.caption)
@@ -395,7 +396,10 @@ struct AgentLaunchSheet: View {
         panel.message = "Choisis les fichiers ou les dossiers à joindre : ils seront copiés dans sources/ du projet."
         guard panel.runModal() == .OK else { return }
         let urls = panel.urls
-        Task { add(await box.attach(urls), issue: nil) }
+        Task {
+            let (items, issue) = await box.attach(urls)
+            add(items, issue: issue)
+        }
     }
 
     private func add(_ items: [AgentAttachment], issue: String?) {
@@ -449,7 +453,7 @@ struct AgentLaunchSheet: View {
 
     private var canLaunch: Bool {
         !launching && missing.isEmpty && folderIssue == nil && info?.problem == nil && surfaceIssue == nil
-            && legacyFilesIssue == nil
+            && legacyFilesIssue == nil && box.copying == 0
     }
 
     private var footer: some View {
@@ -521,7 +525,11 @@ struct AgentLaunchSheet: View {
         let toFix = agent.mcpToFix
         if account != nil || !toFix.isEmpty || !missing.isEmpty || surfaceIssue != nil {
             VStack(alignment: .leading, spacing: 4) {
-                if let account {
+                // l'app Claude a son propre compte : celui de Vigie ne vaut que pour VS Code
+                if chosenSurface == .claudeApp {
+                    Label("Partira sur le compte connecté dans l'app Claude.", systemImage: Icon.account)
+                        .foregroundStyle(.secondary)
+                } else if let account {
                     Label("Partira sur le compte \(account) (celui des nouvelles conversations).", systemImage: Icon.account)
                         .foregroundStyle(.secondary)
                 }

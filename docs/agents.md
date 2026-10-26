@@ -235,8 +235,9 @@ arguments, jamais par un shell ; chaque valeur des liens encodée) :
 **Attente de la fenêtre de VS Code.** VS Code envoie un lien `vscode://` à sa dernière fenêtre active : ouvert trop
 tôt (l'ancienne attente fixe de 2,5 s), le message partait dans la fenêtre d'un autre projet. Chaque fenêtre où
 l'extension Claude Code démarre écrit `~/.claude/ide/<port>.lock` (`pid`, `workspaceFolders`). Le moteur de Vigie
-attend donc la fenêtre **du projet** : un `.lock` dont `workspaceFolders` contient le dossier (chemin réel, casse
-pliée) et dont le `pid` est vivant. Déjà là avant l'ouverture : 800 ms (le temps qu'elle passe devant). Sinon :
+attend donc la fenêtre **du projet** : un `.lock` écrit par VS Code (`ideName` ; Cursor et Windsurf écrivent au même
+endroit), ouvert sur ce seul dossier (chemin réel, casse pliée), dont le `pid` est vivant et dont le port répond (le
+fichier d'une fenêtre fermée reste sur le disque, son port non). Déjà là avant l'ouverture : 800 ms (le temps qu'elle passe devant). Sinon :
 sondage toutes les 300 ms, 25 s au plus, puis 1,5 s (le temps que l'extension écoute). Pas prête à temps : le lien
 n'est **pas** envoyé (il partirait ailleurs) ; VS Code est ouvert sur le projet et l'app copie le message. L'attente
 passe par des minuteries : le moteur répond aux autres demandes pendant ce temps (le lancement peut durer ~30 s).
@@ -248,9 +249,13 @@ La réponse dit ce qui s'est ouvert (`opened`), et l'app affiche le message :
 |---|---|
 | `full` (VS Code) | VS Code s'ouvre sur le projet, avec le message prêt dans Claude Code : envoie-le. |
 | `full` (app Claude) | L'app Claude s'ouvre sur le projet, avec le message prêt : envoie-le. |
-| `folder` | VS Code est ouvert sur le projet, mais Claude Code n'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le. |
+| `folder` | VS Code est ouvert sur le projet, mais le message n'a pas pu partir dans Claude Code (si VS Code demande de faire confiance au dossier, accepte) : il est copié, colle-le dans Claude Code et envoie-le. |
 | `no-prompt` | La conversation s'ouvre dans l'app Claude : le message est copié, colle-le (⌘V) et envoie-le. |
-| `none` | Le dossier est prêt, mais rien ne s'est ouvert : le message est copié, colle-le dans Claude Code. |
+| `none` (VS Code) | Le dossier est prêt, mais VS Code ne s'est pas ouvert : le message est copié, ouvre le dossier dans VS Code, et colle-le dans Claude Code. |
+| `none` (app Claude) | Le dossier est prêt, mais l'app Claude ne s'est pas ouverte : le message est copié, ouvre l'app Claude, puis une conversation Claude Code sur ce dossier, et colle-le. |
+
+En reprise, les phrases nomment la conversation à ouvrir (« ouvre la conversation « … » dans le panneau de Claude
+Code, puis colle-le ») : collé dans une autre, le message perdrait son historique.
 
 ## Ce qui reste
 
@@ -260,9 +265,12 @@ La réponse dit ce qui s'est ouvert (`opened`), et l'app affiche le message :
 - **Garde-fous** : publier un site, supprimer, envoyer un e-mail restent des actions sensibles. Il faudra ajouter la
   publication Webflow (`publish_site`) aux règles.
 - **Aucun secret dans un agent** : les connexions passent par la passerelle MCP de Vigie.
-- **Fichiers joints et accès de macOS** : le moteur de Vigie ne lit pas le Bureau, les Documents ni les
-  Téléchargements tant que macOS ne le lui permet pas ; l'app pourra copier ces fichiers dans son dossier temporaire
-  avant de les joindre, comme elle le fait pour les pièces de Mail.
+- **Fichiers joints et accès de macOS** : macOS ne laisse pas le moteur de Vigie lire le Bureau, les Documents, les
+  Téléchargements, iCloud Drive ou un disque externe. C'est à l'app que tu confies ces fichiers (glissés, choisis) :
+  elle en fait une copie dans son dossier temporaire, instantanée sur le même disque, et c'est cette copie que le
+  moteur range dans `sources/`. Avant de copier, l'app refuse ce que le moteur refuserait et que la copie effacerait :
+  un lien symbolique, un lien physique, `~/Library` (sauf iCloud Drive et Dropbox), un dossier qui contient ton dossier
+  perso, plus d'1 Go ou de 5 000 fichiers.
 - **Fichiers sensibles hors des dossiers réservés** (`~/.claude.json`, `~/.aws`, `~/.gnupg`…) : joints seulement si
   tu les choisis toi-même (cachés dans le Finder) ; à ajouter aux dossiers réservés si le besoin se présente.
 

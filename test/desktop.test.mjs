@@ -48,6 +48,8 @@ test('où un agent peut s\'ouvrir : VS Code avec son extension Claude Code, l\'a
   assert.deepEqual(d.agentSurfaces(), []);
   fs.mkdirSync(path.join(apps, 'Visual Studio Code.app'), { recursive: true });
   assert.deepEqual(d.agentSurfaces(), [], 'VS Code sans l\'extension Claude Code : pas de lancement');
+  for (const e of ['.cursor', '.windsurf', '.vscode-insiders']) fs.mkdirSync(path.join(home, e, 'extensions/anthropic.claude-code-2.1.304-darwin-arm64'), { recursive: true });
+  assert.deepEqual(d.agentSurfaces(), [], 'l\'extension dans Cursor, Windsurf ou Insiders seulement : le lien vscode:// ne va qu\'à VS Code');
   fs.mkdirSync(path.join(home, '.vscode/extensions/anthropic.claude-code-2.1.304-darwin-arm64'), { recursive: true });
   assert.deepEqual(d.agentSurfaces(), ['vscode']);
   fs.rmSync(path.join(apps, 'Visual Studio Code.app'), { recursive: true });

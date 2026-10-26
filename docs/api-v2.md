@@ -536,15 +536,19 @@ facultatifs).
   |---|---|---|
   | `full` | VS Code : la fenêtre du projet était prête, le lien est parti | VS Code s'ouvre sur le projet, avec le message prêt dans Claude Code : envoie-le. |
   | `full` | App Claude, nouvelle conversation : message prérempli | L'app Claude s'ouvre sur le projet, avec le message prêt : envoie-le. |
-  | `folder` | VS Code ouvert sur le projet, mais sa fenêtre n'a pas répondu à temps (ou le lien a échoué) : lien pas envoyé | VS Code est ouvert sur le projet, mais Claude Code n'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le. |
+  | `folder` | VS Code ouvert sur le projet, mais sa fenêtre n'a pas répondu à temps (ou le lien a échoué) : lien pas envoyé | VS Code est ouvert sur le projet, mais le message n'a pas pu partir dans Claude Code (si VS Code demande de faire confiance au dossier, accepte) : il est copié, colle-le dans Claude Code et envoie-le. |
   | `no-prompt` | App Claude : reprise, ou message trop long pour être prérempli | La conversation s'ouvre dans l'app Claude : le message est copié, colle-le (⌘V) et envoie-le. |
-  | `none` | `open` en échec | Le dossier est prêt, mais rien ne s'est ouvert : le message est copié, colle-le dans Claude Code. |
+  | `none` | `open` en échec | VS Code : Le dossier est prêt, mais VS Code ne s'est pas ouvert : le message est copié, ouvre le dossier dans VS Code, et colle-le dans Claude Code. App Claude : Le dossier est prêt, mais l'app Claude ne s'est pas ouverte : le message est copié, ouvre l'app Claude, puis une conversation Claude Code sur ce dossier, et colle-le. |
+
+  En reprise (`session`), les phrases nomment la conversation à ouvrir avant de coller (« la conversation « titre » »).
 
   « copié » : c'est l'app qui copie `prompt` dans le presse-papiers, dès que `opened` n'est pas `full`.
 - **VS Code** : `open -a "Visual Studio Code" <folder>`, puis attente de la fenêtre du projet : un
-  `~/.claude/ide/*.lock` (le dossier `ide` sous `<dossier perso>/.claude`, fichier ordinaire de 64 Ko au plus, lu sans
-  suivre de lien ; 200 au plus) dont `workspaceFolders` contient `folder` (chemin réel, casse pliée) et dont le `pid`
-  (entier > 1) est vivant (`process.kill(pid, 0)`). Déjà là avant l'ouverture : 800 ms, puis le lien. Sinon : sondage
+  `~/.claude/ide/<port>.lock` (le dossier `ide` sous `<dossier perso>/.claude`, fichier ordinaire de 64 Ko au plus, lu
+  sans suivre de lien ; 200 au plus) dont `ideName` vaut « Visual Studio Code » (pas Cursor ni Windsurf), dont
+  `workspaceFolders` est ce seul `folder` (chemin réel, casse pliée), dont le `pid` (entier > 1) est vivant
+  (`process.kill(pid, 0)`) et dont le port répond sur 127.0.0.1 (le fichier d'une fenêtre fermée reste, son port non ;
+  le pid, celui de VS Code, peut avoir été repris). Déjà là avant l'ouverture : 800 ms, puis le lien. Sinon : sondage
   toutes les 300 ms, 25 s au plus (`VIGIE_IDE_WAIT_MS` dans les essais), puis 1,5 s, puis le lien. Lien :
   `vscode://anthropic.claude-code/open?prompt=<prompt>` (encodé pour survivre à deux décodages : VS Code, puis
   l'extension) suivi de `&session=<uuid>` pour une reprise. Pas prête à temps : le lien n'est pas envoyé (VS Code
@@ -582,16 +586,16 @@ facultatifs).
   | pas une liste de chaînes | `Fichiers joints illisibles : ajoute-les de nouveau.` |
   | plus de 50 | `Trop de fichiers joints : 50 au plus. Range-les dans un dossier, et joins le dossier.` |
   | chemin relatif, `~`, plus de 1 024 caractères | `Fichier joint illisible : <nom>. Ajoute-le de nouveau.` |
-  | introuvable | `Fichier joint introuvable : <nom>.` |
+  | introuvable | `Fichier joint introuvable : <nom>. Retire-le de la liste, puis ajoute-le de nouveau.` |
   | lien symbolique en tête | `Fichier joint refusé : <nom> est un lien. Joins le fichier lui-même.` |
-  | dans un dossier réservé du dossier perso (même règle que `folder` : chemin écrit, chemin réel, identité sur le disque, casse pliée), ou un dossier joint qui en contient un | `Fichier joint refusé : ~/<dossier> est réservé (<raison>).` |
+  | dans un dossier réservé du dossier perso (même règle que `folder` : chemin écrit, chemin réel, identité sur le disque, casse pliée), ou un dossier joint qui en contient un | `Fichier joint refusé : ~/<dossier> est réservé (<raison>). Retire-le de la liste.` |
   | un dossier qui est, ou contient, le dossier perso | `Fichier joint refusé : <nom> est ton dossier perso. Joins des fichiers ou un dossier précis.` / `… contient ton dossier perso. …` |
   | un dossier qui contient le dossier du projet | `Fichier joint refusé : <nom> contient le dossier du projet. Joins les fichiers un par un.` |
   | un fichier qui a un autre nom sur le disque (lien physique) | `Fichier joint refusé : <nom> a un autre nom sur le disque (lien physique). Joins-en une copie.` |
-  | ni fichier ni dossier (tube, prise) | `Fichier joint refusé : <nom> n'est ni un fichier ni un dossier.` |
+  | ni fichier ni dossier (tube, prise) | `Fichier joint refusé : <nom> n'est ni un fichier ni un dossier. Retire-le de la liste.` |
   | illisible (droits) | `Fichier joint illisible : <nom>. Vérifie ses droits, ou joins-en une copie.` |
   | illisible (macOS refuse au moteur le Bureau, les Documents, les Téléchargements) | `Fichier joint illisible : <nom>. macOS ne laisse pas Vigie le lire : copie-le ailleurs (dans ~/Code, par exemple), puis joins la copie.` |
-  | plus d'1 Go / de 5 000 fichiers | `Fichiers joints trop gros : 1 Go au plus.` / `Fichiers joints trop nombreux : 5 000 fichiers au plus.` |
+  | plus d'1 Go / de 5 000 fichiers | `Fichiers joints trop gros : 1 Go au plus. Retire les plus gros de la liste, ou joins un dossier plus petit.` / `Fichiers joints trop nombreux : 5 000 fichiers au plus. Joins un dossier plus petit, ou seulement les fichiers utiles.` |
   | `<folder>/sources` n'est pas un dossier ordinaire (un lien, un fichier) | `Dossier refusé : <folder>/sources n'est pas un dossier. Renomme-le, ou choisis un autre dossier.` |
   | remplacé entre la vérification et la copie | `Fichier joint modifié pendant la copie : <nom>. Relance l'agent.` |
 

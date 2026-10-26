@@ -5,6 +5,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -51,7 +52,8 @@ function clock(onSleep = () => {}) {
   const sleeps = [];
   return { sleeps, now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; onSleep(sleeps.length); } };
 }
-const opener = (W, c, more = {}) => createOpener({ home: W.home, openBin: W.bin, sleep: c.sleep, now: c.now, ...more });
+// ports des .lock : tous « répondent » (l'essai de la vraie connexion est plus bas)
+const opener = (W, c, more = {}) => createOpener({ home: W.home, openBin: W.bin, sleep: c.sleep, now: c.now, listening: async () => true, ...more });
 
 test('liens : message prérempli encodé (deux décodages pour VS Code), dossier et q de l\'app Claude, reprises', () => {
   const prompt = 'Lance l\'agent « R&D 100% + essai » : lis le fichier /Users/alex/Code/a b/#1?x=y.md\net suis ses consignes.';
@@ -83,21 +85,29 @@ test('liens : message prérempli encodé (deux décodages pour VS Code), dossier
 test('phrases du lancement et surface proposée', () => {
   assert.equal(launchMessage('full', 'vscode'), 'VS Code s\'ouvre sur le projet, avec le message prêt dans Claude Code : envoie-le.');
   assert.equal(launchMessage('full', 'claude-app'), 'L\'app Claude s\'ouvre sur le projet, avec le message prêt : envoie-le.');
-  assert.equal(launchMessage('folder', 'vscode'), 'VS Code est ouvert sur le projet, mais Claude Code n\'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le.');
+  assert.equal(launchMessage('folder', 'vscode'), 'VS Code est ouvert sur le projet, mais le message n\'a pas pu partir dans Claude Code (si VS Code demande de faire confiance au dossier, accepte) : il est copié, colle-le dans Claude Code et envoie-le.');
   assert.equal(launchMessage('no-prompt', 'claude-app'), 'La conversation s\'ouvre dans l\'app Claude : le message est copié, colle-le (⌘V) et envoie-le.');
-  assert.equal(launchMessage('none', 'vscode'), 'Le dossier est prêt, mais rien ne s\'est ouvert : le message est copié, colle-le dans Claude Code.');
+  assert.equal(launchMessage('none', 'vscode'), 'Le dossier est prêt, mais VS Code ne s\'est pas ouvert : le message est copié, ouvre le dossier dans VS Code, et colle-le dans Claude Code.');
+  assert.equal(launchMessage('none', 'claude-app'), 'Le dossier est prêt, mais l\'app Claude ne s\'est pas ouverte : le message est copié, ouvre l\'app Claude, puis une conversation Claude Code sur ce dossier, et colle-le.');
+  // reprise : le message ne vaut que dans CETTE conversation, la phrase dit laquelle ouvrir
+  const r = { resume: true, title: 'Site du cabinet' };
+  assert.equal(launchMessage('full', 'vscode', r), 'VS Code s\'ouvre sur la conversation « Site du cabinet », avec le message prêt dans Claude Code : envoie-le.');
+  assert.equal(launchMessage('folder', 'vscode', r), 'VS Code est ouvert sur le projet, mais le message n\'a pas pu partir dans Claude Code (si VS Code demande de faire confiance au dossier, accepte) : il est copié, ouvre la conversation « Site du cabinet » dans le panneau de Claude Code, puis colle-le et envoie-le.');
+  assert.equal(launchMessage('no-prompt', 'claude-app', r), 'La conversation « Site du cabinet » s\'ouvre dans l\'app Claude : le message est copié, colle-le (⌘V) et envoie-le.');
+  assert.equal(launchMessage('none', 'vscode', { resume: true }), 'Le dossier est prêt, mais VS Code ne s\'est pas ouvert : le message est copié, ouvre le dossier dans VS Code puis la conversation, et colle-le dans Claude Code.');
   assert.equal(chooseSurface(['vscode', 'claude-app'], 'claude-app'), 'claude-app', 'la dernière utilisée');
   assert.equal(chooseSurface(['vscode'], 'claude-app'), 'vscode', 'plus là : la première disponible');
   assert.equal(chooseSurface(['vscode', 'claude-app'], undefined), 'vscode');
   assert.equal(chooseSurface([], 'vscode'), null);
 });
 
-test('fenêtre VS Code prête : .lock du dossier (chemin réel, casse pliée), pid vivant ; le reste ne compte pas', () => {
+test('fenêtre VS Code prête : .lock de VS Code sur ce seul dossier (chemin réel, casse pliée), pid vivant, port qui répond ; le reste ne compte pas', async () => {
   const W = world();
   const asked = [];
-  const o = createOpener({ home: W.home, openBin: W.bin, alive: (pid) => { asked.push(pid); return pid === process.pid; } });
+  const closed = new Set();
+  const o = createOpener({ home: W.home, openBin: W.bin, alive: (pid) => { asked.push(pid); return pid === process.pid; }, listening: async (p) => !closed.has(p) });
   assert.equal(o.ideDir, path.join(W.home, '.claude', 'ide'));
-  assert.equal(o.windowReady(W.project), false, 'pas de dossier ide');
+  assert.equal(await o.windowReady(W.project), false, 'pas de dossier ide');
   W.lock([path.join(W.home, 'Code')]);                        // le dossier parent : une autre fenêtre
   W.lock([path.join(W.project, 'docs')]);                     // un sous-dossier : une autre fenêtre
   W.lock([W.project], deadPid);                               // fenêtre fermée (pid mort)
@@ -109,17 +119,34 @@ test('fenêtre VS Code prête : .lock du dossier (chemin réel, casse pliée), p
   fs.writeFileSync(elsewhere, JSON.stringify({ pid: process.pid, workspaceFolders: [W.project] }));
   fs.symlinkSync(elsewhere, path.join(W.ide, '11.lock'));      // un lien : pas lu
   fs.writeFileSync(path.join(W.ide, '12.json'), JSON.stringify({ pid: process.pid, workspaceFolders: [W.project] })); // pas un .lock
-  assert.equal(o.windowReady(W.project), false);
+  W.lock([W.project], process.pid, { ideName: 'Cursor' });  // un autre éditeur : le lien vscode:// n'y va pas
+  W.lock([W.project], process.pid, { ideName: undefined });
+  W.lock([path.join(W.home, 'Code', 'autre'), W.project]);    // plusieurs dossiers : VS Code ne met pas cette fenêtre devant
+  closed.add(Number(path.basename(W.lock([W.project]), '.lock'))); // fenêtre fermée : son fichier reste, son port ne répond plus
+  fs.writeFileSync(path.join(W.ide, 'abc.lock'), JSON.stringify({ pid: process.pid, workspaceFolders: [W.project], ideName: 'Visual Studio Code' }));
+  fs.writeFileSync(path.join(W.ide, '70000.lock'), JSON.stringify({ pid: process.pid, workspaceFolders: [W.project], ideName: 'Visual Studio Code' }));
+  assert.equal(await o.windowReady(W.project), false);
   assert.ok(!asked.some((p) => !Number.isInteger(p) || p <= 1), `pids demandés : ${asked}`);
   // écrit autrement : par un lien, en majuscules, avec une barre finale, dans un espace à plusieurs dossiers
   fs.symlinkSync(W.project, path.join(W.home, 'Code', 'raccourci'));
-  for (const f of [[path.join(W.home, 'Code', 'raccourci')], [W.project.toUpperCase().replace(W.root.toUpperCase(), W.root)], [`${W.project}/`],
-    [path.join(W.home, 'Code', 'autre'), W.project]]) {
+  for (const f of [[path.join(W.home, 'Code', 'raccourci')], [W.project.toUpperCase().replace(W.root.toUpperCase(), W.root)], [`${W.project}/`]]) {
     const l = W.lock(f);
-    assert.equal(o.windowReady(W.project), true, JSON.stringify(f));
+    assert.equal(await o.windowReady(W.project), true, JSON.stringify(f));
     fs.rmSync(l);
   }
-  assert.equal(o.windowReady(W.project), false);
+  assert.equal(await o.windowReady(W.project), false);
+});
+
+test('fenêtre VS Code : le port du .lock est vraiment essayé (une fenêtre fermée ne répond plus)', async () => {
+  const W = world();
+  const srv = await new Promise((resolve) => { const s = net.createServer((c) => c.destroy()).listen(0, '127.0.0.1', () => resolve(s)); });
+  const port = srv.address().port;
+  fs.mkdirSync(W.ide, { recursive: true });
+  fs.writeFileSync(path.join(W.ide, `${port}.lock`), JSON.stringify({ pid: process.pid, workspaceFolders: [W.project], ideName: 'Visual Studio Code', transport: 'ws' }));
+  const o = createOpener({ home: W.home, openBin: W.bin });
+  assert.equal(await o.windowReady(W.project), true, 'port ouvert');
+  await new Promise((resolve) => { srv.close(resolve); });
+  assert.equal(await o.windowReady(W.project), false, 'port fermé : la fenêtre n\'est plus là');
 });
 
 test('VS Code : fenêtre déjà là → 800 ms puis le lien ; elle apparaît → sondage, 1,5 s, le lien ; jamais → pas de lien', async () => {

@@ -927,10 +927,10 @@ test('fichiers joints refusés avant de rien créer : introuvable, lien, dossier
   fs.chmodSync(path.join(P, 'ferme.pdf'), 0o000);
   const target = path.join(H, 'Code', 'neuf');
   const go = (files, more = {}) => W.agents.launch({ id: 'r', values: {}, folder: target, files, ...more });
-  const reserved = (d) => `Fichier joint refusé : ~/${d} est réservé (${REASONS[d]}).`;
+  const reserved = (d) => `Fichier joint refusé : ~/${d} est réservé (${REASONS[d]}). Retire-le de la liste.`;
   const caseless = fs.existsSync(path.join(H, '.SSH'));
   const cases = [
-    [[path.join(P, 'absent.pdf')], 'Fichier joint introuvable : absent.pdf.'],
+    [[path.join(P, 'absent.pdf')], 'Fichier joint introuvable : absent.pdf. Retire-le de la liste, puis ajoute-le de nouveau.'],
     [[path.join(H, 'raccourci.pdf')], 'Fichier joint refusé : raccourci.pdf est un lien. Joins le fichier lui-même.'],
     [[path.join(H, 'Code', 'cles')], 'Fichier joint refusé : cles est un lien. Joins le fichier lui-même.'],
     [[path.join(H, '.ssh', 'id_ed25519')], reserved('.ssh')],
@@ -947,7 +947,7 @@ test('fichiers joints refusés avant de rien créer : introuvable, lien, dossier
     [[H], 'Fichier joint refusé : maison est ton dossier perso. Joins des fichiers ou un dossier précis.'],
     [[path.join(H, 'Code')], 'Fichier joint refusé : Code contient le dossier du projet. Joins les fichiers un par un.'],
     [[path.join(P, 'copie-cle')], 'Fichier joint refusé : copie-cle a un autre nom sur le disque (lien physique). Joins-en une copie.'],
-    [[path.join(P, 'tube')], 'Fichier joint refusé : tube n\'est ni un fichier ni un dossier.'],
+    [[path.join(P, 'tube')], 'Fichier joint refusé : tube n\'est ni un fichier ni un dossier. Retire-le de la liste.'],
     ...(root0 ? [] : [[[path.join(P, 'ferme.pdf')], 'Fichier joint illisible : ferme.pdf. Vérifie ses droits, ou joins-en une copie.']]),
     [['charte.pdf'], 'Fichier joint illisible : charte.pdf. Ajoute-le de nouveau.'],
     [['~/charte.pdf'], 'Fichier joint illisible : charte.pdf. Ajoute-le de nouveau.'],
@@ -997,7 +997,7 @@ test('fichiers joints : dossier temporaire du système permis (même sous ~/Libr
   assert.equal(r.ok, true, r.error);
   assert.deepEqual(r.copied, ['sources/pièce de Mail.pdf']);
   assert.equal(fs.readFileSync(path.join(H, 'Code', 'projet', 'sources', 'pièce de Mail.pdf'), 'utf8'), 'pièce jointe');
-  assert.equal(go([path.join(H, 'Library', 'Containers', 'app', 'Data', 'autre.pdf')]).error, `Fichier joint refusé : ~/Library est réservé (${REASONS.Library}).`,
+  assert.equal(go([path.join(H, 'Library', 'Containers', 'app', 'Data', 'autre.pdf')]).error, `Fichier joint refusé : ~/Library est réservé (${REASONS.Library}). Retire-le de la liste.`,
     'à côté du dossier temporaire : réservé');
   // limites (ici 1 000 octets et 3 fichiers ; 1 Go et 5 000 pour de vrai)
   const P = path.join(W.root, 'pièces');
@@ -1006,8 +1006,8 @@ test('fichiers joints : dossier temporaire du système permis (même sous ~/Libr
   w(path.join(P, 'b.bin'), 'x'.repeat(600));
   for (const k of [1, 2, 3, 4]) w(path.join(P, 'dossier', `f${k}.txt`), 'x');
   for (const k of [1, 2, 3, 4]) fs.mkdirSync(path.join(P, 'vides', `d${k}`), { recursive: true });
-  const many = 'Fichiers joints trop nombreux : 3 fichiers au plus.';
-  for (const [files, error] of [[['gros.bin'], 'Fichiers joints trop gros : 1 Go au plus.'], [['a.bin', 'b.bin'], 'Fichiers joints trop gros : 1 Go au plus.'],
+  const many = 'Fichiers joints trop nombreux : 3 fichiers au plus. Joins un dossier plus petit, ou seulement les fichiers utiles.';
+  for (const [files, error] of [[['gros.bin'], 'Fichiers joints trop gros : 1 Go au plus. Retire les plus gros de la liste, ou joins un dossier plus petit.'], [['a.bin', 'b.bin'], 'Fichiers joints trop gros : 1 Go au plus. Retire les plus gros de la liste, ou joins un dossier plus petit.'],
     [['dossier'], many], [['vides'], many]]) {
     assert.equal(go(files.map((f) => path.join(P, f)), '~/Code/limites').error, error, files.join(' '));
   }
@@ -1017,7 +1017,7 @@ test('fichiers joints : dossier temporaire du système permis (même sous ~/Libr
   V.add('r', AGENT_R);
   w(path.join(V.home, '.ssh', 'id_ed25519'), 'CLE');
   assert.equal(V.agents.launch({ id: 'r', values: {}, folder: '~/Code/p', files: [path.join(V.home, '.ssh', 'id_ed25519')] }).error,
-    'Fichier joint refusé : ~/.ssh est réservé (tes clés).');
+    'Fichier joint refusé : ~/.ssh est réservé (tes clés). Retire-le de la liste.');
 });
 
 test('fichiers joints : remplacé entre la vérification et la copie, pas copié ; copie interrompue, rien ne reste', () => {

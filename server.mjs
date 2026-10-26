@@ -1577,7 +1577,8 @@ async function postAgentLaunch(body) {
   const localId = session && surface === 'claude-app' ? desktop.claudeSessions().get(session)?.localId ?? null : null;
   let opened = 'none';
   try { opened = await opener.launch({ surface, folder: r.folder, prompt: r.prompt, session, localId }); } catch (e) { console.error('[vigie] ouverture de l\'agent :', clean(e)); }
-  return [200, { ok: true, folder: r.folder, briefFile: r.briefFile, prompt: r.prompt, surface, opened, copied: r.copied, message: launchMessage(opened, surface) }];
+  const title = session ? conversationsIn(r.folder, 0).find((c) => c.id === session)?.title ?? null : null;
+  return [200, { ok: true, folder: r.folder, briefFile: r.briefFile, prompt: r.prompt, surface, opened, copied: r.copied, message: launchMessage(opened, surface, { resume: !!session, title }) }];
 }
 
 function postQuestionReview(raw, body) {

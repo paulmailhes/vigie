@@ -189,8 +189,11 @@ struct AgentAttachment: Equatable, Sendable, Identifiable {
     /// En octets ; nil pour un dossier.
     var size: Int64?
     var isFolder: Bool
-    /// Copie faite par Vigie dans son dossier temporaire (fichier promis par Mail ou Safari, fichier de ~/Library).
+    /// Copie faite par Vigie dans son dossier temporaire (fichier promis par Mail ou Safari, fichier que le moteur ne
+    /// pourrait pas lire).
     var isCopy: Bool
+    /// Copie d'un fichier du Finder : son chemin d'origine (deux dossiers « Logos » de deux endroits restent deux).
+    var origin: String? = nil
 
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
@@ -202,12 +205,53 @@ struct AgentAttachment: Equatable, Sendable, Identifiable {
     }
 
     /// Lu sur le disque ; nil s'il n'y est pas.
-    static func read(_ url: URL, isCopy: Bool = false) -> AgentAttachment? {
+    static func read(_ url: URL, isCopy: Bool = false, origin: String? = nil) -> AgentAttachment? {
         let path = url.path(percentEncoded: false)
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isFolder) else { return nil }
         let size = isFolder.boolValue ? nil : (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init)
-        return AgentAttachment(path: path, size: size, isFolder: isFolder.boolValue, isCopy: isCopy)
+        return AgentAttachment(path: path, size: size, isFolder: isFolder.boolValue, isCopy: isCopy, origin: origin)
+    }
+
+    /// Les limites du moteur pour les fichiers joints, vérifiées avant toute copie par l'app.
+    static let maxBytes: Int64 = 1 << 30
+    static let maxFiles = 5000
+
+    /// Pourquoi ce fichier ou ce dossier ne peut pas être joint, avant de rien copier ; nil : il peut l'être. Les refus
+    /// du moteur que la copie par l'app effacerait (un lien, ~/Library, ton dossier perso entier, un lien physique).
+    static func refusal(_ url: URL, home: String = AgentFolderRule.home) -> String? {
+        let path = url.path(percentEncoded: false)
+        let name = "« \(url.lastPathComponent) »"
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return "\(name) est introuvable : ajoute-le de nouveau." }
+        let kind = info.st_mode & S_IFMT
+        if kind == S_IFLNK { return "\(name) est un lien : joins le fichier ou le dossier lui-même." }
+        if path == "/" || AgentFolderRule.within(home, path) {
+            return "\(name) contient ton dossier perso : joins des fichiers ou un dossier précis."
+        }
+        let library = home + "/Library"
+        if AgentFolderRule.within(path, library),
+           !["Mobile Documents", "CloudStorage"].contains(where: { AgentFolderRule.within(path, library + "/" + $0) }) {
+            return "\(name) est dans ~/Library (réglages du Mac et des apps) : joins-en une copie rangée ailleurs."
+        }
+        if kind == S_IFREG, info.st_nlink > 1 { return "\(name) a un autre nom sur le disque (lien physique) : joins-en une copie." }
+        return nil
+    }
+
+    /// Plus d'1 Go ou de 5 000 fichiers ? Parcours sans suivre les liens, arrêté dès le dépassement.
+    static func tooBig(_ url: URL) -> Bool {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey]
+        if let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true { return Int64(v.fileSize ?? 0) > maxBytes }
+        guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys) else { return false }
+        var files = 0
+        var bytes: Int64 = 0
+        for case let item as URL in walker {
+            guard let v = try? item.resourceValues(forKeys: Set(keys)), v.isRegularFile == true else { continue }
+            files += 1
+            bytes += Int64(v.fileSize ?? 0)
+            if files > maxFiles || bytes > maxBytes { return true }
+        }
+        return false
     }
 
     /// Dossiers que macOS protège app par app (Bureau, Documents, Téléchargements…) ou que le moteur refuse (~/Library :
@@ -259,7 +303,8 @@ struct AgentAttachments: Equatable, Sendable {
     /// Même chemin, sans tenir compte des majuscules (comme le disque). Une copie de Vigie change de chemin à chaque
     /// dépôt : même nom et même taille, c'est la même pièce jointe déposée deux fois.
     private static func key(_ item: AgentAttachment) -> String {
-        item.isCopy ? "copie:\(AgentFolderRule.fold(item.name)):\(item.size ?? -1)" : AgentFolderRule.fold(item.path)
+        if let origin = item.origin { return AgentFolderRule.fold(origin) }
+        return item.isCopy ? "copie:\(AgentFolderRule.fold(item.name)):\(item.size ?? -1)" : AgentFolderRule.fold(item.path)
     }
 }
 

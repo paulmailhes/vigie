@@ -146,7 +146,11 @@ private final class FileDropTextView: NSTextView {
 /// Dropbox, disque externe : AgentAttachment.needsCopy) y est copié aussi.
 /// Le dossier est effacé quand la feuille se ferme : le moteur a déjà tout copié dans sources/.
 @MainActor
+@Observable
 final class AgentDropBox {
+    /// Copies en cours (fichiers promis, fichiers à copier) : « Lancer » attend qu'elles soient finies.
+    private(set) var copying = 0
+
     static var dragTypes: [NSPasteboard.PasteboardType] {
         [.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
     }
@@ -157,11 +161,11 @@ final class AgentDropBox {
             || pasteboard.canReadObject(forClasses: [NSFilePromiseReceiver.self], options: nil)
     }
 
-    private let root = URL(filePath: NSTemporaryDirectory(), directoryHint: .isDirectory)
+    @ObservationIgnored private let root = URL(filePath: NSTemporaryDirectory(), directoryHint: .isDirectory)
         .appending(path: "vigie-fichiers-joints/\(UUID().uuidString)", directoryHint: .isDirectory)
-    private var folders = 0
-    private var receivers: [NSFilePromiseReceiver] = []
-    private let queue: OperationQueue = {
+    @ObservationIgnored private var folders = 0
+    @ObservationIgnored private var receivers: [NSFilePromiseReceiver] = []
+    @ObservationIgnored private let queue: OperationQueue = {
         let queue = OperationQueue()
         queue.qualityOfService = .userInitiated
         return queue
@@ -172,7 +176,10 @@ final class AgentDropBox {
     func receive(_ pasteboard: NSPasteboard, deliver: @escaping @MainActor @Sendable ([AgentAttachment], String?) -> Void) {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         if !urls.isEmpty {
-            Task { deliver(await attach(urls), nil) }
+            Task {
+                let (items, issue) = await attach(urls)
+                deliver(items, issue)
+            }
             return
         }
         let promised = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver] ?? []
@@ -182,32 +189,53 @@ final class AgentDropBox {
                 continue
             }
             receivers.append(receiver) // gardé jusqu'à la fermeture de la feuille, le temps que l'app d'origine écrive
+            copying += receiver.fileNames.count
             receiver.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: queue) { url, error in
                 let item = error == nil ? AgentAttachment.read(url, isCopy: true) : nil
                 let issue = item == nil ? Self.notJoined(url.lastPathComponent) : nil
-                Task { @MainActor in deliver(item.map { [$0] } ?? [], issue) }
+                Task { @MainActor in
+                    self.copying = max(0, self.copying - 1)
+                    deliver(item.map { [$0] } ?? [], issue)
+                }
             }
         }
     }
 
     /// Des fichiers choisis ou glissés du Finder ; ceux que le moteur ne pourrait pas lire sont copiés d'abord (hors de l'app, un gros
     /// fichier ne fige rien).
-    func attach(_ urls: [URL]) async -> [AgentAttachment] {
+    /// Vérifiés avant toute copie (les refus du moteur que la copie effacerait, ses limites) ; une copie ratée est
+    /// effacée et dite. Rend les fichiers joints et la première phrase de refus (nil : tout est joint).
+    func attach(_ urls: [URL]) async -> ([AgentAttachment], String?) {
         var items: [AgentAttachment] = []
+        var issue: String?
+        copying += 1
+        defer { copying -= 1 }
         for url in urls {
+            if let why = AgentAttachment.refusal(url) { issue = issue ?? why; continue }
             guard let item = AgentAttachment.read(url) else { continue }
             guard AgentAttachment.needsCopy(item.path, isFolder: item.isFolder) else {
                 items.append(item)
                 continue
             }
-            guard let folder = nextFolder() else { continue }
+            if await Task.detached(priority: .userInitiated, operation: { AgentAttachment.tooBig(url) }).value {
+                issue = issue ?? Self.tooBig(item.name)
+                continue
+            }
+            guard let folder = nextFolder() else { issue = issue ?? Self.notCopied(item.name); continue }
             let target = folder.appending(path: item.name)
-            let copied = await Task.detached(priority: .userInitiated) {
-                (try? FileManager.default.copyItem(at: url, to: target)) == nil ? nil : AgentAttachment.read(target, isCopy: true)
+            let origin = item.path
+            let copied = await Task.detached(priority: .userInitiated) { () -> AgentAttachment? in
+                do {
+                    try FileManager.default.copyItem(at: url, to: target)
+                } catch {
+                    try? FileManager.default.removeItem(at: folder) // pas de copie à moitié faite
+                    return nil
+                }
+                return AgentAttachment.read(target, isCopy: true, origin: origin)
             }.value
-            if let copied { items.append(copied) }
+            if let copied { items.append(copied) } else { issue = issue ?? Self.notCopied(item.name) }
         }
-        return items
+        return (items, issue)
     }
 
     /// Un fichier retiré de la liste : sa copie (s'il en a une) est effacée.
@@ -234,6 +262,14 @@ final class AgentDropBox {
         } catch {
             return nil
         }
+    }
+
+    private nonisolated static func tooBig(_ name: String) -> String {
+        "« \(name) » est trop gros pour être joint (1 Go et 5 000 fichiers au plus) : joins seulement les fichiers utiles."
+    }
+
+    private nonisolated static func notCopied(_ name: String) -> String {
+        "« \(name) » n'a pas pu être copié : réessaie, ou range-le d'abord dans ~/Code et glisse-le de là."
     }
 
     private nonisolated static func notJoined(_ name: String?) -> String {

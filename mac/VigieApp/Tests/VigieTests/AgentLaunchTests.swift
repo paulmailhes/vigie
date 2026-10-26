@@ -515,6 +515,53 @@ struct AgentAttachmentsTests {
         #expect(folder.isFolder && folder.size == nil && folder.isCopy)
         #expect(AgentAttachment.read(root.appending(path: "absent.pdf")) == nil)
     }
+
+    /// Avant de copier : les refus du moteur que la copie par l'app effacerait (lien, ~/Library, dossier perso entier,
+    /// lien physique) ; iCloud Drive et Dropbox restent permis.
+    @Test func refusesBeforeCopying() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "vigie-essai-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appending(path: "maison")
+        let fm = FileManager.default
+        for dir in ["Desktop", "Library/Keychains", "Library/Mobile Documents/com~apple~CloudDocs", "Library/CloudStorage/Dropbox"] {
+            try fm.createDirectory(at: home.appending(path: dir), withIntermediateDirectories: true)
+        }
+        let plaquette = home.appending(path: "Desktop/plaquette.pdf")
+        try Data(count: 10).write(to: plaquette)
+        try Data(count: 10).write(to: home.appending(path: "Library/Keychains/login.keychain-db"))
+        try Data(count: 10).write(to: home.appending(path: "Library/Mobile Documents/com~apple~CloudDocs/brief.pdf"))
+        try fm.createSymbolicLink(at: home.appending(path: "Desktop/raccourci.pdf"), withDestinationURL: plaquette)
+        try fm.linkItem(at: plaquette, to: home.appending(path: "Desktop/autre-nom.pdf"))
+        let h = home.path(percentEncoded: false)
+        func refusal(_ p: String) -> String? { AgentAttachment.refusal(home.appending(path: p), home: h) }
+        #expect(refusal("Desktop/raccourci.pdf")?.contains("est un lien") == true)
+        #expect(refusal("Desktop/autre-nom.pdf")?.contains("lien physique") == true)
+        #expect(refusal("Library/Keychains/login.keychain-db")?.contains("~/Library") == true)
+        #expect(refusal("Library/Mobile Documents/com~apple~CloudDocs/brief.pdf") == nil, "iCloud Drive : permis")
+        #expect(refusal("Library/CloudStorage/Dropbox") == nil, "Dropbox : permis")
+        #expect(AgentAttachment.refusal(home, home: h)?.contains("dossier perso") == true)
+        #expect(AgentAttachment.refusal(root, home: h)?.contains("dossier perso") == true, "un dossier qui contient le dossier perso")
+        #expect(refusal("Desktop/absent.pdf")?.contains("introuvable") == true)
+        try fm.removeItem(at: home.appending(path: "Desktop/autre-nom.pdf"))
+        #expect(refusal("Desktop/plaquette.pdf") == nil)
+        // limites du moteur : un dossier de 5 001 fichiers est trop gros ; un petit dossier non
+        let many = root.appending(path: "beaucoup")
+        try fm.createDirectory(at: many, withIntermediateDirectories: true)
+        for i in 0...AgentAttachment.maxFiles { fm.createFile(atPath: many.appending(path: "\(i).txt").path(percentEncoded: false), contents: nil) }
+        #expect(AgentAttachment.tooBig(many))
+        #expect(!AgentAttachment.tooBig(home.appending(path: "Desktop")))
+        #expect(!AgentAttachment.tooBig(plaquette))
+    }
+
+    /// Deux copies venues de deux endroits (deux dossiers « Logos ») restent deux ; la même, déposée deux fois, une seule.
+    @Test func copiesDedupeOnTheirOrigin() {
+        let a = AgentAttachment(path: "/tmp/v/1/Logos", size: nil, isFolder: true, isCopy: true, origin: "/Users/alex/Desktop/Martin/Logos")
+        let b = AgentAttachment(path: "/tmp/v/2/Logos", size: nil, isFolder: true, isCopy: true, origin: "/Users/alex/Desktop/Dupont/Logos")
+        let again = AgentAttachment(path: "/tmp/v/3/Logos", size: nil, isFolder: true, isCopy: true, origin: "/Users/alex/Desktop/Martin/Logos")
+        var list = AgentAttachments([a])
+        list.add([b, again])
+        #expect(list.items.map(\.path) == ["/tmp/v/1/Logos", "/tmp/v/2/Logos"])
+    }
 }
 
 /// La lecture du dossier : 400 ms après la dernière frappe, annulée si le dossier change encore.
