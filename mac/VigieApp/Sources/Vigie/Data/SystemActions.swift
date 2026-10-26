@@ -20,12 +20,6 @@ enum SystemActions {
         return NSWorkspace.shared.open(url)
     }
 
-    /// Une app du Mac ouvre les adresses vscode:// : VS Code est installé (VS Code Insiders seul ne compte pas).
-    static var canOpenVSCode: Bool {
-        guard let url = URL(string: "vscode://file/") else { return false }
-        return NSWorkspace.shared.urlForApplication(toOpen: url) != nil
-    }
-
     /// Met VS Code au premier plan (sans rien ouvrir de particulier).
     static func activateVSCode() {
         guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: vsCodeBundleID) else { return }

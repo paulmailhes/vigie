@@ -95,6 +95,17 @@ struct VigieClient: Sendable {
         return URLSession(configuration: configuration)
     }()
 
+    /// Pour une écriture qui attend une fenêtre (lancer un agent : le moteur attend que VS Code soit prêt, 30 s au
+    /// plus, et copie les fichiers joints) : le délai court couperait la réponse en route.
+    private static let patientSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 90
+        configuration.timeoutIntervalForResource = 120
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+
     // MARK: Lecture
 
     @concurrent
@@ -128,6 +139,9 @@ struct VigieClient: Sendable {
         case "conversation":
             let id = route.dropFirst().first ?? ""
             return "conversation-\(id).json"
+        case "agents" where route.count > 1:
+            // /api/v2/agents/folder?path=… → agents-folder.json (le même pour tout dossier)
+            return route.joined(separator: "-") + ".json"
         case "usage":
             // /api/v2/usage/series?window=60 → usage-series-60.json
             let query = path.split(separator: "?").dropFirst().first.map(String.init) ?? ""
@@ -144,8 +158,9 @@ struct VigieClient: Sendable {
 
     // MARK: Écriture
 
+    /// `patient` : la réponse peut tarder (lancer un agent), délai long.
     @concurrent
-    func post(_ path: String, _ body: JSONValue) async throws -> WriteResult {
+    func post(_ path: String, _ body: JSONValue, patient: Bool = false) async throws -> WriteResult {
         switch source {
         case .fixtures:
             return DemoWrites.answer(path: path, body: body)
@@ -156,7 +171,7 @@ struct VigieClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("1", forHTTPHeaderField: "X-Vigie")
             request.httpBody = try? JSONEncoder().encode(body)
-            let data = try await Self.send(request, acceptErrorBody: true)
+            let data = try await Self.send(request, acceptErrorBody: true, session: patient ? Self.patientSession : Self.session)
             guard let result = try? JSONDecoder().decode(WriteResult.self, from: data) else {
                 throw ClientError.unreadable
             }
@@ -167,13 +182,14 @@ struct VigieClient: Sendable {
 
     // MARK: Réseau
 
-    private static func send(_ request: URLRequest, acceptErrorBody: Bool = false) async throws -> Data {
+    private static func send(_ request: URLRequest, acceptErrorBody: Bool = false,
+                             session: URLSession = VigieClient.session) async throws -> Data {
         let token = APIToken.current()
-        var (data, http) = try await exchange(request, token: token)
+        var (data, http) = try await exchange(request, token: token, session: session)
         // refusé (avant toute action du moteur : rejouer un POST ne fait rien deux fois) : les autres jetons possibles
         if http.statusCode == 401 {
             for other in APIToken.others(than: token) {
-                (data, http) = try await exchange(request, token: other)
+                (data, http) = try await exchange(request, token: other, session: session)
                 if http.statusCode != 401 { APIToken.remember(other); break }
             }
         }
@@ -195,7 +211,8 @@ struct VigieClient: Sendable {
         throw ClientError.refused("Le moteur de Vigie a eu un problème (\(http.statusCode)) : réessaie dans un instant")
     }
 
-    private static func exchange(_ request: URLRequest, token: String?) async throws -> (Data, HTTPURLResponse) {
+    private static func exchange(_ request: URLRequest, token: String?,
+                                 session: URLSession) async throws -> (Data, HTTPURLResponse) {
         var request = request
         if let token { request.setValue(token, forHTTPHeaderField: "X-Vigie-Token") }
         let data: Data

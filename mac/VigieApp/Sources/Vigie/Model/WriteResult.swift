@@ -17,13 +17,20 @@ struct WriteResult: Decodable, Equatable, Sendable {
     /// POST /api/v2/accounts { action: "create" } : le compte créé.
     @Tolerant var account: CreatedAccount?
     /// POST /api/v2/agents/launch : le dossier du projet (créé ou existant), la consigne remplie qui y est rangée, et
-    /// le message à envoyer dans Claude Code (à copier si VS Code ne s'ouvre pas).
+    /// le message à envoyer dans Claude Code (à copier quand il n'a pas pu être prérempli).
     var folder: String?
     var briefFile: String?
     var prompt: String?
+    /// Ce que le moteur a ouvert : full, folder, no-prompt, none (AgentOpened). Absent : moteur plus ancien, qui
+    /// n'ouvre rien.
+    var opened: String?
+    /// Où : vscode ou claude-app (AgentSurface).
+    var surface: String?
+    /// Les fichiers joints, tels que rangés dans le projet (« sources/charte.pdf »).
+    @Lossy var copied: [String]
 
     enum CodingKeys: String, CodingKey {
-        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt
+        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt, opened, surface, copied
         case switchInfo = "switch"
     }
 
@@ -37,6 +44,7 @@ struct WriteResult: Decodable, Equatable, Sendable {
         self.message = message
         self.switchInfo = nil
         self.account = nil
+        self.copied = []
     }
 }
 

@@ -414,39 +414,30 @@ extension VigieStore {
 
     // MARK: Agents
 
-    /// Lance un agent : sans VS Code, rien n'est demandé au moteur ; sinon le moteur crée le dossier du projet et y
-    /// range la consigne remplie, VS Code s'ouvre sur ce dossier, puis Claude Code avec le message préparé, un instant
-    /// plus tard (la fenêtre du dossier doit d'abord être devant, sinon le message part dans une autre).
-    /// Un refus ou VS Code qui ne s'ouvre pas revient à la feuille, qui le montre et reste ouverte (le toast de la
-    /// fenêtre serait caché derrière elle) ; le succès s'affiche ici, une fois la feuille fermée.
-    func launchAgent(_ agent: AgentInfo, values: [String: String], folder: String) async -> AgentLaunchOutcome {
-        let outcome: AgentLaunchOutcome
+    /// Lance un agent : le moteur crée le dossier du projet, y copie les fichiers joints (sources/) et y range la
+    /// consigne remplie, puis ouvre VS Code ou l'app Claude, une fois la fenêtre du projet prête (jusqu'à 30 s :
+    /// sinon le message partirait dans une autre fenêtre). Le message n'a pas pu être prérempli : il est copié ici.
+    /// Un refus revient à la feuille, qui le montre et reste ouverte (le toast de la fenêtre serait caché derrière
+    /// elle) ; le reste s'affiche ici, une fois la feuille fermée.
+    func launchAgent(_ agent: AgentInfo, values: [String: String], folder: String, files: [String],
+                     surface: AgentSurface?, session: String?) async -> AgentLaunchOutcome {
         if isDemo {
-            outcome = .opened(message: "Démonstration : rien n'a été créé (pour de vrai, VS Code s'ouvrirait sur \(Fmt.shortPath(folder)))",
-                              link: nil, prompt: "")
-        } else {
-            let body: JSONValue = ["id": .string(agent.id), "values": .object(values.mapValues(JSONValue.string)),
-                                   "folder": .string(folder)]
-            outcome = await AgentLaunch.run(hasVSCode: SystemActions.canOpenVSCode, folder: folder,
-                                            prepare: { await self.send("/api/v2/agents/launch", body) },
-                                            openFolder: { SystemActions.openInVSCode(path: $0) })
+            let place = surface?.label ?? "VS Code"
+            show(info: "Démonstration : rien n'a été créé (pour de vrai, \(place) s'ouvrirait sur \(Fmt.shortPath(folder)))")
+            return .launched(message: "", copy: nil, alert: false)
         }
+        let body = AgentLaunch.body(agent: agent.id, values: values, folder: folder, files: files,
+                                    surface: surface, session: session)
+        let outcome = AgentLaunch.outcome(await send("/api/v2/agents/launch", body, patient: true), surface: surface)
         switch outcome {
         case .refused:
-            await refreshAgents() // AGENT.md modifié entre-temps : la carte le montre
-        case .notOpened:
             break
-        case .opened(let message, let link, let prompt):
-            show(info: message)
-            guard let link else { break }
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2.5))
-                guard !SystemActions.open(link.absoluteString) else { return }
-                // la feuille est fermée : le message part dans le presse-papiers, et le toast le dit
-                SystemActions.copy(prompt)
-                self.show(error: AgentLaunch.linkFailedMessage)
-            }
+        case .launched(let message, let copy, let alert):
+            if let copy { SystemActions.copy(copy) }
+            if alert { show(error: message) } else { show(info: message) }
         }
+        // AGENT.md modifié entre-temps (la carte le montre), ou l'endroit choisi, retenu par le moteur
+        await refreshAgents()
         return outcome
     }
 

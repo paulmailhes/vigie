@@ -109,7 +109,12 @@ final class SnapshotRunner {
             await captureAlone(OnboardingView(start: .ready), "14-accueil-pret-\(theme)", appearance: NSAppearance(named: appearanceName))
             await captureAlone(MCPLibrarySheet(), "15-bibliotheque-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
             if let agent = store.agentsState?.agents.first(where: \.canLaunch) {
-                await captureAlone(AgentLaunchSheet(agent: agent), "17-feuille-agent-\(theme)", appearance: NSAppearance(named: appearanceName))
+                // un dossier où une conversation existe déjà (agents-folder.json), et deux fichiers joints
+                let sheet = AgentLaunchSheet(agent: agent, folder: "~/Code/cabinet-martin", files: [
+                    AgentAttachment(path: "/Users/alex/Downloads/questionnaire-cabinet-martin.pdf", size: 248_000, isFolder: false, isCopy: false),
+                    AgentAttachment(path: "/Users/alex/Downloads/charte-graphique.pdf", size: 3_400_000, isFolder: false, isCopy: false),
+                ])
+                await captureAlone(sheet, "17-feuille-agent-\(theme)", appearance: NSAppearance(named: appearanceName))
             }
         }
 

@@ -99,6 +99,14 @@ struct DecodingTests {
                 #expect(agents.dir != nil, "\(name)")
                 #expect(agents.agents.contains { $0.canLaunch && !$0.fields.isEmpty && !$0.mcp.isEmpty }, "\(name)")
                 #expect(agents.agents.contains { !$0.canLaunch }, "\(name)")
+                // la feuille des captures : un agent à un seul long texte, qui dit ce qu'il crée
+                #expect(agents.agents.contains { $0.canLaunch && $0.fields.count == 1 && $0.dropField != nil && !$0.willCreate.isEmpty },
+                        "\(name)")
+                #expect(agents.surfaces?.available == [.vscode, .claudeApp], "\(name)")
+            case "agents-folder.json":
+                let folder = try decoder.decode(AgentFolderInfo.self, from: data)
+                #expect(folder.exists && folder.problem == nil, "\(name)")
+                #expect(!folder.resumable.isEmpty && !folder.sources.isEmpty, "\(name)")
             case let usage where usage.hasPrefix("usage-series-"):
                 let series = try decoder.decode(UsageSeries.self, from: data)
                 #expect(!series.conversations.isEmpty, "\(name)")
@@ -209,8 +217,9 @@ struct DecodingTests {
         #expect(agent.suggestedFolder(values: ["client": "Cabinet Martin", "note": "x"]) == "/Users/alex/Code/cabinet-martin")
         #expect(agent.suggestedFolder(values: [:]) == "/Users/alex/Code/")
 
+        // sans champ qui le nomme, le nom du projet se tape directement dans le dossier
         let bare = try JSONDecoder().decode(AgentInfo.self, from: Data(#"{ "id": "Revue SEO" }"#.utf8))
-        #expect(bare.suggestedFolder(values: [:]) == "~/Code/revue-seo")
+        #expect(bare.suggestedFolder(values: [:]) == "~/Code/")
     }
 
     @Test func fineFormats() {
@@ -242,6 +251,7 @@ struct DecodingTests {
         #expect(VigieClient.fixtureName(for: "/api/v2/conversation/abc") == "conversation-abc.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/mcp") == "mcp.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/agents") == "agents.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/agents/folder?path=%2FUsers%2Falex%2FCode%2Fx") == "agents-folder.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/usage/series?window=600") == "usage-series-600.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/usage/series") == "usage-series-60.json")
     }
