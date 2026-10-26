@@ -185,6 +185,7 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
 | `POST /api/v2/mcp/project` | `{ action: "add"\|"update"\|"remove", path, name, config? }` | édite `<path>/.mcp.json` (sauvegarde) |
 | `POST /api/v2/mcp/disable` | `{ path, name, disabled: bool }` | coupe ou rallume un MCP pour un projet |
 | `POST /api/v2/accounts` | `{ action: "create", label }`, `{ action: "rename", id, label }`, `{ action: "setDefault", id }`, `{ action: "connect", id }`, `{ action: "wrapper", enable: bool }`, `{ action: "refresh", id? }` | gestion des comptes ; refresh relève l'usage (session, semaine) du compte (ou de tous) par une requête minimale, au plus une fois toutes les 10 min par compte |
+| `POST /api/v2/agents/launch` | `{ id, values: { "<champ>": "texte" }, folder }` | prépare le lancement d'un agent (voir « Agents » plus bas) |
 
 `config` d'un MCP : la forme de Claude Code, `{ "type": "stdio", "command": "…", "args": [], "env": {} }` ou `{ "type": "http", "url": "…", "headers": {} }`.
 
@@ -436,3 +437,60 @@ L'utilisateur refuse : `POST /api/v2/approvals` `{ approvalId, decision: "deny" 
 - `ConversationSummary.account` (conversations qui tournent, sinon `null`) : `{ chosen, running, pending: { to, since } | null, history: [{ ts, accountId, reason }] }`. `running` = compte du processus réellement lancé (fichier du lanceur), `history` = 10 derniers lancements lus dans `data/launches.log`.
 - `POST /api/v2/conversation/:id/settings` accepte `now: true` avec `accountId` : la conversation est arrêtée même en plein travail (message « Interrompue : écris « continue »… »). Sans `now`, la bascule attend la fin du tour et des commandes de fond (vrais enfants shell du processus, plus le transcript).
 - Alerte « s'emballe » : une boucle = même outil avec exactement les mêmes paramètres (`sig`, empreinte de l'entrée) ; l'app notifie au plus une fois par conversation et par tranche de 3 h.
+
+## Agents (2026-10-26, `lib/agents.mjs`)
+
+Un agent est une recette rangée dans `<données du moteur>/agents/<id>/AGENT.md` (`~/.vigie/data/agents`), format décrit
+dans [agents.md](agents.md). Le moteur lit la bibliothèque à chaque appel (rien en cache) et crée le dossier des agents
+s'il manque.
+
+### GET /api/v2/agents
+
+```jsonc
+{
+  "dir": "/Users/alex/.vigie/data/agents",          // dossier des agents (chemin absolu)
+  "account": { "id": "travail1", "label": "Perso" }, // ? compte des nouvelles conversations : celui sur lequel partira la conversation
+  "agents": [                                         // triés par nom (sans tenir compte des accents ni des majuscules)
+    {
+      "id": "demarrer-projet",                        // nom du dossier : /^[a-z0-9][a-z0-9-]{0,63}$/
+      "name": "Démarrer un projet client",
+      "description": "Brief, références et préparation du premier rendez-vous",  // ? null
+      "icon": "wand.and.stars",                       // ? nom de symbole SF, null
+      "folder": "/Users/alex/Code",                   // dossier PARENT proposé pour le projet (« ~ » développé ; ~/Code par défaut)
+      "fields": [
+        { "id": "client", "label": "Nom du client", "type": "text",   // text | longtext | url | urls (une adresse par ligne)
+          "required": true, "help": "Il sert aussi à nommer le dossier du projet", "placeholder": "Cabinet Martin" }  // help, placeholder : ? null
+      ],
+      "mcp": [ { "name": "figma-pro", "status": "connected" } ],    // MCP nécessaires et leur état pour ce compte
+      "error": null                                   // ? phrase si AGENT.md est illisible : agent listé mais pas lançable
+    }
+  ]
+}
+```
+- `mcp[].status` : `connected` | `needs-auth` | `failed` | `pending-approval` | `disabled` | `unknown`. MCP de la passerelle : `connected` s'il est autorisé, sinon `needs-auth`. Les autres : dernier relevé de `claude mcp list` pour ce compte, et à défaut celui du connecteur claude.ai de ce nom (`Gmail` comme `claude.ai Gmail`) ; `unknown` sans relevé, ou si le MCP n'existe pas.
+- Agent illisible (`error` non nul) : `name` est celui de l'en-tête s'il se lit, sinon `id` ; `fields` et `mcp` sont vides ; `folder` vaut ~/Code. Un sous-dossier au nom invalide, sans `AGENT.md`, ou un fichier à la place d'un dossier n'est pas listé. `AGENT.md` de plus de 256 Ko : listé avec une erreur. 200 agents au plus.
+
+### POST /api/v2/agents/launch
+
+Corps : `{ "id": "demarrer-projet", "values": { "client": "Cabinet Martin", "questionnaire": "…" }, "folder": "/Users/alex/Code/cabinet-martin" }`.
+
+```jsonc
+{
+  "ok": true,
+  "folder": "/Users/alex/Code/cabinet-martin",                        // chemin absolu normalisé, créé ou déjà là
+  "briefFile": "/Users/alex/Code/cabinet-martin/.vigie/agent-demarrer-projet.md",
+  "openUrl": "vscode://anthropic.claude-code/open?prompt=…",          // message pré-rempli, encodé pour survivre à deux décodages
+  "prompt": "Lance l'agent « Démarrer un projet client » : lis le fichier …/agent-demarrer-projet.md et suis ses consignes, dans le dossier ….",
+  "message": "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent."
+}
+```
+- Le moteur n'ouvre rien : l'app ouvre VS Code sur `folder` (pour que la conversation parte dans ce dossier), puis `openUrl`, qui ouvre un onglet Claude Code avec `prompt` dans la saisie, sans l'envoyer. `prompt` sert aussi à copier le message si l'onglet ne le reçoit pas.
+- `values` : un objet ; chaque valeur une chaîne (ou absente, ou `null` = vide). `text` et `url` : 2 000 caractères au plus ; `longtext` et `urls` : 200 000. Les clés inconnues sont ignorées. Le corps entier reste sous 1 Mo (sinon 413).
+- `folder` : chemin absolu ou commençant par `~`. Il doit être DANS le dossier perso, pas le dossier perso lui-même, ni sous `~/.vigie`, `~/Library`, `~/.claude`, `~/.claude-comptes`, `~/.ssh`, `~/.codex`. Le chemin réel (liens résolus) est vérifié aussi : un lien vers un dossier réservé ou vers le dossier perso est refusé, un `~/Code` relié à un disque externe est accepté. S'il existe, ce doit être un dossier (ses droits ne changent pas) ; sinon il est créé avec ses parents manquants, en `0755`.
+- Écrit `<folder>/.vigie/agent-<id>.md` (fichier `0600`, remplacé à chaque lancement ; `.vigie` créé en `0755` avec un `.gitignore` « * » pour que le brief ne parte jamais dans git). Contenu : `# Agent : <name>`, la date, le dossier du projet, `## Ce que tu m'as donné` (un `### <label>` par champ, sa valeur ou « (non fourni) » ; long texte dans un bloc de code, adresses en liste), puis `## Consignes` : la consigne de l'agent, `{{id}}` remplacé par la valeur saisie (ou « (non fourni) »).
+
+| Statut | Cas (`{ "ok": false, "error": "…" }`) |
+|---|---|
+| 400 | `Champ manquant : <label>` (obligatoire vide ou fait d'espaces) ; `<label> : texte attendu.` ; `<label> : trop long (2 000 caractères au plus).` ; `Valeurs du formulaire illisibles.` ; dossier refusé (`Choisis le dossier du projet.`, `Dossier refusé : …`, `Dossier impossible à préparer : …`) ; `Cet agent ne peut pas être lancé : <erreur de son AGENT.md>` |
+| 404 | `Agent introuvable.` (id invalide, dossier ou `AGENT.md` absent) |
+Comme toute écriture : `X-Vigie-Token` (401) et `X-Vigie: 1` (403) obligatoires.

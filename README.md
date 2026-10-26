@@ -102,6 +102,14 @@ Les MCP qui passent par la **passerelle** de Vigie (une autorisation pour tous t
 
 Les MCP que le service refuse de faire passer par Vigie (Figma) restent branchés compte par compte : après les avoir autorisés, une conversation déjà ouverte demande un « Reconnect » dans le panneau MCP de VS Code.
 
+## Agents
+
+Un **agent** est une recette préparée à l'avance, par exemple « Démarrer un projet client » : un petit formulaire (nom du client, questionnaire, sites de référence…), les MCP dont il a besoin, puis une consigne pour Claude.
+
+- Chaque agent est un fichier `AGENT.md`, rangé dans `~/.vigie/data/agents/<nom>/`. Son format est dans [docs/agents.md](docs/agents.md).
+- La page Agents montre chaque agent et l'état de ses MCP.
+- **Lancer** : tu remplis le formulaire et tu choisis le dossier du projet. Vigie crée le dossier et y écrit la consigne remplie (`.vigie/agent-<nom>.md`, hors de git). VS Code s'ouvre ensuite avec le message prêt : tu l'envoies, et la conversation suit la recette.
+
 ## Codex (OpenAI)
 
 Vigie suit aussi tes conversations **Codex** (l'extension VS Code d'OpenAI), dans la même liste, avec une pastille « Codex ». Pour chacune, tu vois :
