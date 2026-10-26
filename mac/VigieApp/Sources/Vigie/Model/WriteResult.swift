@@ -16,12 +16,14 @@ struct WriteResult: Decodable, Equatable, Sendable {
     var message: String?
     /// POST /api/v2/accounts { action: "create" } : le compte créé.
     @Tolerant var account: CreatedAccount?
-    /// POST /api/v2/agents/launch : le dossier du projet (créé ou existant) et la consigne remplie qui y est rangée.
+    /// POST /api/v2/agents/launch : le dossier du projet (créé ou existant), la consigne remplie qui y est rangée, et
+    /// le message à envoyer dans Claude Code (à copier si VS Code ne s'ouvre pas).
     var folder: String?
     var briefFile: String?
+    var prompt: String?
 
     enum CodingKeys: String, CodingKey {
-        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile
+        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt
         case switchInfo = "switch"
     }
 

@@ -141,6 +141,10 @@ propres fichiers (scripts, images, modèles) et la consigne les cite par `{{doss
 5. L'app ouvre VS Code sur le dossier, puis un onglet Claude Code avec le message prêt (« Lance l'agent … : lis le
    fichier … et suis ses consignes ») : tu l'envoies, la conversation lit le brief et le suit.
 
+Dans l'app, la feuille vérifie le dossier comme le moteur, avant le clic : le bouton reste grisé et la raison
+s'affiche sous le dossier. Un refus du moteur s'affiche en bas de la feuille, qui reste ouverte. Sans VS Code, rien
+n'est créé. Si VS Code ne s'ouvre pas, la feuille propose de copier le message.
+
 Rien de nouveau à surveiller : c'est une conversation comme les autres, avec ses actions sensibles et sa consommation
 dans Vigie. Le brief est lisible par la conversation, mais le modifier passe par toi : Vigie protège tous les dossiers
 `.vigie` (garde-fou « réglages de Vigie »).
