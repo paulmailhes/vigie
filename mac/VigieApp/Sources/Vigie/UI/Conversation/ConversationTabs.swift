@@ -309,7 +309,7 @@ struct FileRow: View {
             Button("Ouvrir dans VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
                 SystemActions.openInVSCode(path: file.path)
             }
-            Button("Révéler dans le Finder", systemImage: "folder") {
+            Button("Afficher dans le Finder", systemImage: "folder") {
                 SystemActions.revealInFinder(path: file.path)
             }
             Divider()
@@ -373,11 +373,11 @@ struct TestRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// « 245 réussis », « 3 en échec sur 248 », « échec voulu », « en cours ».
+    /// « 245 réussis », « 3 en échec sur 248 », « échec attendu », « en cours ».
     private var result: String {
         switch test.outcome {
         case .pending: return "en cours"
-        case .expectedFail: return "échec voulu"
+        case .expectedFail: return "échec attendu"
         case .passed:
             if let passed = test.passed, passed > 0 { return Fmt.count(passed, "réussi") }
             return "réussi"
@@ -428,7 +428,7 @@ struct ConversationMCPList: View {
                     row(item)
                 }
             }
-            Button("Tous les MCP", systemImage: Icon.mcp) { store.route = .mcp }
+            Button("Ouvrir la page MCP", systemImage: Icon.mcp) { store.route = .mcp }
                 .buttonStyle(.link)
                 .padding(.top, 4)
         }

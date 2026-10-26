@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Message d'une ligne qui flotte en bas de la fenêtre (verre : élément flottant).
+/// Message qui flotte en bas de la fenêtre (verre : élément flottant) : trois lignes au plus, et un message long reste
+/// plus longtemps (une consigne coupée ou disparue trop vite ne sert à rien).
 struct ToastView: View {
     let toast: Toast
     let dismiss: (UUID) -> Void
@@ -10,8 +11,8 @@ struct ToastView: View {
             Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
                 .foregroundStyle(toast.isError ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
             Text(toast.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             Button("Fermer", systemImage: "xmark") { dismiss(toast.id) }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -20,10 +21,10 @@ struct ToastView: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .glassEffect(.regular.tint(toast.isError ? Color.red.opacity(0.10) : nil), in: .capsule)
+        .glassEffect(.regular.tint(toast.isError ? Color.red.opacity(0.10) : nil), in: .rect(cornerRadius: 18))
         .frame(maxWidth: 560)
         .task(id: toast.id) {
-            try? await Task.sleep(for: .seconds(6))
+            try? await Task.sleep(for: .seconds(min(14, 6 + max(0, toast.text.count - 80) / 30)))
             dismiss(toast.id)
         }
         .accessibilityElement(children: .combine)

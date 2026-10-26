@@ -310,7 +310,7 @@ console.log(JSON.stringify({ type: 'result', result: '.' }));
   // sans binaire connu (dossier perso de test, pas de VIGIE_CLAUDE_BIN) : jamais de requête
   const n = calls().length;
   assert.deepEqual(A.autoRefresh(), []);
-  assert.deepEqual(A.apply({ action: 'refresh' }), { ok: false, error: 'Claude Code introuvable : relevé impossible.' });
+  assert.deepEqual(A.apply({ action: 'refresh' }), { ok: false, error: 'Claude Code introuvable : impossible de lire la consommation.' });
   assert.equal(calls().length, n);
   // aucun secret dans ce qui est montré
   assert.ok(!JSON.stringify(P.view()).includes(SECRET));
@@ -450,7 +450,7 @@ test('lanceur : cas où l\'on ne touche à rien', () => {
   // lanceur absent ou non exécutable
   w(VSC, '{}');
   const B = createAccounts({ ...opts, wrapperPath: path.join(TMP, 'lanceur-absent') });
-  assert.deepEqual(B.wrapper(true), { ok: false, error: 'Lanceur introuvable.' });
+  assert.deepEqual(B.wrapper(true), { ok: false, error: 'Vigie est incomplet : télécharge-le à nouveau.' });
   // réglages absents : créés ; lien symbolique : on écrit la cible
   fs.rmSync(VSC);
   assert.equal(A.wrapper(true).ok, true);
@@ -471,7 +471,7 @@ test('lanceur : cas où l\'on ne touche à rien', () => {
 test('connecter : Terminal sur le bon dossier, rien d\'automatique', () => {
   runner.calls.length = 0;
   const r = A.connect('travail2');
-  assert.deepEqual(r, { ok: true, message: 'Terminal est ouvert : tape /login.' });
+  assert.deepEqual(r, { ok: true, message: 'Terminal est ouvert : tape /login puis Entrée, et suis les étapes.' });
   const call = runner.calls.find((c) => c.cmd === '/usr/bin/osascript');
   const lines = call.args.filter((_, i) => i % 2 === 1);
   assert.deepEqual(call.args.filter((_, i) => i % 2 === 0), ['-e', '-e', '-e', '-e']);
@@ -505,7 +505,7 @@ test('connecter : Terminal sur le bon dossier, rien d\'automatique', () => {
 test('connecter sans Claude Code utilisable : Terminal tout de suite ; copie de l\'extension nommée en entier', () => {
   runner.calls.length = 0;
   const none = createAccounts({ ...opts, claudeBin: null });
-  assert.deepEqual(none.connect('travail2'), { ok: true, message: 'Terminal est ouvert : tape /login.' });
+  assert.deepEqual(none.connect('travail2'), { ok: true, message: 'Terminal est ouvert : tape /login puis Entrée, et suis les étapes.' });
   assert.equal(runner.calls.some((c) => /claude$/.test(c.cmd)), false, 'rien de lancé en silence');
   const ext = '/Users/x/.vscode/extensions/anthropic.claude-code-2.1.304-darwin-arm64/resources/native-binary/claude';
   runner.login = 1; // la page ne s'ouvre pas : repli Terminal
@@ -535,7 +535,7 @@ const vigieModel = () => rj(path.join(DATA, 'accounts.json'));
 test('bascule : refus clairs', () => {
   assert.deepEqual(A.switchConversation('pas-un-id', 'travail2'), { ok: false, error: 'Conversation inconnue.' });
   assert.deepEqual(A.switchConversation(SID, 'inconnu'), { ok: false, error: 'Compte inconnu.' });
-  assert.deepEqual(A.switchConversation(SID, 'eteperso'), { ok: false, error: 'Été perso n\'est pas connecté.' });
+  assert.deepEqual(A.switchConversation(SID, 'eteperso'), { ok: false, error: 'Été perso n\'est pas connecté : connecte-le d\'abord dans Comptes.' });
   assert.equal(A.accountOf(SID), 'travail1');
 });
 
@@ -552,7 +552,7 @@ test('bascule sans lanceur actif : choix noté, aucun processus arrêté', () =>
   proc();
   const r = A.switchConversation(SID, 'travail1', { liveSessions: new Map([[SID, live]]) });
   assert.equal(r.switch.state, 'done');
-  assert.match(r.switch.message, /Active le choix du compte/);
+  assert.match(r.switch.message, /clique sur « Activer » dans Comptes/);
   assert.deepEqual(kills, []);
 });
 
@@ -907,7 +907,7 @@ test('connecté : l\'état du coffre fait foi s\'il est frais ; inconnu ou trop 
   // une bascule vers un compte que le coffre dit perdu est refusée
   runner.keychain.add(keychainItem(T2DIR));
   setCx({ travail2: { connected: false, state: 'lost' } });
-  assert.deepEqual(X.switchConversation(SID2, 'travail2', { liveSessions: [] }), { ok: false, error: 'Travail 2 n\'est pas connecté.' });
+  assert.deepEqual(X.switchConversation(SID2, 'travail2', { liveSessions: [] }), { ok: false, error: 'Travail 2 n\'est pas connecté : connecte-le d\'abord dans Comptes.' });
   fs.rmSync(CX);
   assert.equal(X.switchConversation(SID2, 'travail2', { liveSessions: [] }).ok, true, 'sans état : le trousseau suffit');
   runner.keychain.delete(keychainItem(T2DIR));

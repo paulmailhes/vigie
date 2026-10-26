@@ -50,7 +50,7 @@ struct ReviewRow: View {
     private var dismissButton: some View {
         AsyncButton { await store.dismissReview(item) } label: { Image(systemName: "xmark") }
             .glassButton()
-            .help("Retirer")
+            .help("Retirer de « À regarder »")
             .accessibilityLabel("Retirer")
     }
 
@@ -67,7 +67,7 @@ struct ReviewRow: View {
             .glassButton()
         case .limit:
             HStack(spacing: 6) {
-                Button("Comptes") {
+                Button("Voir les comptes") {
                     store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
                 }
                 .glassButton()

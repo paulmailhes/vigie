@@ -43,7 +43,7 @@ struct BlockedActionSheet: View {
                 if item.isAwaitingApproval {
                     Text(item.holding == true
                          ? "En pause : la conversation attend ton accord ici. Rien ne s'affiche dans VS Code."
-                         : "Elle a continué sans : autorise-la ici pour qu'elle puisse la relancer.")
+                         : "Elle a continué sans cette action : autorise-la ici, elle pourra la relancer.")
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if waiting {
@@ -53,7 +53,9 @@ struct BlockedActionSheet: View {
                             .foregroundStyle(.red)
                     }
                 } else {
-                    Text(item.state == "waiting" ? "Décide dans VS Code" : "Refusée par le garde-fou : à faire toi-même")
+                    Text(item.state == "waiting" ? "Décide dans VS Code"
+                         : item.failed ? "Autorisée, mais elle a échoué : regarde l'erreur dans la conversation"
+                         : "Refusée par le garde-fou : à faire toi-même")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -82,7 +84,7 @@ struct BlockedActionSheet: View {
                 Text(conversationName)
             }
             GridRow {
-                Text("Par").foregroundStyle(.secondary)
+                Text("Demandée par").foregroundStyle(.secondary)
                 Label(item.byAgent ?? "La conversation elle-même", systemImage: item.byAgent == nil ? "bubble.left" : Icon.agent)
                     .labelStyle(CompactLabelStyle())
             }
@@ -158,7 +160,7 @@ struct BlockedActionSheet: View {
                     .glassButton(.primary)
                     .disabled(sending)
             } else {
-                Button("Ignorer") {
+                Button("Retirer") {
                     Task { await store.dismissReview(item) }
                     dismiss()
                 }

@@ -27,22 +27,22 @@ struct CodexSetupSteps: View {
                     }
                 }
             }
-            step(2, done: account?.hook?.trusted == true, title: "Le hook de Vigie approuvé dans Codex") {
+            step(2, done: account?.hook?.trusted == true, title: "Vigie accepté dans Codex") {
                 if account?.hook?.trusted == true {
                     Text("Approuvé : l'auto-accept marche pour Codex.")
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Codex demande de faire confiance une fois à un nouveau hook (c'est une sécurité d'OpenAI). Sans ça, pas d'auto-accept pour Codex.")
+                        Text("Codex demande d'accepter une fois le module de Vigie (une sécurité d'OpenAI). Sans ça, pas d'auto-accept pour Codex.")
                             .fixedSize(horizontal: false, vertical: true)
                         if tools?.codexVSCode ?? true {
-                            Label("Dans VS Code : ouvre le panneau Codex. En bas, un bandeau « Review hooks » : clique dessus et accepte les deux hooks « Vigie ».",
+                            Label("Dans VS Code : ouvre le panneau Codex. En bas, un bandeau « Review hooks » : clique dessus et accepte les deux lignes « Vigie ».",
                                   systemImage: "chevron.left.forwardslash.chevron.right")
                                 .font(.callout)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if tools?.codexApp ?? (store.tools?.detected?.codexApp == true) {
-                            Label("Dans l'app ChatGPT : ouvre Codex. Un message te propose de vérifier les hooks (« Review hooks ») : accepte les deux hooks « Vigie ».",
+                            Label("Dans l'app ChatGPT : ouvre Codex. Un message te propose « Review hooks » : accepte les deux lignes « Vigie ».",
                                   systemImage: "macwindow")
                                 .font(.callout)
                                 .fixedSize(horizontal: false, vertical: true)

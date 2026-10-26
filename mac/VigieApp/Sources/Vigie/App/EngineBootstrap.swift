@@ -42,7 +42,7 @@ enum EngineBootstrap {
     /// Lance scripts/bootstrap.sh du moteur livré (Node.js téléchargé s'il manque : jusqu'à une minute).
     /// nil : installé ; sinon les dernières lignes du journal (~/Library/Logs/Vigie-installation.log).
     static func install() async -> String? {
-        guard let engine = bundledEngine else { return "Moteur introuvable dans l'app." }
+        guard let engine = bundledEngine else { return "Vigie est incomplet : télécharge-le à nouveau." }
         let log = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/Vigie-installation.log")
         return await withCheckedContinuation { continuation in
             let process = Process()

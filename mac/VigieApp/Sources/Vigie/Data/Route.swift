@@ -32,7 +32,7 @@ enum ConversationTab: String, CaseIterable, Identifiable, Sendable {
         case .fil: "Ce qui compte, du plus récent au plus ancien"
         case .files: "Créés ou modifiés, et ce qui a été publié"
         case .agents: "Les assistants lancés en fond"
-        case .tests: "Tests, types, build"
+        case .tests: "Tests, contrôle du code, construction"
         case .mcp: "Les outils branchés à cette conversation"
         }
     }

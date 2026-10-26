@@ -10,12 +10,12 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .waiting: "Une conversation t'attend"
-        case .sensitive: "Action sensible à autoriser"
-        case .failed: "Action autorisée qui a échoué"
-        case .question: "Question choisie à ta place"
-        case .accountWeek: "Compte à 80 % puis 90 % de sa semaine"
-        case .missionDone: "Mission terminée"
-        case .runaway: "Conversation qui s'emballe"
+        case .sensitive: "Une action sensible attend ton accord"
+        case .failed: "Une action autorisée a échoué"
+        case .question: "Vigie a répondu à une question à ta place"
+        case .accountWeek: "Un compte passe 80 % puis 90 % de sa semaine"
+        case .missionDone: "Une conversation finit un long travail"
+        case .runaway: "Une conversation s'emballe"
         }
     }
 
@@ -137,7 +137,7 @@ final class Notifier {
                 list.append(Candidate(key: "r:" + item.id, kind: .sensitive, title: "À autoriser · \(conversation)",
                                       body: what + command, conversationId: item.conversationId, reviewId: item.id))
             case .blocked where item.failed:
-                list.append(Candidate(key: "r:" + item.id, kind: .failed, title: "N'a pas marché · \(conversation)",
+                list.append(Candidate(key: "r:" + item.id, kind: .failed, title: "Action autorisée en échec · \(conversation)",
                                       body: item.detail ?? item.rule ?? "L'action autorisée a échoué",
                                       conversationId: item.conversationId, reviewId: item.id))
             case .question:
@@ -145,7 +145,7 @@ final class Notifier {
                 var body = "« \(item.title ?? "Question") »"
                 if let chosen, !chosen.isEmpty { body += " → \(chosen)" }
                 list.append(Candidate(key: "r:" + item.id, kind: .question,
-                                      title: "Question choisie à ta place · \(conversation)",
+                                      title: "Réponse choisie pour toi · \(conversation)",
                                       body: body, conversationId: nil, reviewId: item.id))
             case .blocked, .limit, .other:
                 continue
@@ -174,7 +174,7 @@ final class Notifier {
             guard report.reportKind == .missionDone || report.reportKind == .workflowDone else { continue }
             let conversation = name(report.conversationId, report.conversationTitle)
             list.append(Candidate(key: "m:" + report.stableKey, kind: .missionDone,
-                                  title: "Mission terminée · \(conversation)",
+                                  title: "Travail terminé · \(conversation)",
                                   body: report.title ?? report.detail ?? "Terminée",
                                   conversationId: report.conversationId, reviewId: nil))
         }

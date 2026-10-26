@@ -106,7 +106,7 @@ struct LoadingView: View {
                     .glassButton(.primary)
             }
         } else {
-            ProgressView("Lecture du moteur…")
+            ProgressView("Chargement…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

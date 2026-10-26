@@ -44,7 +44,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
         case .blocked: "Bloquées"
         case .failed: "Échouées"
         case .question: "Questions"
-        case .vscode: "Dans VS Code"
+        case .vscode: "Laissées à VS Code"
         case .waiting: "En attente"
         }
     }
@@ -56,7 +56,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
         case .blocked: "Bloquée"
         case .failed: "Échouée"
         case .question: "Question"
-        case .vscode: "VS Code"
+        case .vscode: "Laissée à VS Code"
         case .waiting: "En attente"
         }
     }

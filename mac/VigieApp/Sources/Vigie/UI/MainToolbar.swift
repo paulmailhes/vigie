@@ -32,7 +32,7 @@ struct AutoAcceptSwitch: View {
                 .controlSize(.small)
         }
         .padding(.horizontal, 10)
-        .help(store.autoAccept ? "Claude valide tout seul, sauf les garde-fous" : "Claude te demande avant d'agir")
+        .help(store.autoAccept ? "Vigie accepte pour toi, sauf les actions sensibles" : "Claude te demande à chaque fois")
         .accessibilityElement(children: .combine)
     }
 }
@@ -42,7 +42,7 @@ struct QuestionsMenu: View {
 
     var body: some View {
         Menu {
-            Toggle("Quand je ne suis pas là, Claude choisit l'option recommandée", isOn: $store.questionsAuto)
+            Toggle("Quand tu n'es pas là, Vigie choisit l'option recommandée", isOn: $store.questionsAuto)
             Picker("Attendre avant de choisir", selection: $store.questionWaitMin) {
                 ForEach([5, 10, 20, 30, 60], id: \.self) { minutes in
                     Text("\(minutes) min").tag(minutes)
@@ -75,6 +75,6 @@ struct GuardsButton: View {
                 Text("Garde-fous")
             }
         }
-        .help("Actions sensibles : à valider dans ta conversation ou dans Vigie")
+        .help("Actions sensibles : à autoriser dans ta conversation ou dans Vigie")
     }
 }

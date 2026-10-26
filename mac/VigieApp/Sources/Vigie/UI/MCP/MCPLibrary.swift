@@ -75,7 +75,7 @@ struct MCPLibrarySheet: View {
                 SheetIcon(symbol: Icon.mcp)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Bibliothèque de MCP").font(.title3.bold())
-                    Text("Les serveurs officiels des éditeurs. Un clic : il est sur tous tes comptes, tu l'autorises une seule fois.")
+                    Text("Les MCP officiels, proposés par les services eux-mêmes. Un clic : il arrive sur tous tes comptes Claude.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -120,7 +120,7 @@ struct MCPLibrarySheet: View {
             } else {
                 AsyncButton("Ajouter") { await add(entry) }
                     .glassButton(.primary)
-                    .help(entry.open ? "Ajouté à tous tes comptes, rien à autoriser" : "Ajouté à tous tes comptes ; ton navigateur s'ouvre une fois pour l'autoriser")
+                    .help(entry.open ? "Ajouté à tous tes comptes, rien à connecter" : "Ajouté à tous tes comptes ; ton navigateur s'ouvre pour le connecter")
             }
         }
     }

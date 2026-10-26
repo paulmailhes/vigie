@@ -17,7 +17,7 @@ struct AddAccountSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
                 .onSubmit(add)
-            Text("Ensuite, « Connecter » sur sa carte.")
+            Text("Ensuite, clique sur « Connecter » dans sa section.")
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()

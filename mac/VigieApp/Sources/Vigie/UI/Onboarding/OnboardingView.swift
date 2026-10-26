@@ -135,7 +135,7 @@ struct OnboardingView: View {
             header("chevron.left.forwardslash.chevron.right", "Codex",
                    "Deux choses à faire une seule fois. Sans elles, Vigie ne peut rien accepter pour Codex.")
             if codexAccount == nil {
-                Label("Codex n'a pas encore été ouvert sur ce Mac : ouvre-le une fois, puis reviens ici.", systemImage: "exclamationmark.triangle")
+                Label("Codex n'a pas encore été ouvert sur ton Mac : ouvre-le une fois, puis reviens ici.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(Theme.warn)
             } else {
                 CodexSetupSteps(account: codexAccount, tools: choice)
@@ -143,7 +143,7 @@ struct OnboardingView: View {
                     .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             }
             if codexSkipped && !codexReady {
-                Label("Sans ces deux étapes, Codex n'est pas surveillé. Tu pourras les faire plus tard dans Comptes.", systemImage: "exclamationmark.triangle")
+                Label("Sans ces deux étapes, Vigie ne peut rien accepter pour Codex. Tu pourras les faire plus tard dans Comptes.", systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(Theme.warn)
             }
@@ -164,15 +164,15 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 16) {
-                point("checkmark.shield", "Il valide pour toi les demandes d'autorisation",
+                point("checkmark.shield", "Il accepte pour toi les demandes d'autorisation",
                       "Plus besoin de cliquer « Oui » toute la journée : les commandes, les fichiers, les outils passent tout seuls, dans toutes tes conversations.")
                 point("hand.raised", "Il garde pour toi les actions sensibles",
-                      "Suppressions, sudo, git push forcé, paiements, e-mails, réglages : ça attend toujours ton accord.")
+                      "Suppressions, commandes administrateur, git push forcé, paiements, e-mails, réglages : ça attend toujours ton accord.")
                 point("square.grid.2x2", "Il te montre où en est chaque conversation",
-                      "Ce qu'elle fait, sur quel compte, ce qu'elle consomme, ses MCP, et ce qui t'attend.")
+                      "Ce qu'elle fait, sur quel compte, ce qu'elle consomme, et ce qui t'attend.")
                 point(Icon.mcp, "Il centralise tes MCP",
-                      "Connectés une seule fois, ils marchent sur tous tes comptes Claude.",
-                      note: "(amélioré pour Webflow : plusieurs espaces de travail, tu passes de l'un à l'autre)")
+                      "Les MCP, ce sont les outils que Claude peut utiliser (Figma, Notion, Webflow…). Connectés une seule fois, ils marchent sur tous tes comptes Claude.",
+                      note: "Webflow : plusieurs espaces de travail (un par client), tu passes de l'un à l'autre en un clic.")
             }
             Text("Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.")
                 .font(.callout)
@@ -185,14 +185,15 @@ struct OnboardingView: View {
     private var guards: some View {
         VStack(alignment: .leading, spacing: 20) {
             header("hand.raised.fill", "Les actions sensibles restent à toi",
-                   "Même avec l'auto-accept, Vigie ne valide jamais ces actions à ta place.")
-            FlowChips(items: ["Commande sudo", "Suppression de dossiers importants", "git push forcé", "Effacement de disque",
-                              "Paiements et achats", "Envoi d'e-mails", "Publication sur les réseaux", "Réglages de Claude Code et du shell"])
+                   "Même avec l'auto-accept, Vigie n'accepte jamais ces actions à ta place.")
+            FlowChips(items: ["Commandes administrateur (sudo)", "Suppression de dossiers importants", "Git push forcé", "Effacement de disque",
+                              "Paiements et achats", "Envoi d'e-mails", "Publication sur les réseaux", "Suppression ou partage en ligne (Drive, Notion…)",
+                              "Réglages de Claude Code, de Vigie ou du Terminal", "Mots de passe du trousseau", "Ajout d'un MCP"])
             VStack(alignment: .leading, spacing: 10) {
                 Text("Tu les autorises où tu veux").font(.headline)
                 Label("Dans ta conversation : la fenêtre habituelle de Claude Code", systemImage: "bubble.left.and.text.bubble.right")
                 Label("Dans Vigie, avec une notification : un clic suffit", systemImage: "binoculars")
-                Text("Les deux restent d'accord : réponds d'un côté, l'autre se ferme. Avec Codex, c'est dans Vigie (Codex ne sait pas afficher sa fenêtre à la demande).")
+                Text("Les deux sont liés : réponds d'un côté, l'autre se ferme. Avec Codex, c'est dans Vigie (Codex ne sait pas afficher sa fenêtre à la demande).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -217,7 +218,7 @@ struct OnboardingView: View {
                     if account.id != store.accounts.last?.id { Divider() }
                 }
                 if store.accounts.isEmpty {
-                    Text("Lecture des comptes…").foregroundStyle(.secondary).padding(12)
+                    Text("Chargement des comptes…").foregroundStyle(.secondary).padding(12)
                 }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
@@ -245,7 +246,7 @@ struct OnboardingView: View {
         return VStack(alignment: .leading, spacing: 18) {
             header(Icon.mcp, "Tes MCP", "Les outils que Claude peut utiliser (Notion, Figma, ta base de données…). Il y en a trois sortes :")
             VStack(spacing: 0) {
-                mcpFamily("desktopcomputer", "MCP de ce Mac", mcp.map { Fmt.count($0.user.count, "MCP", "MCP") },
+                mcpFamily("desktopcomputer", "MCP de ton Mac", mcp.map { Fmt.count($0.user.count, "MCP", "MCP") },
                           "Dans toutes tes conversations, sur tous tes comptes Claude.")
                 Divider()
                 mcpFamily("folder", "MCP des projets", mcp.map { _ in Fmt.count(projectCount, "MCP", "MCP") },
@@ -257,7 +258,7 @@ struct OnboardingView: View {
                     Toggle(isOn: $store.connectorsDefaultOn) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Activés dans les nouvelles conversations")
-                            Text("Désactivés de base : ils arrivent dans toutes les conversations du compte, et sur un compte partagé ce sont aussi ceux des autres. Tu peux les allumer pour une conversation précise.")
+                            Text("Coupés par défaut : ils arrivent dans toutes les conversations du compte, et sur un compte partagé ce sont aussi ceux des autres. Tu peux les activer pour une conversation précise.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -324,11 +325,11 @@ struct OnboardingView: View {
         return VStack(alignment: .leading, spacing: 20) {
             header("checkmark.seal.fill", "C'est prêt", "Quelques réglages, modifiables à tout moment.")
             VStack(spacing: 0) {
-                setting("Auto-accept", "Valide les demandes d'autorisation dans toutes tes conversations (sauf les actions sensibles).",
+                setting("Auto-accept", "Accepte pour toi les demandes d'autorisation de Claude, dans toutes tes conversations (sauf les actions sensibles).",
                         isOn: $store.autoAccept)
                 Divider()
                 setting("Répondre aux questions quand tu n'es pas là",
-                        "Si Claude te pose une question et que tu ne réponds pas en \(store.questionWaitMin) min, il prend l'option recommandée. Tu relis ensuite dans Vigie.",
+                        "Si Claude te pose une question et que tu ne réponds pas en \(store.questionWaitMin) min, Vigie choisit l'option que Claude recommande. Tu peux revenir dessus dans Vigie.",
                         isOn: $store.questionsAuto)
                 Divider()
                 setting("Mises à jour automatiques",
@@ -338,7 +339,7 @@ struct OnboardingView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Notifications")
-                        Text("Pour savoir quand une action t'attend ou qu'une conversation s'emballe.")
+                        Text("Pour savoir quand une action t'attend ou qu'une conversation s'emballe (elle consomme trop ou tourne en boucle).")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -428,9 +429,9 @@ struct OnboardingView: View {
                     if codexSkipped { withAnimation(.smooth) { step += 1 } } else { codexSkipped = true }
                 }
                 .glassButton()
-                .help("Codex ne sera pas surveillé tant que ce n'est pas fait")
+                .help("Vigie ne pourra rien accepter pour Codex tant que ce n'est pas fait")
             }
-            Button(step == steps.count - 1 ? "Commencer" : "Continuer") {
+            Button(step < steps.count - 1 ? "Continuer" : current == .ready && !notificationsAllowed && !store.isDemo ? "Commencer sans notifications" : "Commencer") {
                 if current == .tools {
                     let chosen = choice
                     Task {
@@ -448,10 +449,10 @@ struct OnboardingView: View {
             .keyboardShortcut(.defaultAction)
             .glassButton(.primary)
             // Codex : on n'avance qu'une fois connecté et ses hooks approuvés (ou par « Plus tard ») ;
-            // « Commencer » attend les notifications (sans elles, une action sensible attendrait sans prévenir)
-            .disabled((current == .codex && !codexReady) || (current == .tools && !choice.any)
-                      || (current == .ready && !notificationsAllowed && !store.isDemo))
-            .help(current == .ready && !notificationsAllowed ? "Autorise d'abord les notifications" : "")
+            // sans notifications, on peut commencer quand même (le bouton le dit) : une action sensible attendra dans
+            // Vigie sans prévenir, mais personne ne reste bloqué dans l'accueil.
+            .disabled((current == .codex && !codexReady) || (current == .tools && !choice.any))
+            .help(current == .ready && !notificationsAllowed ? "Sans notifications, une action sensible attendra dans Vigie sans te prévenir" : "")
         }
         .controlSize(.large)
     }
@@ -551,7 +552,7 @@ struct OnboardingAddAccountSheet: View {
             }
             TextField("Nom", text: $label, prompt: Text("Travail, Perso, Client…"))
                 .textFieldStyle(.roundedBorder)
-            TextField("Adresse e-mail du compte", text: $email, prompt: Text("toi@exemple.fr"))
+            TextField("Adresse e-mail du compte (facultatif)", text: $email, prompt: Text("toi@exemple.fr"))
                 .textFieldStyle(.roundedBorder)
             Text("Ton navigateur s'ouvre ensuite sur la page de connexion de Claude : connecte-toi avec cette adresse.")
                 .font(.callout)

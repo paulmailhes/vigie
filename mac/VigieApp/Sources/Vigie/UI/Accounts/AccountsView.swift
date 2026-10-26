@@ -35,10 +35,10 @@ struct AccountsView: View {
                             // Toujours actif (le moteur s'en charge) : on ne le montre que s'il n'a pas pu l'être.
                             if !wrapperActive && store.tools?.chosen?.claudeVSCode != false && store.engineInfo != nil {
                                 HStack {
-                                    Label("VS Code ne choisit pas encore le compte de chaque conversation", systemImage: "exclamationmark.triangle")
+                                    Label("Le choix du compte par conversation n'est pas actif dans VS Code", systemImage: "exclamationmark.triangle")
                                         .foregroundStyle(Theme.warn)
                                     Spacer()
-                                    AsyncButton("Réparer") { await store.setWrapper(true) }
+                                    AsyncButton("Activer") { await store.setWrapper(true) }
                                         .glassButton()
                                 }
                             }
@@ -54,8 +54,8 @@ struct AccountsView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItem {
-                AsyncButton("Actualiser les relevés", systemImage: "arrow.clockwise") { await store.refreshUsage(nil) }
-                .help("Relever à nouveau les crédits de tous les comptes")
+                AsyncButton("Actualiser la consommation", systemImage: "arrow.clockwise") { await store.refreshUsage(nil) }
+                .help("Relire la consommation de tous les comptes")
             }
             ToolbarItem {
                 Button("Ajouter un compte", systemImage: "plus") { showAddAccount = true }
@@ -76,7 +76,7 @@ struct AccountsView: View {
 
     private var subtitle: String {
         let connected = accounts.count(where: \.isConnected)
-        return "\(connected) sur \(accounts.count) connectés"
+        return "\(connected) connecté\(connected > 1 ? "s" : "") sur \(accounts.count)"
     }
 
     private func scroll(_ proxy: ScrollViewProxy) {
@@ -101,7 +101,7 @@ struct AccountCard: View {
             if account.wrongAccount == true {
                 Label {
                     let expected = Text(account.expectedEmail.map { " (prévu : \($0))" } ?? "").foregroundStyle(.secondary)
-                    Text("Connecté avec une autre adresse que prévu\(expected)")
+                    Text("Connecté avec une autre adresse que celle prévue\(expected) : reconnecte-le avec la bonne")
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                 }
@@ -121,7 +121,7 @@ struct AccountCard: View {
                 }
                 footer
             } else if !account.isCodex {
-                Text("Connecte-le pour voir ses crédits.")
+                Text("Connecte-le pour voir sa consommation.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -139,10 +139,10 @@ struct AccountCard: View {
             }
             Spacer(minLength: 8)
             if account.isDefault == true || store.accountsState?.defaultForNew == account.id {
-                Text("Nouvelles conversations")
+                Text("Par défaut")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .help("Compte des nouvelles conversations")
+                    .help("Les nouvelles conversations partent sur ce compte")
             }
             if account.isConnected {
                 Label("Connecté", systemImage: "checkmark.circle")
@@ -153,7 +153,7 @@ struct AccountCard: View {
             } else {
                 AsyncButton("Connecter", systemImage: "person.crop.circle.badge.plus") { await store.connectAccount(account.id) }
                 .glassButton(.primary)
-                .help("Ouvre Terminal pour te connecter (/login)")
+                .help("Ouvre la page de connexion de Claude dans ton navigateur")
             }
         }
     }
@@ -173,23 +173,23 @@ struct AccountCard: View {
                 AsyncButton("Actualiser", systemImage: "arrow.clockwise") { await store.refreshUsage(account.id) }
                 .glassButton()
                 .controlSize(.small)
-                .help("Relever les crédits de ce compte (une petite requête, au plus toutes les 10 min)")
+                .help("Relire la consommation de ce compte")
             }
         }
     }
 
     private func observedText(_ observed: Date?, source: String?) -> String {
-        guard let observed else { return "Pas encore de relevé" }
+        guard let observed else { return "Consommation pas encore lue" }
         let origin: String = switch source {
-        case "session": account.isCodex ? ", par une conversation Codex" : ", par une conversation"
-        case "ping": ", par une requête rapide"
+        case "session": account.isCodex ? " (lue dans une conversation Codex)" : " (lue dans une conversation)"
+        case "ping": " (demandée par Vigie)"
         default: ""
         }
-        return "Relevé \(Fmt.ago(observed, now: store.now))\(origin)"
+        return "Mise à jour \(Fmt.ago(observed, now: store.now))\(origin)"
     }
 }
 
-/// Une jauge : « Semaine   ▬▬▬▬▭▭   39 %   reprise lun. 26 oct. à 20:00 » ; « — » sans relevé.
+/// Une jauge : « Semaine   ▬▬▬▬▭▭   39 %   remise à zéro lun. 26 oct. à 20:00 » ; « — » sans relevé.
 struct UsageGaugeRow: View {
     @Environment(VigieStore.self) private var store
     let title: String
@@ -209,18 +209,18 @@ struct UsageGaugeRow: View {
             Text(resetText)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .frame(width: 210, alignment: .leading)
+                .frame(width: 240, alignment: .leading)
                 .lineLimit(1)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title) : \(pct.map(Fmt.pct) ?? "pas de relevé"), \(resetText)")
+        .accessibilityLabel("\(title) : \(pct.map(Fmt.pct) ?? "pas de chiffre récent"), \(resetText)")
     }
 
     private var resetText: String {
-        guard window?.pct != nil else { return "pas de relevé récent" }
+        guard window?.pct != nil else { return "pas de chiffre récent" }
         guard let date = window?.resetsAt else { return "" }
         if date < store.now { return "remis à zéro" }
-        return "reprise \(Fmt.reset(date, now: store.now))"
+        return "remise à zéro \(Fmt.reset(date, now: store.now))"
     }
 }
 

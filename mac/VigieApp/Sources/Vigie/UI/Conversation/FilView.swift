@@ -112,7 +112,7 @@ struct MilestoneRow: View {
         case .prompt: "Ta demande"
         case .report: "Compte rendu"
         case .commit: "Commit"
-        case .push: "Push"
+        case .push: "Envoi (push)"
         case .deploy: "Déploiement"
         case .pr: "Fusion"
         case .agent: milestone.ok == false ? "Agent en échec" : "Agent fini"

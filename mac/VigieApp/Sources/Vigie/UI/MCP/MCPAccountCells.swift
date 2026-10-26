@@ -107,7 +107,7 @@ struct MCPAccountIssues: View {
         }
     }
 
-    /// Un compte : le connecter ; plusieurs : l'un après l'autre (une page d'autorisation à la fois).
+    /// Un compte : le connecter ; plusieurs : l'un après l'autre (une page de connexion à la fois).
     private var connectButton: some View {
         let accounts = summary.connect
         return AsyncButton(accounts.count == 1 ? "Connecter" : "Connecter les \(accounts.count) comptes") {
@@ -121,15 +121,15 @@ struct MCPAccountIssues: View {
         .tint(Theme.warn)
         .controlSize(.small)
         .help(accounts.count == 1
-              ? "Ouvre la page d'autorisation de « \(name) » pour \(accounts[0].displayName) dans ton navigateur"
-              : "Ouvre la page d'autorisation de « \(name) » pour chaque compte, l'un après l'autre")
+              ? "Ouvre la page de connexion de « \(name) » pour \(accounts[0].displayName) dans ton navigateur"
+              : "Ouvre la page de connexion de « \(name) » pour chaque compte, l'un après l'autre")
     }
 
     private var retryMenu: some View {
         Menu("Réessayer") {
             ForEach(summary.failed) { account in
                 Section(account.displayName) {
-                    Button("Refaire l'autorisation", systemImage: "arrow.clockwise") {
+                    Button("Reconnecter", systemImage: "arrow.clockwise") {
                         Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
                     }
                     Button("Vérifier de nouveau", systemImage: "arrow.triangle.2.circlepath") {

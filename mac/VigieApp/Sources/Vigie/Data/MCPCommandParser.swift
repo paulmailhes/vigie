@@ -9,7 +9,7 @@ struct MCPDraft: Equatable, Sendable {
             switch self {
             case .stdio: "Commande"
             case .http: "Adresse web"
-            case .sse: "SSE"
+            case .sse: "Ancien format (SSE)"
             }
         }
     }

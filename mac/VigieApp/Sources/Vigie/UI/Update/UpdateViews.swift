@@ -42,8 +42,8 @@ struct UpdateBanner: View {
 
     private func detail(_ update: UpdateStatus) -> String {
         if update.installing == true { return "Vigie redémarre tout seul dans un instant ; tes réglages sont gardés." }
-        if let error = update.lastError, update.available == true { return "\(error) Réessaie, ou relance la commande d'installation dans Terminal." }
-        return "Un clic : Vigie se met à jour tout seul, sans Terminal. Tes réglages et tes comptes sont gardés."
+        if let error = update.lastError, update.available == true { return "\(error) Réessaie dans un moment ; si ça ne passe toujours pas, télécharge Vigie à nouveau." }
+        return "Un clic : Vigie se met à jour tout seul. Tes réglages et tes comptes sont gardés."
     }
 }
 
@@ -113,14 +113,14 @@ struct UpdateSettingsView: View {
                 Toggle(isOn: $store.autoUpdate) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Mises à jour automatiques")
-                        Text("Vigie s'installe la nouvelle version tout seul, jamais pendant qu'une action attend ta décision.")
+                        Text("Vigie installe tout seul ses nouvelles versions, jamais pendant qu'une action attend ta décision.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                 }
                 LabeledContent("Version installée") {
                     if let update = store.updateStatus, update.available != true, let checked = update.checkedAt {
-                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.when(checked, now: store.now))")
+                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.ago(checked, now: store.now))")
                     } else {
                         Text(store.updateStatus?.current ?? "…")
                     }

@@ -7,7 +7,7 @@ enum MCPStatusStyle {
         case .connected: "connecté"
         case .needsAuth: "à connecter"
         case .failed: "en échec"
-        case .pendingApproval: "en attente d'approbation"
+        case .pendingApproval: "à approuver dans Claude Code"
         case .disabled: "coupé"
         case .unknown: "pas encore vérifié"
         }

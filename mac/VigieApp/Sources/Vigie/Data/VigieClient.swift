@@ -36,7 +36,7 @@ enum ClientError: Error, Sendable, Equatable {
         switch self {
         case .unreachable: "Le moteur de Vigie ne répond pas"
         case .refused(let text): text
-        case .unreadable: "Réponse illisible du moteur"
+        case .unreadable: "Réponse illisible du moteur de Vigie : réessaie"
         case .missingFixture(let name): "Fichier de démonstration absent : \(name)"
         }
     }
@@ -139,7 +139,7 @@ struct VigieClient: Sendable {
             guard let result = try? JSONDecoder().decode(WriteResult.self, from: data) else {
                 throw ClientError.unreadable
             }
-            if result.ok == false { throw ClientError.refused(result.error ?? "Le moteur a refusé") }
+            if result.ok == false { throw ClientError.refused(result.error ?? "Le moteur de Vigie a refusé cette action") }
             return result
         }
     }

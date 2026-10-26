@@ -64,7 +64,7 @@ struct UsageSection: View {
                 }
             }
         } else if store.usageUnavailable {
-            Label("Le moteur ne fournit pas encore la consommation", systemImage: "chart.line.downtrend.xyaxis")
+            Label("Graphique indisponible pour l'instant", systemImage: "chart.line.downtrend.xyaxis")
                 .foregroundStyle(.secondary)
         } else {
             ProgressView()
@@ -317,7 +317,7 @@ private struct UsageLegend: View {
                     .padding(.vertical, 1)
                     .background(.quaternary, in: .capsule)
                     .lineLimit(1)
-                    .help("Consomme les tokens de \(account)")
+                    .help("Consomme sur \(account)")
             }
             if !line.running {
                 Text("fermée")

@@ -536,7 +536,7 @@ function limitResetAt(text, ts) {
 }
 
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
-const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office', 'sous-agent': 'Refusée (demandée par un agent)', echec: 'Autorisée, mais elle a échoué' };
+const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office (réglage : toujours refuser)', 'sous-agent': 'Refusée : un agent ne peut pas demander une action sensible', echec: 'Autorisée, mais elle a échoué' };
 
 // ---------- connexions des comptes (coffre, lib/vault.mjs) ----------
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -558,14 +558,14 @@ function connectionItems(ctx, title) {
     if (!why) continue;
     out.push({ id: `cx:${a.id}:${st}`, kind: 'waiting', conversationId: null, conversationTitle: a.label,
       title: `${a.label} : à reconnecter`,
-      detail: `${why}. ${main ? 'C\'est le compte du Mac : sans lui, VS Code affiche « déconnecté » dans toutes ses fenêtres.' : 'Ses conversations partent sur un autre compte en attendant.'} ${fix}`,
+      detail: `${why}. ${main ? 'C\'est le compte que VS Code utilise de base : sans lui, VS Code affiche « déconnecté » dans toutes ses fenêtres.' : 'Ses conversations partent sur un autre compte en attendant.'} ${fix}`,
       ts: since });
   }
   let falls = [];
   try { falls = accounts.fallbacks(indexer.live); } catch { /* journal du lanceur illisible */ }
   for (const f of falls) {
     out.push({ id: `cf:${f.sessionId}:${f.running}`, kind: 'waiting', conversationId: f.sessionId, conversationTitle: title(f.sessionId),
-      title: `Partie sur ${label(f.running)}`,
+      title: `Lancée sur ${label(f.running)} au lieu de ${label(f.wanted)}`,
       detail: `${label(f.wanted)} ${f.why === 'non-connecte' ? 'n\'était pas connecté' : 'ne pouvait pas servir'} quand elle a démarré. Elle reprendra sur ${label(f.wanted)} quand il sera reconnecté (au prochain démarrage de la conversation).`,
       ts: new Date(Number(indexer.live.get(f.sessionId)?.startedAt) || ctx.now).toISOString() });
   }
@@ -602,7 +602,7 @@ function reviewItems(ctx, sums) {
         live.push({ id: `w:${sid}:${w.ts}`, kind: 'waiting', conversationId: sid, conversationTitle: title(sid),
           title: short(w.tool === 'ExitPlanMode' ? 'Plan à valider' : questionText(w.action) || 'Question de Claude', 120),
           detail: w.ask ? (answerable ? `Réponds ici ou dans ${where(sid)}.` : `Réponds dans ${where(sid)}.`)
-            : `Réponds ${answerable ? 'ici ou ' : ''}dans ${where(sid)}, sinon Claude choisit l'option recommandée ${when}.`,
+            : `Réponds ${answerable ? 'ici ou ' : ''}dans ${where(sid)}, sinon Vigie choisit l'option recommandée ${when}.`,
           ...(answerable ? { pendingId: String(w.pid), questions: w.questions } : {}), ts: w.ts });
       } else {
         live.push({ id: `g:${sid}:${w.ts}`, kind: 'blocked', state: 'waiting', pendingId: w.pendingId, expiresAt: w.expiresAt,
@@ -632,14 +632,14 @@ function reviewItems(ctx, sums) {
       title: short(a.rule || 'Action sensible', 120),
       detail: a.holding ? `${what(a)} · en pause, elle attend ton accord ici (rien ne s'affiche dans VS Code)`
         : a.approved ? `${what(a)} · autorisée : elle peut la relancer à l'identique.`
-        : `${what(a)} · elle a continué sans : autorise-la ici pour qu'elle puisse la relancer.`,
+        : `${what(a)} · elle a continué sans cette action : autorise-la ici, elle pourra la relancer.`,
       ts: a.ts });
   }
   const cx = safeCodex(() => codex.account(), null);
   if (cx?.connected && cx.hook?.installed && !cx.hook.trusted) {
     live.push({ id: 'codex-hook', kind: 'waiting', conversationId: null, conversationTitle: 'Codex',
-      title: 'Codex : approuve le hook de Vigie',
-      detail: 'Sans lui, Vigie ne peut rien accepter pour Codex. Dans Codex (panneau de VS Code ou app ChatGPT) : « Review hooks », puis accepte les deux hooks Vigie.',
+      title: 'Codex : accepte le module de Vigie',
+      detail: 'Sans lui, Vigie ne peut rien accepter pour Codex. Dans Codex (panneau de VS Code ou app ChatGPT) : « Review hooks », puis accepte les deux lignes « Vigie ».',
       ts: new Date(ctx.now).toISOString() });
   }
   for (const n of switchNotices) {
@@ -925,11 +925,11 @@ function historyReason(h) {
     case 'auto-accepte': return 'Acceptée automatiquement par Vigie';
     case 'garde-fou-autorise-app': case 'garde-fou-autorise-vigie': return `Autorisée par toi dans Vigie${rule}`;
     case 'garde-fou-tu-as-repondu': return `Décidée par toi dans VS Code${rule}${h.resultat ? ` · ${h.resultat}` : ''}`;
-    case 'demande-pour-toi': case 'garde-fou-pour-toi': case 'garde-fou-rendu': return `Laissée à ta fenêtre VS Code${rule}`;
-    case 'refus-classifieur-pour-toi': return 'Laissée à ta fenêtre VS Code (le mode auto de Claude a refusé plusieurs fois)';
+    case 'demande-pour-toi': case 'garde-fou-pour-toi': case 'garde-fou-rendu': return `Laissée à toi dans VS Code${rule}`;
+    case 'refus-classifieur-pour-toi': return 'Laissée à toi dans VS Code (le mode automatique de Claude a refusé plusieurs fois)';
     case 'reponse-perdue': return 'Réponse de Vigie arrivée trop tard : décidée dans VS Code';
     case 'garde-fou-refuse-app': case 'garde-fou-refuse-vigie': return `Refusée par toi dans Vigie${rule}`;
-    case 'refuse-mode-auto': return `Refusée par le mode auto de Claude${h.reason ? ` : ${short(String(h.reason), 200)}` : ''}`;
+    case 'refuse-mode-auto': return `Refusée par le mode automatique de Claude${h.reason ? ` : ${short(String(h.reason), 200)}` : ''}`;
     case 'garde-fou-bloque': case 'garde-fou-delai-vigie': return `${BLOCKED_WHY[h.raison] || BLOCKED_WHY.delai}${rule}`;
     case 'garde-fou-echec': return `Autorisée, mais elle a échoué${h.extrait ? ` : « ${short(mask(String(h.extrait).replace(/^Exit code \d+\n?/, '')), 200)} »` : ''}`;
     case 'question-auto': return 'Réponse choisie à ta place (option recommandée)';
@@ -1119,7 +1119,7 @@ function postSettings(body) {
 }
 
 function postConversationSettings(id, body) {
-  if (!UUID.test(id)) return bad('Conversation inconnue.', 404);
+  if (!UUID.test(id)) return bad('Cette conversation n\'existe plus.', 404);
   const keys = ['autoAccept', 'accountId', 'connectors'].filter((k) => k in body);
   if (!keys.length) return bad('Rien à régler.');
   if ('autoAccept' in body && body.autoAccept !== null && typeof body.autoAccept !== 'boolean') return bad('Auto-accept : oui, non ou par défaut.');
@@ -1161,11 +1161,11 @@ function postPending(raw, body) {
     const ctx = context();
     const w = [...ctx.waits.values()].flat().find((x) => x.question && String(x.pid) === id && Array.isArray(x.questions));
     if (!w) return bad('Cette question n\'attend plus de réponse.', 404);
-    if (!writeAnswer(id, body.answers, { sessionId: w.sessionId })) return bad('Réponse illisible.');
+    if (!writeAnswer(id, body.answers, { sessionId: w.sessionId })) return bad('Réponse non envoyée : réessaie.');
     return [200, { ok: true, pendingId: id, message: 'Réponse envoyée à Claude.' }];
   }
   const r = decide(id, body.decision, { history, state: readState() });
-  return r.ok ? [200, { ok: true, pendingId: r.pendingId, decision: r.decision, message: r.message }] : bad(r.error || 'Échec.', r.status || 400);
+  return r.ok ? [200, { ok: true, pendingId: r.pendingId, decision: r.decision, message: r.message }] : bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
 }
 
 // POST /api/v2/approvals { approvalId, decision?: 'deny' } (actions Codex retenues dans Vigie, lib/approvals.mjs).
@@ -1179,7 +1179,7 @@ function approvalWhat(a) {
 }
 function postApprovals(body) {
   const r = approve(body.approvalId, body.decision, { history });
-  if (!r.ok) return bad(r.error || 'Échec.', r.status || 400);
+  if (!r.ok) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
   if (r.decision === 'deny') return [200, { ok: true, approvalId: r.approvalId, decision: 'deny', message: 'Refusée : rien n\'est envoyé à Claude.' }];
   // La conversation attend encore (PreToolUse) : l'action part d'elle-même, rien à ouvrir ni à coller.
   if (r.item.holding) {
@@ -1198,9 +1198,9 @@ function postApprovals(body) {
 const REVIEW_ID = /^(?:[gwsbl]:[\w.:-]{1,200}|c:[0-9a-f-]{36}|q:[\w-]{1,100}|v:[0-9a-f]{16})$/i;
 function postDismiss(raw) {
   let id;
-  try { id = decodeURIComponent(raw); } catch { return bad('Élément inconnu.', 404); }
-  if (!REVIEW_ID.test(id)) return bad('Élément inconnu.', 404);
-  if (id.startsWith('q:')) { const r = questions.review(id, { action: 'ok' }); if (!r.ok && r.status !== 404) return bad(r.error || 'Échec.', r.status || 400); }
+  try { id = decodeURIComponent(raw); } catch { return bad('Cet élément n\'existe plus.', 404); }
+  if (!REVIEW_ID.test(id)) return bad('Cet élément n\'existe plus.', 404);
+  if (id.startsWith('q:')) { const r = questions.review(id, { action: 'ok' }); if (!r.ok && r.status !== 404) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400); }
   const u = ui();
   const now = Date.now();
   const kept = Object.entries(dismissedOf(u)).filter(([, at]) => now - Date.parse(at) < DISMISS_KEEP_MS);
@@ -1231,7 +1231,7 @@ async function openApp(bundleId, name, message) {
   return [200, { ok: true, message }];
 }
 async function openConversation(id) {
-  if (typeof id !== 'string' || !UUID.test(id)) return bad('Conversation inconnue.', 404);
+  if (typeof id !== 'string' || !UUID.test(id)) return bad('Cette conversation n\'existe plus.', 404);
   const cx = safeCodex(() => codex.summaries(), []).find((s) => s.id === id);
   if (cx) {
     const surface = surfaceOf(cx);
@@ -1246,7 +1246,7 @@ async function openConversation(id) {
     return openApp('com.anthropic.claudefordesktop', 'Claude', `L'app Claude est ouverte${t ? ` : « ${short(t, 60)} » est dans Code` : ''}.`);
   }
   const dir = launchDirOf(id);
-  if (!dir) return bad('Conversation introuvable : plus de 7 jours, ou inconnue.', 404);
+  if (!dir) return bad('Conversation introuvable : elle date sans doute de plus de 7 jours.', 404);
   if (!isDir(dir)) return bad('Le dossier de cette conversation n\'existe plus.', 404);
   if (!(await runBin(OPEN_BIN, ['-a', 'Visual Studio Code', dir])).ok) return bad('VS Code ne s\'est pas ouvert.');
   const openUrl = `vscode://anthropic.claude-code/open?session=${id}`;
@@ -1288,8 +1288,8 @@ const TERM_DIR = path.join(DATA, 'terminal');
 const loginShell = () => { try { return process.env.VIGIE_SHELL || os.userInfo().shell || process.env.SHELL || ''; } catch { return process.env.SHELL || ''; } };
 async function openTerminalWith(body) {
   const found = guardCommand(body);
-  if (!found) return bad('Quelle commande ? Elle est vide.');
-  if (found.masked) return bad('Commande masquée introuvable : ouvre la conversation pour la relancer.');
+  if (!found) return bad('Commande vide : rien à lancer.');
+  if (found.masked) return bad('Commande introuvable (elle contenait une clé masquée) : relance-la depuis la conversation.');
   const command = found.command;
   if (!command.trim() || command.length > MAX_COMMAND || command.includes('\u0000')) return bad('Commande refusée : vide ou trop longue.');
   const okDir = (d) => typeof d === 'string' && path.isAbsolute(d) && !/[\u0000-\u001f\u007f]/.test(d) && isDir(d);
@@ -1310,7 +1310,7 @@ async function openTerminalWith(body) {
       fs.rmSync(file, { force: true });
     } catch (e) { console.error('[vigie] Terminal :', clean(e)); }
   }
-  if (mask(command) !== command) return bad('Cette commande contient une clé : je ne la copie pas. Relance-la depuis la conversation.');
+  if (mask(command) !== command) return bad('Cette commande contient une clé secrète : Vigie ne la copie pas. Relance-la depuis la conversation.');
   const copied = await runBin(PBCOPY, [], { input: command });
   const opened = await runBin(OPEN_BIN, ['-a', 'Terminal', cwd]);
   if (!copied.ok || !opened.ok) return bad('Terminal ne s\'est pas ouvert.');
@@ -1327,7 +1327,7 @@ function accountLabel(id) { return accounts.load().accounts.find((a) => a.id ===
 // Résultat d'une action MCP : un échec compte par compte devient une phrase lisible.
 function mcpReply(r) {
   if (r?.ok) return [200, r];
-  const error = r?.error || (Array.isArray(r?.results) ? r.results.filter((x) => !x.ok).map((x) => `${accountLabel(x.accountId)} : ${x.error}`).join(' · ') : '') || 'Échec.';
+  const error = r?.error || (Array.isArray(r?.results) ? r.results.filter((x) => !x.ok).map((x) => `${accountLabel(x.accountId)} : ${x.error}`).join(' · ') : '') || 'Ça n\'a pas marché : réessaie dans un instant.';
   return [400, { ...r, ok: false, error }];
 }
 // ---------- passerelle MCP ----------
@@ -1372,7 +1372,7 @@ async function postGateway(body) {
       if (action === 'migrate') {
         const cfg = mcp.rawUser(name).map((x) => x.config).find(Boolean);
         if (!cfg) return bad('Ce MCP n\'existe dans aucun compte.');
-        if (!cfg.url || (cfg.type && !['http', 'streamable-http'].includes(cfg.type))) return bad('Seuls les MCP en ligne (http) passent par Vigie.');
+        if (!cfg.url || (cfg.type && !['http', 'streamable-http'].includes(cfg.type))) return bad('Seuls les MCP en ligne peuvent passer par Vigie.');
         if (cfg.headers && Object.keys(cfg.headers).length) return bad('Ce MCP a ses propres en-têtes (clé d\'API) : il reste en direct.');
         url = cfg.url;
       } else if (mcp.userNames().includes(name) && !gateway.has(name)) {
@@ -1418,7 +1418,7 @@ async function oauthCallback(url, res) {
   const r = await gateway.callback(url.searchParams);
   if (r.ok) syncMcpAccounts();
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  const title = r.ok ? `« ${esc(r.name)} » est autorisé` : 'Autorisation non aboutie';
+  const title = r.ok ? `« ${esc(r.name)} » est connecté` : 'Connexion non aboutie';
   const text = r.ok ? `Espace : ${esc(r.label)}. Il marche maintenant dans tous tes comptes Claude. Tu peux fermer cet onglet.` : esc(r.error);
   return send(res, r.ok ? 200 : 400, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Vigie</title>
 <style>body{font:16px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#f5f5f7;color:#1d1d1f}
@@ -1481,7 +1481,7 @@ async function postMcpConnect(body) {
   if (body.everywhere === true) return mcpReply(await mcp.connectEverywhere({ name: body.name }));
   const name = connectName(body);
   if (body.force !== true && typeof name === 'string' && name && lastStatus(name, body) === 'connected') {
-    return bad('Déjà connecté : rien à faire (reconnecter effacerait l\'autorisation en place).');
+    return bad('Déjà connecté : rien à faire (le reconnecter couperait la connexion actuelle).');
   }
   return mcpReply(await mcp.connect({ name, accountId: body.accountId, path: body.path }));
 }
@@ -1492,14 +1492,14 @@ function postAccounts(body) {
     return c.ok ? [200, c] : [400, c];
   }
   const r = accounts.apply(body);
-  return r.ok ? [200, r] : [400, { ...r, ok: false, error: r.error || 'Échec.' }];
+  return r.ok ? [200, r] : [400, { ...r, ok: false, error: r.error || 'Ça n\'a pas marché : réessaie dans un instant.' }];
 }
 function postQuestionReview(raw, body) {
   let id;
   try { id = decodeURIComponent(raw); } catch { return bad('Question introuvable.', 404); }
   if (!/^(q:)?[\w-]{1,100}$/.test(id)) return bad('Question introuvable.', 404);
   const r = questions.review(id, body);
-  return r.ok ? [200, r] : bad(r.error || 'Échec.', r.status || 400);
+  return r.ok ? [200, r] : bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
 }
 
 // ---------- HTTP ----------

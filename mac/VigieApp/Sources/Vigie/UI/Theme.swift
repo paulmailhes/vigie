@@ -40,7 +40,7 @@ enum Theme {
         case .waiting: "T'attend"
         case .blocked: "Bloquée"
         case .closed: "Fermée"
-        case .unknown: "Inconnu"
+        case .unknown: "État inconnu"
         }
     }
 
@@ -119,8 +119,8 @@ enum Theme {
         switch kind {
         case .tests: "Tests"
         case .e2e: "Parcours"
-        case .types: "Types"
-        case .lint: "Relecture"
+        case .types: "Contrôle du code"
+        case .lint: "Style du code"
         case .build: "Construction"
         case .other: "Vérification"
         }
@@ -152,7 +152,7 @@ enum Theme {
 
     static func title(for group: MCPGroup) -> String {
         switch group {
-        case .mac: "MCP de ce Mac"
+        case .mac: "MCP de ton Mac"
         case .project: "MCP du projet"
         case .connector: "MCP du compte (claude.ai)"
         }

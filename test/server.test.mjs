@@ -865,7 +865,7 @@ test('passerelle MCP : relais et retour d\'autorisation branchés, sans en-tête
   assert.match(r.body.error.message, /ne passe pas par Vigie/);
   r = await raw('GET', '/oauth/callback?state=inconnu&code=x');
   assert.equal(r.status, 400);
-  assert.match(r.text, /Autorisation non aboutie/);
+  assert.match(r.text, /Connexion non aboutie/);
   const inv = (await get('/api/v2/mcp')).body;
   assert.deepEqual(inv.gateway, {}, 'rien ne passe encore par Vigie');
   assert.equal((await post('/api/v2/gateway', { action: 'inconnue' })).status, 400);

@@ -54,7 +54,7 @@ struct MCPView: View {
                 Button("Demander à Claude", systemImage: "bubble.left.and.text.bubble.right") {
                     MCPHelp.askClaude(about: nil, store: store)
                 }
-                .help("Copie un message préparé et ouvre VS Code")
+                .help("Copie une demande d'aide toute prête et ouvre VS Code : colle-la dans une conversation")
             }
             ToolbarItem {
                 Menu {
@@ -85,7 +85,7 @@ struct MCPView: View {
             }
             Button("Annuler", role: .cancel) {}
         } message: { removal in
-            Text(removal.projectPath == nil ? "Il sera retiré de tous tes comptes." : "Il sera retiré du .mcp.json du projet (sauvegarde gardée).")
+            Text(removal.projectPath == nil ? "Il sera retiré de tous tes comptes." : "Il sera retiré de ce projet (une copie de sauvegarde est gardée).")
         }
         .task(id: store.windowVisible) { await store.followMCP() }
     }
@@ -103,7 +103,7 @@ struct MCPView: View {
         let failed = allHealth.count { $0.contains { $0.mcpStatus == .failed } }
         if failed > 0 { parts.append("\(failed) en échec") }
         if let checked = allHealth.compactMap(MCPStatusStyle.lastCheck).max() {
-            parts.append("vérifié \(Fmt.when(checked, now: store.now))")
+            parts.append("vérifié \(Fmt.ago(checked, now: store.now))")
         }
         return parts.joined(separator: " · ")
     }
@@ -118,7 +118,7 @@ struct MCPView: View {
                 }
                 if mcp.user.isEmpty { EmptyRow(text: "Aucun MCP sur ton Mac") }
             } header: {
-                MCPSectionHeader(title: "MCP de ce Mac", text: "Dans toutes tes conversations, sur tous tes comptes Claude.")
+                MCPSectionHeader(title: "MCP de ton Mac", text: "Dans toutes tes conversations, sur tous tes comptes Claude.")
             }
 
             Section {
@@ -138,9 +138,9 @@ struct MCPView: View {
                         }
                     }
                 }
-                if projects.isEmpty { EmptyRow(text: "Aucun .mcp.json dans ~/Code") }
+                if projects.isEmpty { EmptyRow(text: "Aucun projet de ~/Code n'a de MCP à lui") }
             } header: {
-                MCPSectionHeader(title: "MCP des projets", text: "Seulement quand Claude travaille dans ce dossier (fichier .mcp.json).")
+                MCPSectionHeader(title: "MCP des projets", text: "Seulement quand Claude travaille dans le dossier du projet (fichier .mcp.json).")
             }
 
             Section {
@@ -150,7 +150,7 @@ struct MCPView: View {
                 ForEach(mcp.connectors.sorted { ($0.uses7d ?? 0) > ($1.uses7d ?? 0) }) { connector in
                     ConnectorRow(connector: connector, account: store.account(connector.accountId))
                 }
-                if mcp.connectors.isEmpty { EmptyRow(text: "Aucun MCP du compte vu") }
+                if mcp.connectors.isEmpty { EmptyRow(text: "Aucun MCP du compte utilisé pour l'instant") }
             } header: {
                 MCPSectionHeader(title: "MCP du compte (claude.ai)",
                                  text: "Branchés à ton compte sur claude.ai (Gmail, Drive…), partagés par toutes ses conversations. Coupés par défaut, réglables par conversation.")
@@ -212,6 +212,7 @@ struct UsesLabel: View {
             .font(.caption)
             .monospacedDigit()
             .foregroundStyle(.secondary)
+            .help("Utilisations en 7 jours")
             .frame(minWidth: 62, alignment: .trailing)
             .opacity((count ?? 0) == 0 ? 0.6 : 1)
             .accessibilityLabel("\(Fmt.int(count)) utilisations en 7 jours")
@@ -238,7 +239,7 @@ struct UserMCPRow: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
-                .help(active ? "Actif partout · couper dans tes \(projects.count) projets" : "Coupé dans \(disabledNames) · rallumer partout")
+                .help(active ? "Actif partout · couper dans tes \(projects.count) projets" : "Coupé dans \(disabledNames) · réactiver partout")
             moreMenu
         } details: {
             if let gateway {
@@ -305,21 +306,21 @@ struct UserMCPRow: View {
                 }
             }
             if !missingAccounts.isEmpty {
-                Button("Mettre dans tous les comptes", systemImage: "square.on.square") {
+                Button("Ajouter à tous les comptes", systemImage: "square.on.square") {
                     Task { _ = await store.mcpUser("update", name: server.name, accounts: accounts.map(\.id)) }
                 }
             }
             if gateway != nil {
-                Button("Revenir en direct (une autorisation par compte)", systemImage: "arrow.uturn.backward") {
+                Button("Ne plus passer par Vigie (une connexion par compte)", systemImage: "arrow.uturn.backward") {
                     Task { await store.gateway("restore", name: server.name) }
                 }
             } else if migratable {
-                Button("Passer par Vigie (une autorisation pour tous)", systemImage: "arrow.triangle.merge") {
+                Button("Passer par Vigie (une seule connexion pour tous tes comptes)", systemImage: "arrow.triangle.merge") {
                     Task { await store.gateway("migrate", name: server.name) }
                 }
             }
             if gateway == nil && (server.type == "http" || server.type == "sse") {
-                Menu("Autoriser sur un compte") {
+                Menu("Reconnecter sur un compte") {
                     ForEach(accounts.filter { server.accounts.contains($0.id) && $0.isConnected && !$0.isCodex }) { account in
                         Button(account.displayName) {
                             Task { await store.mcpConnect(name: server.name, accountId: account.id, path: nil, force: true) }
@@ -362,7 +363,7 @@ struct ProjectHeaderRow: View {
             Text(Fmt.count(project.servers.count, "MCP", "MCP"))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-            Text(isLocal ? "\(Fmt.shortPath(project.path)) · réglage local" : Fmt.shortPath(project.path))
+            Text(isLocal ? "\(Fmt.shortPath(project.path)) · rien que pour toi" : Fmt.shortPath(project.path))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -389,14 +390,14 @@ struct ProjectServerRow: View {
     var body: some View {
         let enabled = !(server.disabled ?? false)
         let summary = MCPAccountSummary(accounts: store.accounts, health: server.health)
-        let subtitle = [enabled ? nil : "Coupé ici", MCPHelp.origin(type: server.type, target: server.target)]
+        let subtitle = [enabled ? nil : "Coupé dans ce projet", MCPHelp.origin(type: server.type, target: server.target)]
             .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
         MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !enabled, uses: server.uses7d) {
             Toggle("Actif dans ce projet", isOn: enabledBinding(enabled))
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
-                .help(enabled ? "Couper pour ce projet" : "Rallumer pour ce projet")
+                .help(enabled ? "Couper pour ce projet" : "Réactiver pour ce projet")
             MCPMoreMenu {
                 Button("Modifier", systemImage: "pencil", action: edit)
                 Button("Demander à Claude", systemImage: "bubble.left.and.text.bubble.right") {
@@ -466,7 +467,7 @@ enum MCPHelp {
         } else {
             SystemActions.activateVSCode()
         }
-        store.show(info: "« /mcp » copié : colle-le dans Claude, choisis « \(name) », puis Reconnecter")
+        store.show(info: "« /mcp » copié : colle-le dans Claude, choisis « \(name) », puis « Reconnect »")
     }
 
     /// D'où vient un MCP, en mots simples : « Par Vigie · mcp.webflow.com », « En ligne · mcp.figma.com »,

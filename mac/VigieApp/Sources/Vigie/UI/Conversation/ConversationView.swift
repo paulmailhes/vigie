@@ -116,8 +116,13 @@ struct ConversationView: View {
                     }
                 }
             } else if store.loadedOnce {
-                ContentUnavailableView("Conversation introuvable", systemImage: "questionmark.bubble",
-                                       description: Text("Elle a peut-être été fermée il y a plus de 48 h."))
+                ContentUnavailableView {
+                    Label("Conversation introuvable", systemImage: "questionmark.bubble")
+                } description: {
+                    Text("Elle date sans doute de plus de 7 jours.")
+                } actions: {
+                    Button("Retour à la vue d'ensemble") { store.route = .overview }
+                }
             } else {
                 LoadingView()
             }
@@ -134,7 +139,7 @@ struct ConversationView: View {
                 }
             } else if let cwd = summary?.cwd {
                 ToolbarItem {
-                    Button("Ouvrir dans VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
+                    Button("Ouvrir le projet dans VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
                         SystemActions.openInVSCode(path: cwd)
                     }
                     .help("Ouvrir le dossier du projet dans VS Code")
@@ -248,7 +253,7 @@ struct ConversationHeader: View {
                 run("account") { await store.switchAccount(of: summary.id, to: account.id) }
             }
             if summary.state == .working {
-                Button("Tout de suite (interrompt)") {
+                Button("Tout de suite (l'interrompt)") {
                     run("account") { await store.switchAccount(of: summary.id, to: account.id, now: true) }
                 }
             }
@@ -369,7 +374,7 @@ struct ConversationHeader: View {
             ? "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
             : "Elle reprend sur \(account.displayName) avec tout son historique."
         if let contextTokens, contextTokens > 0 {
-            text += " ≈ \(Fmt.tokens(contextTokens)) tokens relus."
+            text += " ≈ \(Fmt.tokens(contextTokens)) tokens relus sur le nouveau compte."
         }
         return text
     }
@@ -403,7 +408,7 @@ struct ConversationHeader: View {
             let when = launch.ts.map { Fmt.when($0, now: store.now) } ?? "?"
             return "\(when) : lancée sur \(accountName(launch.accountId))"
         }
-        return lines.isEmpty ? "Compte du processus en cours" : "Lancements :\n" + lines.joined(separator: "\n")
+        return lines.isEmpty ? "Compte utilisé en ce moment" : "Lancements :\n" + lines.joined(separator: "\n")
     }
 
     // MARK: Auto-accept
@@ -463,7 +468,7 @@ struct ConversationHeader: View {
         }
         .menuStyle(.button)
         .glassButton()
-        .help("Les MCP de ton compte claude.ai (Gmail, Drive…) dans cette conversation. Les MCP de ce Mac et du projet restent actifs.")
+        .help("Les MCP de ton compte claude.ai (Gmail, Drive…) dans cette conversation. Les MCP de ton Mac et du projet restent actifs.")
     }
 
     @ViewBuilder
@@ -495,7 +500,7 @@ struct AcceptedSection: View {
             }
         } header: {
             HStack(spacing: 6) {
-                Text("Ce qui a été accepté")
+                Text("Ses actions et leur résultat")
                 Text(summary(feed))
                     .font(.callout)
                     .fontWeight(.regular)
@@ -514,7 +519,7 @@ struct AcceptedSection: View {
         let denied = items.count { $0.decisionKind == .denied }
         if auto > 0 { parts.append(Fmt.count(auto, "automatique", "automatiques")) }
         if you > 0 { parts.append("\(Fmt.int(you)) par toi") }
-        if blocked > 0 { parts.append(Fmt.count(blocked, "sensible", "sensibles")) }
+        if blocked > 0 { parts.append(Fmt.count(blocked, "action sensible", "actions sensibles")) }
         if denied > 0 { parts.append(Fmt.count(denied, "refusée", "refusées")) }
         return parts.joined(separator: " · ")
     }

@@ -37,9 +37,9 @@ struct GuardSettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Picker("Refusée automatiquement après", selection: $store.guardWaitMin) {
+                Picker("Sans réponse de ta part, refusée après", selection: $store.guardWaitMin) {
                     ForEach(waitChoices, id: \.self) { minutes in
-                        Text(minutes == 0 ? "tout de suite" : "\(minutes) min").tag(minutes)
+                        Text(minutes == 0 ? "0 min (toujours refusée)" : "\(minutes) min").tag(minutes)
                     }
                 }
                 .disabled(!store.guardEnabled)

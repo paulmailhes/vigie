@@ -72,7 +72,7 @@ struct MCPEditorSheet: View {
                         .glassButton(.primary)
                         .disabled(!canSubmit)
                 } else {
-                    Button("Analyser", action: analyse)
+                    Button("Lire la commande", action: analyse)
                         .keyboardShortcut(.defaultAction)
                         .glassButton(.primary)
                         .disabled(pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -149,7 +149,7 @@ struct MCPEditorSheet: View {
             case .notACommand: "Ce n'est pas une commande « claude mcp add »"
             case .missingName: "Il manque le nom du MCP"
             case .missingTarget: "Il manque la commande ou l'adresse"
-            case .badJSON: "La configuration JSON est illisible"
+            case .badJSON: "La configuration entre { } est illisible"
             }
         }
     }
@@ -197,7 +197,7 @@ struct MCPEditorSheet: View {
                     PairsEditor(pairs: $draft.headers, keyPrompt: "Authorization", addTitle: "Ajouter un en-tête")
                 }
             } header: {
-                Text(draft.transport == .stdio ? "Variables (secrètes)" : "En-têtes (secrets)")
+                Text(draft.transport == .stdio ? "Variables (secrètes)" : "En-têtes : clés d'accès (secrètes)")
             }
 
             if destination == .mac {

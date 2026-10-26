@@ -127,7 +127,7 @@ struct ConversationListHeader: View {
             Text("")
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Compte").frame(width: Column.account, alignment: .trailing)
-            Text("Conso").frame(width: Column.rate, alignment: .trailing)
+            Text("Consommation").frame(width: Column.rate, alignment: .trailing)
             Text("Étapes").frame(width: Column.steps, alignment: .trailing)
         }
         .font(.caption)

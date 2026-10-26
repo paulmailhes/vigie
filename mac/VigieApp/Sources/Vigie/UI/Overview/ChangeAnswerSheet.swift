@@ -86,7 +86,7 @@ struct ChangeAnswerSheet: View {
                     HStack(spacing: 6) {
                         Text(label).bold()
                         if claudeChoice {
-                            Pill(text: "Choix de Claude", symbol: "sparkles")
+                            Pill(text: "Choisie pour toi", symbol: "sparkles")
                         }
                     }
                     if let description = option.description, !description.isEmpty {
@@ -185,7 +185,7 @@ struct ChangeAnswerSheet: View {
                     if sending {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Corriger")
+                        Text("Préparer le message")
                     }
                 }
                 .keyboardShortcut(.defaultAction)

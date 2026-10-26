@@ -149,7 +149,7 @@ extension VigieStore {
             // Elle avait continué sans : rien ne s'ouvre (VS Code choisissait souvent la mauvaise fenêtre) ;
             // le message est copié, à coller dans sa conversation si elle ne relance pas l'action d'elle-même.
             if let message = result.message, !message.isEmpty { SystemActions.copy(message) }
-            show(info: "Autorisée. Elle avait continué sans : message copié, colle-le dans sa conversation pour qu'elle relance l'action")
+            show(info: "Autorisée. Elle avait continué sans cette action : message copié, colle-le dans sa conversation pour qu'elle la relance")
         }
         await reloadAfterWrite(conversation: item.conversationId)
         return true
@@ -194,8 +194,8 @@ extension VigieStore {
     func runInTerminal(_ command: String, cwd: String?) async {
         var body: [String: JSONValue] = ["kind": "terminal", "command": .string(command)]
         if let cwd { body["cwd"] = .string(cwd) }
-        if await write("/api/v2/open", .object(body), quiet: true) != nil {
-            show(info: "Terminal ouvert : appuie sur Entrée, puis tape ton mot de passe")
+        if let result = await write("/api/v2/open", .object(body), quiet: true) {
+            show(info: result.message ?? "Terminal ouvert : relis la commande, appuie sur Entrée, puis tape ton mot de passe")
             return
         }
         SystemActions.copy(command)
@@ -229,7 +229,7 @@ extension VigieStore {
         guard let result else { return }
         patchConversation(id) { $0.accountId = accountID }
         let label = accounts.first(where: { $0.id == accountID })?.displayName ?? accountID
-        show(info: result.switchInfo?.message ?? result.message ?? "Passera sur \(label) à ton prochain message")
+        show(info: result.switchInfo?.message ?? result.message ?? "Elle passera sur \(label) à ton prochain message")
         await reloadAfterWrite(conversation: id)
     }
 
@@ -311,7 +311,7 @@ extension VigieStore {
         for (key, value) in extra { body[key] = value }
         let result = await write("/api/v2/gateway", .object(body))
         if let result, ["add", "migrate", "authorize"].contains(action), result.open != true {
-            show(info: "Ton navigateur s'ouvre : autorise « \(name) » une fois, pour tous tes comptes")
+            show(info: "Ton navigateur s'ouvre : connecte « \(name) » une seule fois, pour tous tes comptes")
         }
         await reloadAfterWrite(mcp: true)
         return result != nil
@@ -382,11 +382,16 @@ extension VigieStore {
         if let accountId { body["accountId"] = .string(accountId) }
         if let path { body["path"] = .string(path) }
         if force { body["force"] = .bool(true) }
-        if let result = await write("/api/v2/mcp/connect", .object(body), quiet: true) {
+        switch await send("/api/v2/mcp/connect", .object(body)) {
+        case .success(let result):
             let suffix = accountId.flatMap { account($0)?.displayName }.map { " (\($0))" } ?? ""
-            show(info: result.message ?? "Autorise « \(name) »\(suffix) dans ton navigateur")
+            show(info: result.message ?? "Connecte « \(name) »\(suffix) dans ton navigateur")
             await reloadAfterWrite(mcp: true)
-        } else {
+        // le moteur explique pourquoi (déjà connecté, compte pas connecté…) : on le dit tel quel
+        case .failure(.refused(let text)) where text != "Adresse inconnue.":
+            show(error: text)
+        // moteur trop ancien ou injoignable : « /mcp » dans VS Code
+        case .failure:
             MCPHelp.reconnect(name, path: path, store: self)
         }
     }
@@ -394,7 +399,7 @@ extension VigieStore {
     /// « Partout » : chaque compte qui demande ce MCP, l'un après l'autre (une page d'autorisation à la fois).
     func mcpConnectEverywhere(name: String) async {
         guard let result = await write("/api/v2/mcp/connect", ["name": .string(name), "everywhere": .bool(true)]) else { return }
-        show(info: result.message ?? "Autorise « \(name) » dans ton navigateur, pour chaque compte")
+        show(info: result.message ?? "Connecte « \(name) » dans ton navigateur, une fois par compte")
         await reloadAfterWrite(mcp: true)
     }
 

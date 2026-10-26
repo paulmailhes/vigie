@@ -32,7 +32,7 @@ struct MenuBarPanel: View {
                     .contentTransition(.symbolEffect(.replace))
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Auto-accept").font(.headline)
-                    Text(store.autoAccept ? "Claude valide tout seul" : "Claude te demande")
+                    Text(store.autoAccept ? "Vigie accepte pour toi, sauf les actions sensibles" : "Claude te demande à chaque fois")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -44,7 +44,7 @@ struct MenuBarPanel: View {
 
             if store.connection == .down {
                 HStack(spacing: 8) {
-                    Label("Le moteur ne répond pas", systemImage: "bolt.horizontal.circle")
+                    Label("Le moteur de Vigie ne répond pas", systemImage: "bolt.horizontal.circle")
                         .foregroundStyle(.red)
                         .font(.callout)
                     Spacer()
@@ -137,7 +137,7 @@ struct MenuBarPanel: View {
                 }
                 .labelStyle(.iconOnly)
                 .glassButton()
-                .help("Réglages : garde-fous et notifications")
+                .help("Réglages : garde-fous, notifications, mises à jour")
                 Button("Quitter Vigie", systemImage: "power") { NSApplication.shared.terminate(nil) }
                     .labelStyle(.iconOnly)
                     .glassButton()

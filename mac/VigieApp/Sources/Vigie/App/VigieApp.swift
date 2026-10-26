@@ -27,7 +27,7 @@ struct VigieApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
-            CommandMenu("Affichage Vigie") {
+            CommandMenu("Aller") {
                 Button("Vue d'ensemble") { store.route = .overview }
                     .keyboardShortcut("1", modifiers: .command)
                 Button("Comptes") { store.showAccounts(nil) }

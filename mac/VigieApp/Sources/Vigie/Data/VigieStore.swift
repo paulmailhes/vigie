@@ -421,21 +421,30 @@ final class VigieStore {
 
     // MARK: Écritures
 
-    /// POST vers le moteur. Les erreurs s'affichent en une ligne (sauf `quiet`) ; renvoie nil en cas d'échec.
+    /// POST vers le moteur. Les erreurs s'affichent (sauf `quiet`) ; renvoie nil en cas d'échec.
     @discardableResult
     func write(_ path: String, _ body: JSONValue, quiet: Bool = false) async -> WriteResult? {
+        switch await send(path, body) {
+        case .success(let result): return result
+        case .failure(let error):
+            if !quiet { show(error: error.message) }
+            return nil
+        }
+    }
+
+    /// POST vers le moteur, avec son erreur : pour choisir quoi faire selon la raison d'un refus.
+    func send(_ path: String, _ body: JSONValue) async -> Result<WriteResult, ClientError> {
         writesInFlight += 1
         defer {
             writesInFlight -= 1
             lastWriteEnd = .now
         }
         do {
-            return try await client.post(path, body)
+            return .success(try await client.post(path, body))
         } catch {
             let clientError = error as? ClientError ?? .unreadable
             if clientError == .unreachable { update(\.connection, .down) }
-            if !quiet { show(error: clientError.message) }
-            return nil
+            return .failure(clientError)
         }
     }
 
@@ -471,9 +480,9 @@ final class VigieStore {
             guard let self else { return }
             self.restarting = false
             if ok {
-                self.show(info: "Moteur relancé")
+                self.show(info: "Moteur de Vigie relancé")
             } else {
-                self.show(error: "Impossible de relancer le moteur")
+                self.show(error: "Impossible de relancer le moteur de Vigie : quitte Vigie et rouvre-le")
             }
             Task { await self.refreshOverview() }
         }

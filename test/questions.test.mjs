@@ -60,7 +60,7 @@ test('à relire : non relues, plus récentes d\'abord, forme du contrat', async 
     options: [{ label: 'Fond B (recommandé)', description: 'sobre' }, { label: 'Fond A', description: 'vif' }], chosen: 'Fond B (recommandé)' });
   const e = reviewEntry(list[1], 'Atelier');
   assert.deepEqual(e, { id: `q:${a.id}`, kind: 'question', conversationId: RUNNING, conversationTitle: 'Atelier',
-    title: 'Quel fond pour la charte ?', detail: 'Claude a pris « Fond B (recommandé) »', ts: a.ts, question: { id: a.id, items: a.items } });
+    title: 'Quel fond pour la charte ?', detail: 'Vigie a pris « Fond B (recommandé) »', ts: a.ts, question: { id: a.id, items: a.items } });
 });
 
 test('« Ça me va » : sort de la liste, relecture enregistrée', () => {
