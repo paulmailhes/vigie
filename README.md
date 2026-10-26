@@ -2,7 +2,7 @@
 
 **Vigie veille sur Claude Code (et Codex) pendant que tu travailles… ou pendant que tu dors.**
 
-Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fenêtre « Autoriser ? » qui attend depuis le début ? Vigie s'en charge à ta place. Les demandes sans risque sont validées toutes seules, et les actions sensibles t'attendent toujours. Tu suis tout dans une petite app Mac : tes conversations, ta consommation, tes comptes et tes MCP.
+Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fenêtre « Autoriser ? » qui attend depuis le début ? Vigie s'en charge à ta place. Les demandes sans risque sont acceptées toutes seules, et les actions sensibles t'attendent toujours. Tu suis tout dans une petite app Mac : tes conversations, ta consommation, tes comptes et tes MCP.
 
 > **Bêta.** Vigie est en test. Il marche au quotidien, mais attends-toi à quelques angles encore à arrondir. Les retours sont les bienvenus (onglet *Issues*).
 
@@ -10,14 +10,14 @@ Tu lances Claude Code pour plusieurs heures, et tu reviens pour trouver une fen�
 
 ## Ce que fait Vigie
 
-- **Il valide pour toi** les demandes d'autorisation de Claude Code (commandes, fichiers, outils, MCP), dans toutes tes conversations, y compris celles déjà ouvertes.
-- **Il garde pour toi les actions sensibles** : `sudo`, suppression de dossiers importants, `git push --force`, effacement de disque, paiements, envoi d'e-mails, publications, réglages de Claude Code ou du shell. Elle s'affiche à la fois dans ta conversation (la fenêtre habituelle de Claude Code) et dans Vigie : tu réponds où tu veux, l'autre se ferme.
-- **Il répond aux questions quand tu n'es pas là**, si tu le veux. Après un délai, Claude prend l'option recommandée, et tu relis son choix ensuite (« Ça me va » ou « Changer »).
+- **Il accepte pour toi** les demandes d'autorisation de Claude Code (commandes, fichiers, outils, MCP), dans toutes tes conversations, y compris celles déjà ouvertes.
+- **Il garde pour toi les actions sensibles** : `sudo`, suppression de dossiers importants, `git push --force`, effacement de disque, paiements, envoi d'e-mails, publications, suppressions en ligne, scripts téléchargés lancés tels quels (`… | bash`), mots de passe du trousseau, ajout d'un MCP, réglages de Claude Code, de Vigie ou du shell. Elle s'affiche à la fois dans ta conversation (la fenêtre habituelle de Claude Code) et dans Vigie : tu réponds où tu veux, l'autre se ferme.
+- **Il répond aux questions quand tu n'es pas là**, si tu le veux. Après un délai, Vigie choisit l'option que Claude recommande, et tu relis ce choix ensuite (« Ça me va » ou « Changer »).
 - **Il te montre où en est chaque conversation** : ta demande, son message en direct, sa feuille de route, le fil de ce qu'elle a fait (commits, déploiements, tests, agents).
 - **Il suit ta consommation** par compte et par conversation : session de 5 h, semaine, et l'heure exacte de remise à zéro.
 - **Il gère plusieurs comptes Claude** : ils restent connectés en même temps, et tu choisis le compte de chaque conversation.
 - **Il garde tes connexions** : une copie chiffrée de la connexion de chaque compte (Claude et Codex). Si une app la perd sans que tu te sois déconnecté (ça arrivait au redémarrage du Mac), Vigie la remet tout seul.
-- **Il gère tes MCP**, avec leur état sur chaque compte et un bouton « Connecter » qui ouvre directement la page d'autorisation.
+- **Il gère tes MCP**, avec leur état sur chaque compte et un bouton « Connecter » qui ouvre directement la page de connexion du service.
 
 Tout se passe sur ton Mac : Vigie n'envoie tes conversations nulle part.
 
@@ -46,7 +46,7 @@ L'app s'ouvre sur un court accueil :
 
 Ensuite, Vigie vit dans la barre des menus (les jumelles).
 
-**Mises à jour :** Vigie se met à jour tout seul (Réglages › Mises à jour), sans Terminal, et te montre ce qui a changé. Tu peux aussi relancer la même commande. Tes réglages et ton historique sont gardés.
+**Mises à jour :** Vigie se met à jour tout seul (Réglages › Mises à jour) et te montre ce qui a changé. Tu peux aussi relancer la même commande. Tes réglages et ton historique sont gardés. Une mise à jour n'est installée que si son app est signée par l'équipe de Vigie et notarisée par Apple : un dépôt GitHub piraté ne pourrait rien faire installer.
 
 ## Plusieurs comptes Claude
 
@@ -125,7 +125,18 @@ Une conversation ne peut pas passer de Claude à Codex : leurs historiques sont 
 - Le **lanceur de comptes** (`bin/claude-account-wrapper`, facultatif) démarre chaque conversation VS Code sur le compte que tu lui as choisi, ou sur un compte connecté si le sien ne l'est pas.
 - Le **coffre des connexions** (`lib/vault.mjs`) garde une copie chiffrée de la connexion de chaque compte et la remet si une app la perd. Il publie l'état des connexions dans `~/.vigie/data/connexions.json` (connecté ou non, jamais rien de secret), que lit le lanceur.
 
-L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; ses données (réglages, historique) sont dans `~/.vigie/data`. Le hook est branché dans `~/.claude/settings.json` (et `~/.codex/hooks.json` pour Codex). Une sauvegarde de ces fichiers est faite à chaque modification.
+L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; ses données (réglages, historique) sont dans `~/.vigie/data`, lisibles par toi seul. Le hook est branché dans `~/.claude/settings.json` (et `~/.codex/hooks.json` pour Codex). Une sauvegarde de ces fichiers est faite à chaque modification.
+
+### Sécurité
+
+- **API locale protégée** : le moteur n'écoute que ton Mac, refuse les pages web (hôte et origine vérifiés) et exige un jeton d'accès (`~/.vigie/data/api-token`, lisible par toi seul) : un autre compte du Mac, un conteneur ou une commande lancée au hasard n'ont rien sans lui. Le garde-fou retient une conversation qui voudrait le lire.
+- **Mises à jour vérifiées** : signature de l'app par l'équipe de Vigie, accord de Gatekeeper, version attendue ; seul le moteur scellé dans l'app est installé.
+- **MCP par Vigie** : un MCP qui se présente comme un autre service, ou qui désigne une adresse du réseau local ou un fichier du Mac, n'est jamais connecté.
+- **Limite des garde-fous** : ils protègent des erreurs et des consignes piégées ordinaires (une page web qui demande à Claude de lancer une commande). Une conversation dont les commandes sont acceptées d'office a tes droits sur le Mac : un programme vraiment décidé à contourner Vigie le pourrait. Pour du code dont tu ne te fies pas, coupe l'auto-accept.
+
+### Sobriété
+
+Vigie ralentit de lui-même quand tu ne le regardes pas : fenêtre cachée ou recouverte, il ne relit plus ses pages et ne relit la vue d'ensemble que toutes les 15 s (60 s écran éteint). Ses relevés de fond (état des MCP, consommation des comptes au repos) passent une fois par heure, un à la fois, en priorité basse.
 
 ## Désinstaller
 
