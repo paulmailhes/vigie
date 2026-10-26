@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Lancer un agent : son formulaire, le dossier du projet (proposé d'après le nom saisi), puis « Lancer dans VS Code ».
-/// Le moteur refuse (champ trop long, dossier refusé…) : la feuille reste ouverte, son message s'affiche en bas.
+/// Le moteur refuse (champ trop long, dossier refusé…) ou VS Code manque : la feuille reste ouverte, le message
+/// s'affiche en bas, au-dessus des boutons.
 struct AgentLaunchSheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -12,6 +13,11 @@ struct AgentLaunchSheet: View {
     @State private var folder = ""
     /// Le dossier a été changé à la main : il ne suit plus le nom saisi.
     @State private var folderEdited = false
+    /// Le dernier lancement n'a pas abouti (refus, VS Code fermé) : effacé dès qu'un champ ou le dossier change.
+    @State private var launchIssue: AgentLaunchOutcome?
+    /// Le moteur a préparé le dossier : « Annuler » ne défait rien, il devient « Fermer ».
+    @State private var prepared = false
+    @State private var copied = false
     @FocusState private var focused: String?
 
     var body: some View {
@@ -101,6 +107,7 @@ struct AgentLaunchSheet: View {
         } set: { value in
             values[field.id] = value
             if !folderEdited { folder = suggested }
+            launchIssue = nil
         }
     }
 
@@ -114,6 +121,7 @@ struct AgentLaunchSheet: View {
         } set: { value in
             folder = value
             folderEdited = value != suggested
+            launchIssue = nil
         }
     }
 
@@ -144,24 +152,8 @@ struct AgentLaunchSheet: View {
         return ("Vigie le crée s'il n'existe pas, et y range la consigne de l'agent.", false)
     }
 
-    /// Ce qui empêche de lancer côté dossier (le moteur vérifie aussi) ; nil : rien.
-    private var folderIssue: String? {
-        guard !folder.trimmingCharacters(in: .whitespaces).isEmpty else { return "Indique le dossier du projet." }
-        let path = Self.expanded(folder)
-        guard path.hasPrefix("/") else { return "Indique un chemin complet, par exemple ~/Code/cabinet-martin." }
-        let parent = Self.expanded(agent.parentFolder)
-        let home = Self.expanded("~")
-        if path == "/" || path == home || path == parent {
-            return "Choisis un dossier rien que pour ce projet, pas \(Fmt.shortPath(path)) lui-même."
-        }
-        return nil
-    }
-
-    /// « ~/Code/x/ » → « /Users/alex/Code/x ».
-    private static func expanded(_ path: String) -> String {
-        let trimmed = path.trimmingCharacters(in: .whitespaces)
-        return ((trimmed as NSString).expandingTildeInPath as NSString).standardizingPath
-    }
+    /// Ce qui empêche de lancer côté dossier, avec les règles du moteur (qui vérifie encore) ; nil : rien.
+    private var folderIssue: String? { AgentFolderRule.issue(folder, parent: agent.parentFolder) }
 
     private func chooseFolder() {
         let panel = NSOpenPanel()
@@ -172,14 +164,15 @@ struct AgentLaunchSheet: View {
         panel.prompt = "Choisir"
         panel.message = "Choisis le dossier du projet, ou crée-le avec « Nouveau dossier »."
         // s'ouvre là où ira le projet : le dossier s'il existe déjà, sinon son parent
-        let current = Self.expanded(folder.isEmpty ? agent.parentFolder : folder)
+        let current = AgentFolderRule.expanded(folder.isEmpty ? agent.parentFolder : folder)
         var isFolder: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: current, isDirectory: &isFolder) && isFolder.boolValue
         panel.directoryURL = URL(filePath: exists ? current : (current as NSString).deletingLastPathComponent,
                                  directoryHint: .isDirectory)
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        folder = Fmt.shortPath(Self.expanded(url.path(percentEncoded: false)))
+        folder = Fmt.shortPath(AgentFolderRule.expanded(url.path(percentEncoded: false)))
         folderEdited = folder != suggested
+        launchIssue = nil
     }
 
     // MARK: Lancement
@@ -193,6 +186,7 @@ struct AgentLaunchSheet: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
             notes
+            if let launchIssue { issueView(launchIssue) }
             HStack(spacing: 12) {
                 if !missing.isEmpty {
                     Text("À remplir : " + missing.map(\.label).formatted(.list(type: .and).locale(Fmt.locale)))
@@ -201,7 +195,7 @@ struct AgentLaunchSheet: View {
                         .lineLimit(2)
                 }
                 Spacer()
-                Button("Annuler") { dismiss() }
+                Button(prepared ? "Fermer" : "Annuler") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .glassButton()
                 AsyncButton("Lancer dans VS Code", systemImage: "arrow.up.forward.app") { await launch() }
@@ -237,6 +231,36 @@ struct AgentLaunchSheet: View {
         }
     }
 
+    /// Le lancement n'a pas abouti : pourquoi, en rouge, juste au-dessus des boutons (le toast de la fenêtre serait
+    /// caché derrière la feuille). VS Code fermé : le dossier est prêt, le message se copie d'ici.
+    @ViewBuilder
+    private func issueView(_ issue: AgentLaunchOutcome) -> some View {
+        switch issue {
+        case .refused(let text):
+            issueLabel(text)
+        case .notOpened(let prompt):
+            HStack(spacing: 12) {
+                issueLabel(AgentLaunch.notOpenedMessage)
+                Button(copied ? "Message copié" : "Copier le message", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                    SystemActions.copy(prompt)
+                    copied = true
+                }
+                .glassButton()
+                .help("Copie le message à envoyer dans Claude Code pour lancer l'agent")
+            }
+        case .opened:
+            EmptyView()
+        }
+    }
+
+    private func issueLabel(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.callout)
+            .foregroundStyle(Theme.alert)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func launch() async {
         guard canLaunch else { return }
         var sent: [String: String] = [:]
@@ -244,7 +268,17 @@ struct AgentLaunchSheet: View {
             let value = Self.clean(values[field.id], kind: field.kind)
             if !value.isEmpty { sent[field.id] = value }
         }
-        if await store.launchAgent(agent, values: sent, folder: Self.expanded(folder)) { dismiss() }
+        let outcome = await store.launchAgent(agent, values: sent, folder: AgentFolderRule.expanded(folder))
+        switch outcome {
+        case .opened:
+            dismiss()
+        case .refused:
+            launchIssue = outcome
+        case .notOpened:
+            launchIssue = outcome
+            prepared = true
+            copied = false
+        }
     }
 
     /// Valeur envoyée : sans blancs autour ; une adresse par ligne, sans lignes vides.

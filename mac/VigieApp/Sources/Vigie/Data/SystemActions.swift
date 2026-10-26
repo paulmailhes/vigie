@@ -5,16 +5,25 @@ import AppKit
 enum SystemActions {
     static let vsCodeBundleID = "com.microsoft.VSCode"
 
-    static func open(_ link: String?) {
-        guard let link, let url = URL(string: link) else { return }
-        NSWorkspace.shared.open(url)
+    /// false : rien ne s'est ouvert (adresse illisible, aucune app pour elle).
+    @discardableResult
+    static func open(_ link: String?) -> Bool {
+        guard let link, let url = URL(string: link) else { return false }
+        return NSWorkspace.shared.open(url)
     }
 
-    /// Ouvre un fichier (ou un dossier) dans VS Code : vscode://file<chemin encodé>.
-    static func openInVSCode(path: String) {
+    /// Ouvre un fichier (ou un dossier) dans VS Code : vscode://file<chemin encodé>. false : VS Code ne s'est pas ouvert.
+    @discardableResult
+    static func openInVSCode(path: String) -> Bool {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        guard let url = URL(string: "vscode://file" + (encoded.hasPrefix("/") ? encoded : "/" + encoded)) else { return }
-        NSWorkspace.shared.open(url)
+        guard let url = URL(string: "vscode://file" + (encoded.hasPrefix("/") ? encoded : "/" + encoded)) else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    /// Une app du Mac ouvre les adresses vscode:// : VS Code est installé (VS Code Insiders seul ne compte pas).
+    static var canOpenVSCode: Bool {
+        guard let url = URL(string: "vscode://file/") else { return false }
+        return NSWorkspace.shared.urlForApplication(toOpen: url) != nil
     }
 
     /// Met VS Code au premier plan (sans rien ouvrir de particulier).
