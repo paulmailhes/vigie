@@ -53,6 +53,7 @@ fields:
 Prépare le projet de {{client}} (site actuel : {{ site }}).
 
 Questionnaire : {{questionnaire}}
+Scripts : {{dossier_agent}}/scripts
 Inconnu : {{inconnu}}
 `;
 
@@ -174,6 +175,10 @@ test('valeurs dans la consigne : {{id}} remplacé, « (non fourni) » si vide, i
   const fields = [{ id: 'client' }, { id: 'site' }];
   assert.equal(fillPlaceholders('{{client}} · {{ site }} · {{autre}} · {{client}} $& $1', fields, { client: 'Atelier', site: '' }),
     `Atelier · ${NOT_GIVEN} · {{autre}} · Atelier $& $1`);
+  // repères de Vigie : remplacés s'ils sont fournis ; un champ du même nom passe avant
+  assert.equal(fillPlaceholders('{{dossier_agent}}/a · {{autre}}', fields, {}, { dossier_agent: '/x/$&' }), '/x/$&/a · {{autre}}');
+  assert.equal(fillPlaceholders('{{dossier_agent}}', [{ id: 'dossier_agent' }], { dossier_agent: 'saisi' }, { dossier_agent: '/x' }), 'saisi');
+  assert.equal(fillPlaceholders('{{toString}} {{constructor}}', [], {}, {}), '{{toString}} {{constructor}}');
 });
 
 // ---------- bibliothèque ----------
@@ -262,6 +267,7 @@ test('lancement : dossier créé lisible (0755), brief privé (0600) avec les va
   assert.ok(consignes.includes('Prépare le projet de Cabinet Martin (site actuel : https://studio-exemple.fr).'));
   assert.ok(consignes.includes(`Questionnaire : ${VALUES.questionnaire}`));
   assert.ok(consignes.includes('Inconnu : {{inconnu}}'));
+  assert.ok(consignes.includes(`Scripts : ${fs.realpathSync(path.join(W.dir, 'demarrer-projet'))}/scripts`), 'dossier de l\'agent, chemin réel');
   // message pré-rempli : il survit aux deux décodages (VS Code, puis l'extension)
   assert.equal(r.prompt, `Lance l'agent « Démarrer un projet client » : lis le fichier ${r.briefFile} et suis ses consignes, dans le dossier ${folder}.`);
   assert.ok(r.openUrl.startsWith('vscode://anthropic.claude-code/open?prompt='));

@@ -34,10 +34,10 @@ sites de référence (adresses) ; modèle Figma de l'agence ; espace Webflow ; d
 | Besoin | Possible ? | Conséquence |
 |---|---|---|
 | Fichier Figma neuf dans un dossier projet | Oui (`create_new_file` avec `projectId`) | |
-| Dupliquer un fichier Figma modèle | **Non** : ni le MCP ni l'API de Figma ne copient un fichier | Le modèle devient une **bibliothèque d'équipe publiée** (composants, styles, variables) que l'agent pose dans le fichier neuf ; ou bien on duplique le modèle d'un clic et on colle le lien dans le formulaire |
+| Dupliquer un fichier Figma modèle | **Non** : ni le MCP ni l'API de Figma ne copient un fichier | L'agent **reconstruit le modèle** dans le fichier neuf avec ses propres scripts (`use_figma`), rangés à côté d'`AGENT.md` ; ou bien le modèle devient une bibliothèque d'équipe publiée ; ou on duplique d'un clic et on colle le lien |
 | Écrire dans un fichier Figma, y poser des images | Oui (`use_figma`, `upload_assets`) | |
 | Créer un site Webflow | **Non** : le MCP lit, remplit et publie des sites existants ; l'API réserve la création aux espaces Enterprise | Un **site modèle** est dupliqué à la main dans Webflow (un clic), puis l'agent le remplit (pages, CMS, styles) |
-| Capturer un site de référence | Pas avec les MCP en place | Ajouter un navigateur pilotable (Claude in Chrome ou un MCP Playwright) |
+| Capturer un site de référence | Oui, sans MCP : Chrome sans fenêtre (`--headless=new --screenshot`) | Un navigateur pilotable (Claude in Chrome, Playwright) seulement pour les pages derrière une connexion |
 | Dossier, fichiers, git, GitHub | Oui (Claude Code lui-même, `gh`) | |
 
 ## Où ranger un agent
@@ -125,6 +125,8 @@ Un `AGENT.md` mal écrit ne bloque rien : l'agent est listé avec une phrase qui
 guillemets non fermés. »), et ne peut pas être lancé.
 
 **Consigne** : tout ce qui suit l'en-tête. `{{id}}` y est remplacé par la valeur saisie, ou par « (non fourni) ».
+`{{dossier_agent}}` donne le dossier de l'agent (chemin réel, lien symbolique suivi) : un agent peut y porter ses
+propres fichiers (scripts, images, modèles) et la consigne les cite par `{{dossier_agent}}/…`.
 
 ## Comment il se lance
 
@@ -154,9 +156,11 @@ dans Vigie. Le brief est lisible par la conversation, mais le modifier passe par
 
 ## Encore à décider
 
-La première version a tranché le point 4 (visible dans VS Code) ; le reste est ouvert.
+La première version a tranché les points 1 (le modèle Figma est reconstruit par les scripts de l'agent : aucune
+manipulation à la main, et le modèle s'améliore en modifiant les scripts) et 4 (visible dans VS Code) ; le reste est
+ouvert.
 
-1. Le modèle Figma : bibliothèque d'équipe publiée, ou duplication à la main puis lien collé ?
+1. ~~Le modèle Figma~~ : reconstruit par l'agent.
 2. Webflow : site modèle dupliqué à la main, ou l'agent part d'un site vide déjà créé ?
 3. Les agents de l'équipe : quel dépôt, et qui les tient à jour ?
 4. Lancement : visible dans VS Code (on suit et on corrige en direct), ou en fond ?
