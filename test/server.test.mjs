@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_GUARDS } from '../lib/state.mjs';
 import { HEALTH_STATUSES } from '../lib/mcp.mjs';
+import { gitInstalled, MSG as LIB_MSG } from '../lib/libraries.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie serveur-'));
@@ -43,6 +44,13 @@ const IDE_SERVERS = await Promise.all(Array.from({ length: 8 }, () => new Promis
 })));
 const IDE_PORTS = IDE_SERVERS.map((srv) => srv.address().port);
 const IDE_PORTS_FILE = path.join(TMP, 'ports-vscode.json');
+// Bibliothèques d'agents : de vrais dépôts git locaux (REPOS/<chemin>), servis au moteur par un faux git (VIGIE_GIT_BIN)
+// qui note ses appels puis lance le vrai git en changeant https://github.com/ en file://REPOS/ ; https et ssh y sont
+// coupés : aucun serveur réel n'est contacté. Sans git sur le Mac, l'essai est sauté.
+const REAL_GIT = gitInstalled('/usr/bin/git') ? '/usr/bin/git' : null;
+const REPOS = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vigie-depots-')));
+const FAKE_GIT = path.join(REPOS, 'faux-git.mjs');
+const GIT_LOG = path.join(REPOS, 'faux-git.log');
 
 const SID_A = 'b1b9b451-c53c-439e-b804-3689257268e3'; // ouverte (registre), garde-fou en attente
 const SID_B = '9ca55731-9c56-4174-ad2a-c63bef5f7c11'; // fermée
@@ -203,6 +211,16 @@ if (${JSON.stringify(name)} === 'open' && args[0] === '-a' && args[1] === 'Visua
 `, 0o755);
   }
   fs.writeFileSync(IDE_PORTS_FILE, JSON.stringify(IDE_PORTS.slice(2)));
+  w(FAKE_GIT, `#!${process.execPath}
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(GIT_LOG)}, JSON.stringify({ args }) + '\\n');
+const swap = { 'protocol.file.allow=never': 'protocol.file.allow=always', 'protocol.https.allow=always': 'protocol.https.allow=never', 'protocol.ssh.allow=always': 'protocol.ssh.allow=never' };
+const r = spawnSync(${JSON.stringify(REAL_GIT || '/nonexistent')}, ['-c', ${JSON.stringify(`url.file://${REPOS}/.insteadOf=https://github.com/`)}, ...args.map((a) => swap[a] ?? a)],
+  { stdio: 'inherit', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+process.exit(r.status ?? 1);
+`, 0o755);
   // VS Code et son extension Claude Code, l'app Claude : installés (faux /Applications) ; la fenêtre VS Code de la
   // conversation ouverte (SID_A) existe déjà.
   fs.mkdirSync(path.join(APPS, 'Visual Studio Code.app'), { recursive: true });
@@ -226,6 +244,7 @@ before(async () => {
     VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même
     VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
     VIGIE_APPS_DIR: APPS, VIGIE_IDE_WAIT_MS: '1500', // fenêtre VS Code attendue 1,5 s au plus (25 s pour de vrai)
+    VIGIE_GIT_BIN: FAKE_GIT, // faux git : dépôts locaux derrière des adresses GitHub
   };
   child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', (d) => { logs += d; });
@@ -245,6 +264,7 @@ after(() => {
   child?.kill('SIGTERM');
   for (const hk of hooks) hk.kill('SIGKILL');
   fs.rmSync(TMP, { recursive: true, force: true });
+  fs.rmSync(REPOS, { recursive: true, force: true });
 });
 
 // Jeton d'accès posé par le moteur au démarrage ; `token: null` pour un appel sans lui.
@@ -1259,6 +1279,114 @@ test('agents : conversations du dossier (triées, filtrées par dossier), repris
   } finally {
     fs.rmSync(reg, { force: true });
     sleeper.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- bibliothèques d'agents (lib/libraries.mjs : dépôt git partagé, un dossier par agent) ----------
+const Library = { id: 'string', name: 'string', url: 'string', addedAt: opt(ISO), updatedAt: opt(ISO), commit: opt('string'),
+  status: oneOf('ok', 'updating', 'error'), error: opt('string'), agents: 'int' };
+test('agents : bibliothèques (dépôt git partagé) : ajout, agents avec leur source, lancement, mise à jour, retrait', { skip: !REAL_GIT && 'git absent' }, async () => {
+  const dir = path.join(DATA, 'agents');
+  w(path.join(dir, 'local', 'AGENT.md'), '---\nname: Agent local\n---\nConsigne.');
+  // le dépôt publié par l'auteur : un dossier par agent
+  const repo = path.join(REPOS, 'studio', 'agents');
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Studio', GIT_AUTHOR_EMAIL: 'studio@example.com', GIT_COMMITTER_NAME: 'Studio', GIT_COMMITTER_EMAIL: 'studio@example.com' };
+  const g = (...args) => { const r = spawnSync(REAL_GIT, args, { cwd: repo, env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+  const page = (name) => `---\nname: ${name}\nfields:\n  - id: page\n    label: Page\n---\nModèles : {{dossier_agent}}/modeles. Page : {{page}}.\n`;
+  w(path.join(repo, 'creer-une-page', 'AGENT.md'), page('Créer une page'));
+  w(path.join(repo, 'creer-une-page', 'modeles', 'accueil.json'), '{}\n');
+  w(path.join(repo, 'local', 'AGENT.md'), '---\nname: Local de la bibliothèque\n---\nConsigne.\n');
+  g('init', '-q', '-b', 'main');
+  g('add', '-A');
+  g('commit', '-qm', 'v1');
+  const v1 = g('rev-parse', 'HEAD');
+  const gitCalls = () => { try { return fs.readFileSync(GIT_LOG, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+  const url = 'https://github.com/studio/agents';
+  const lib = (body, headers) => post('/api/v2/agents/libraries', body, headers);
+  try {
+    // une écriture comme les autres : en-tête et jeton
+    assert.equal((await lib({ action: 'add', url }, { 'Content-Type': 'application/json' })).status, 403);
+    assert.equal((await raw('POST', '/api/v2/agents/libraries', { body: { action: 'add', url }, headers: { 'X-Vigie': '1' }, token: null })).status, 401);
+    assert.equal((await raw('GET', '/api/v2/agents/libraries')).status, 405);
+    assert.equal(gitCalls(), 0);
+    // refus : rien de lancé
+    let r = await lib({ action: 'ajoute' });
+    assert.deepEqual([r.status, r.body], [400, { ok: false, error: 'Action : add, update ou remove.' }]);
+    for (const bad of [undefined, 'file:///Users/alex/agents', '/Users/alex/agents', 'http://github.com/studio/agents', '--upload-pack=x']) {
+      r = await lib({ action: 'add', url: bad });
+      assert.deepEqual([r.status, r.body], [400, { ok: false, error: 'Adresse refusée : colle l\'adresse du dépôt (https://github.com/… ou git@github.com:…).' }], String(bad));
+    }
+    r = await lib({ action: 'add', url: 'https://alex:ghp_A1b2C3d4E5f6@github.com/studio/agents' });
+    assert.deepEqual([r.status, r.body.error], [400, 'N\'écris pas d\'identifiant dans l\'adresse : git utilise ceux de ton Mac.']);
+    assert.equal(gitCalls(), 0, 'adresse refusée : git jamais lancé');
+    r = await lib({ action: 'add', url: 'https://github.com/studio/absent' });
+    assert.equal(r.status, 400);
+    assert.ok(r.body.error.startsWith('Dépôt introuvable, ou git n\'a pas accès : vérifie l\'adresse, et que tu peux le cloner (gh auth login, ou ta clé SSH).'), r.body.error);
+    // ajout : clonage, puis la bibliothèque et ses agents
+    r = await lib({ action: 'add', url });
+    assert.equal(r.status, 200, r.text);
+    conforms(r.body, { ok: 'bool', library: Library, message: 'string' });
+    assert.equal(r.body.message, 'Bibliothèque ajoutée : 2 agents.');
+    assert.deepEqual([r.body.library.id, r.body.library.name, r.body.library.url, r.body.library.commit, r.body.library.status, r.body.library.error, r.body.library.agents],
+      ['agents', 'agents', url, v1.slice(0, 7), 'ok', null, 2]);
+    assert.equal(fs.statSync(path.join(DATA, 'agent-libraries.json')).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(path.join(DATA, 'agent-libraries', 'agents')).mode & 0o777, 0o700);
+    r = await lib({ action: 'add', url: `${url}.git` });
+    assert.deepEqual([r.status, r.body.error], [400, LIB_MSG.duplicate]);
+    // la liste : chaque agent avec sa source ; lue sans relancer git
+    const before = gitCalls();
+    r = await get('/api/v2/agents');
+    assert.equal(gitCalls(), before, 'la liste ne lance pas git');
+    conforms(r.body, { ...AgentsList, libraries: arr(Library) });
+    assert.deepEqual(r.body.agents.map((a) => [a.id, a.source]), [
+      ['local', { kind: 'local' }],
+      ['creer-une-page', { kind: 'library', id: 'agents', name: 'agents' }],
+      ['agents-local', { kind: 'library', id: 'agents', name: 'agents' }],
+    ], 'un agent local n\'est jamais remplacé : celui de la bibliothèque prend <bibliothèque>-<dossier>');
+    assert.deepEqual(r.body.libraries.map((l) => [l.id, l.status, l.agents, l.commit]), [['agents', 'ok', 2, v1.slice(0, 7)]]);
+    // lancement d'un agent de la bibliothèque : {{dossier_agent}} est son dossier dans la copie
+    const folder = path.join(CODE, 'page-studio');
+    fs.rmSync(MAC_LOG, { force: true });
+    r = await post('/api/v2/agents/launch', { id: 'creer-une-page', values: { page: 'Accueil' }, folder, surface: 'claude-app' });
+    assert.equal(r.status, 200, r.text);
+    conforms(r.body, AgentLaunch);
+    const agentDir = fs.realpathSync(path.join(DATA, 'agent-libraries', 'agents', 'creer-une-page'));
+    assert.ok(fs.readFileSync(r.body.briefFile, 'utf8').includes(`Modèles : ${agentDir}/modeles. Page : Accueil.`));
+    assert.equal(r.body.prompt, `Lance l'agent « Créer une page » : lis le fichier ${r.body.briefFile} et suis ses consignes, dans le dossier ${folder}.`);
+    // l'auteur publie une nouvelle version : mise à jour demandée
+    w(path.join(repo, 'creer-une-page', 'AGENT.md'), page('Créer une page v2'));
+    g('commit', '-qam', 'v2');
+    const v2 = g('rev-parse', 'HEAD');
+    r = await lib({ action: 'update', id: 'agents' });
+    assert.equal(r.status, 200, r.text);
+    conforms(r.body, { ok: 'bool', libraries: arr(Library), message: 'string' });
+    assert.deepEqual([r.body.message, r.body.libraries[0].commit], ['Bibliothèque à jour : 2 agents.', v2.slice(0, 7)]);
+    assert.equal((await get('/api/v2/agents')).body.agents.find((a) => a.id === 'creer-une-page').name, 'Créer une page v2');
+    r = await lib({ action: 'update' });
+    assert.deepEqual([r.status, r.body.ok, r.body.message], [200, true, 'Bibliothèque à jour : 2 agents.']);
+    r = await lib({ action: 'update', id: 'inconnue' });
+    assert.deepEqual([r.status, r.body], [404, { ok: false, error: LIB_MSG.notFound }]);
+    // dépôt parti : la copie d'avant reste, l'erreur est montrée
+    fs.renameSync(repo, `${repo}-parti`);
+    r = await lib({ action: 'update', id: 'agents' });
+    fs.renameSync(`${repo}-parti`, repo);
+    assert.equal(r.status, 400);
+    assert.ok(r.body.error.startsWith('Mise à jour impossible : dépôt introuvable'), r.body.error);
+    const l = (await get('/api/v2/agents')).body.libraries[0];
+    assert.deepEqual([l.status, l.error, l.commit, l.agents], ['error', r.body.error, v2.slice(0, 7), 2]);
+    // retrait : la bibliothèque, sa copie et ses agents
+    r = await lib({ action: 'remove', id: 'agents' });
+    assert.deepEqual([r.status, r.body], [200, { ok: true, message: 'Bibliothèque retirée.' }]);
+    assert.equal(fs.existsSync(path.join(DATA, 'agent-libraries', 'agents')), false);
+    r = await get('/api/v2/agents');
+    assert.deepEqual([r.body.libraries, r.body.agents.map((a) => a.id)], [[], ['local']]);
+    r = await lib({ action: 'remove', id: 'agents' });
+    assert.deepEqual([r.status, r.body.error], [404, LIB_MSG.notFound]);
+    noSecret(r);
+  } finally {
+    await lib({ action: 'remove', id: 'agents' });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
