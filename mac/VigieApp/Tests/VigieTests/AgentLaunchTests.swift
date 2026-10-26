@@ -36,6 +36,10 @@ struct AgentFolderRuleTests {
             try FileManager.default.createSymbolicLink(atPath: path + "/" + name, withDestinationPath: target)
         }
 
+        func make(_ dir: String) throws {
+            try FileManager.default.createDirectory(atPath: path + "/" + dir, withIntermediateDirectories: true)
+        }
+
         func issue(_ folder: String, parent: String = "~/Code") -> String? {
             AgentFolderRule.issue(folder, parent: parent, home: path)
         }
@@ -164,6 +168,41 @@ struct AgentFolderRuleTests {
             #expect(home.issue("~/Code/depot/chez-moi") == Self.homeItself)
             #expect(home.issue("~/Code/depot/chez-moi/.VIGIE") == Self.reserved(".vigie"))
         }
+    }
+
+    /// Un lien qui mène DANS un dossier réservé, pas seulement vers lui : les parents du chemin réel comptent, comme
+    /// dans le moteur. Dropbox et OneDrive rangent leurs fichiers dans ~/Library/CloudStorage, avec un lien ~/Dropbox.
+    @Test func followsLinksIntoReservedSubfolders() throws {
+        let home = try FakeHome()
+        try home.make("Library/CloudStorage/Dropbox/Clients")
+        try home.make(".ssh/client")
+        try home.link("Dropbox", to: home.path + "/Library/CloudStorage/Dropbox")
+        try home.link("Code/depot/la", to: home.path + "/Library/LaunchAgents")
+        try home.link("Code/depot/vd", to: "../../.vigie/data")
+        try home.link("Code/cles", to: home.path + "/.ssh/client")
+        #expect(home.issue("~/Dropbox/Clients/martin") == Self.reserved("Library"))
+        #expect(home.issue("~/Dropbox/Clients") == Self.reserved("Library"))
+        #expect(home.issue("~/Code/depot/la") == Self.reserved("Library"))
+        #expect(home.issue("~/Code/depot/la/x") == Self.reserved("Library"))
+        #expect(home.issue("~/Code/depot/vd/agents/x") == Self.reserved(".vigie"))
+        #expect(home.issue("~/Code/cles") == Self.reserved(".ssh"))
+        #expect(home.issue("~/Code/cles/projet") == Self.reserved(".ssh"))
+    }
+
+    /// Ce qui doit passer passe encore : un projet ordinaire, un lien vers un dossier ordinaire du dossier perso, et
+    /// ~/Code tout entier relié à un disque externe.
+    @Test func acceptsOrdinaryLinks() throws {
+        let home = try FakeHome()
+        try home.make("Documents/Clients")
+        try home.link("Code/depot/clients", to: "../../Documents/Clients")
+        #expect(home.issue("~/Code/client") == nil)
+        #expect(home.issue("~/Code/depot/clients/martin") == nil)
+        #expect(home.issue("~/Code/depot/clients") == nil)
+
+        let external = try FakeHome(without: ["Code/depot"])
+        try external.link("Code", to: external.outside)
+        #expect(external.issue("~/Code/martin") == nil)
+        #expect(external.issue("~/Code/martin/site") == nil)
     }
 
     /// /System/Volumes/Data<dossier perso> est le dossier perso (le volume des données du Mac), mais son chemin réel

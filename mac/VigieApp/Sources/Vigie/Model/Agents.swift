@@ -200,28 +200,41 @@ enum AgentFolderRule {
         return diskIssue(path, home: home)
     }
 
-    /// Le dossier où mène le chemin, tel que le disque le voit. Un lien peut mener au dossier perso ou à un dossier
-    /// réservé sans que le chemin le dise, et le chemin réel ne ramène pas tout au chemin habituel
-    /// (/System/Volumes/Data/Users/… reste tel quel) : chaque début du chemin déjà là est donc comparé à ces dossiers
-    /// par son identité sur le disque. Juste après le dossier perso, le nom suivant compte aussi, pour un dossier
-    /// réservé pas encore créé.
+    /// Le dossier où mène le chemin, tel que le disque le voit (onDisk dans le moteur). Un lien peut mener au dossier
+    /// perso, à un dossier réservé ou dedans sans que le chemin le dise (~/Dropbox vers ~/Library/CloudStorage) : on
+    /// part donc du chemin réel et on en remonte les parents. Le chemin réel ne ramène pas tout au chemin habituel
+    /// (/System/Volumes/Data/Users/… reste tel quel) : chaque parent est comparé à ces dossiers par son identité sur le
+    /// disque. Au dossier perso, on s'arrête : le nom suivant compte aussi, pour un dossier réservé pas encore créé.
     private static func diskIssue(_ path: String, home: String) -> String? {
         guard let homeID = DiskID(home) else { return nil }
         let reservedIDs = reserved.compactMap { name in DiskID(join(home, name)).map { (name: name, id: $0) } }
-        let parts = path.split(separator: "/").map(String.init)
-        var prefix = ""
-        for (index, part) in parts.enumerated() {
-            prefix += "/" + part
-            guard let id = DiskID(prefix) else { return nil } // la suite n'existe pas encore
+        let parts = realParts(path)
+        for depth in stride(from: parts.count, through: 0, by: -1) {
+            guard let id = DiskID("/" + parts.prefix(depth).joined(separator: "/")) else { continue } // pas encore là
             if let hit = reservedIDs.first(where: { $0.id == id }) { return reservedIssue(hit.name) }
             guard id == homeID else { continue }
-            guard index + 1 < parts.count else {
+            guard depth < parts.count else {
                 return "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
             }
-            let next = fold(parts[index + 1])
-            if let bad = reserved.first(where: { fold($0) == next }) { return reservedIssue(bad) }
+            let next = fold(parts[depth])
+            return reserved.first(where: { fold($0) == next }).map(reservedIssue)
         }
         return nil
+    }
+
+    /// Le chemin réel, en morceaux (realPath dans le moteur) : le plus long début qui existe, résolu par realpath
+    /// (liens compris), plus la suite pas encore créée.
+    private static func realParts(_ path: String) -> [String] {
+        var head = path.split(separator: "/").map(String.init)
+        var tail: [String] = []
+        while true {
+            if let resolved = realpath("/" + head.joined(separator: "/"), nil) {
+                defer { free(resolved) }
+                return String(cString: resolved).split(separator: "/").map(String.init) + tail
+            }
+            guard let last = head.popLast() else { return tail }
+            tail.insert(last, at: 0)
+        }
     }
 
     private static func reservedIssue(_ name: String) -> String {
