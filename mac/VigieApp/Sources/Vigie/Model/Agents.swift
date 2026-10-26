@@ -1,11 +1,13 @@
 import Foundation
 
-/// GET /api/v2/agents : les recettes rangées dans le dossier des agents (<dossier>/<id>/AGENT.md), et le compte sur
-/// lequel partira la conversation (celui des nouvelles conversations).
+/// GET /api/v2/agents : les recettes rangées dans le dossier des agents (<dossier>/<id>/AGENT.md), le compte sur
+/// lequel partira la conversation (celui des nouvelles conversations) et où elle peut s'ouvrir.
 struct AgentLibrary: Decodable, Equatable, Sendable {
     var dir: String?
     @Tolerant var account: AgentAccount?
     @Lossy var agents: [AgentInfo]
+    /// Absent : moteur plus ancien, qui prépare le dossier sans rien ouvrir ni joindre de fichiers.
+    @Tolerant var surfaces: AgentSurfaces?
 }
 
 struct AgentAccount: Decodable, Equatable, Sendable {
@@ -27,11 +29,23 @@ struct AgentInfo: Decodable, Equatable, Sendable, Identifiable {
     var folder: String?
     @Lossy var fields: [AgentField]
     @Lossy var mcp: [AgentMCP]
+    /// Ce que l'agent crée (clé `creates` de l'AGENT.md), en phrases courtes.
+    @Lossy var creates: [String]
     var error: String?
 
     var displayName: String {
         if let name, !name.isEmpty { return name }
         return id
+    }
+
+    /// Ce que l'agent va créer, sans les lignes vides.
+    var willCreate: [String] {
+        creates.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    /// Le champ où glisser des fichiers : le premier long texte, sinon le premier champ d'adresses.
+    var dropField: AgentField? {
+        fields.first { $0.kind == .longtext } ?? fields.first { $0.kind.isMultiline }
     }
 
     /// La phrase du moteur quand l'AGENT.md est illisible (rien à lancer alors).
@@ -61,9 +75,10 @@ struct AgentInfo: Decodable, Equatable, Sendable, Identifiable {
     }
 
     /// Dossier du projet proposé : <dossier parent>/<nom du client en minuscules, sans accents>. Tant que le nom
-    /// n'est pas saisi, il finit par « / » (le nom viendra là). Sans champ d'une ligne : le nom de l'agent.
+    /// n'est pas saisi, il finit par « / » (le nom viendra là). Sans champ d'une ligne, le nom se tape directement
+    /// dans le dossier : il finit par « / » aussi.
     func suggestedFolder(values: [String: String]) -> String {
-        let source = namingField.map { values[$0.id] ?? "" } ?? id
+        let source = namingField.map { values[$0.id] ?? "" } ?? ""
         return parentFolder + (parentFolder.hasSuffix("/") ? "" : "/") + AgentSlug.make(source)
     }
 }
@@ -275,7 +290,7 @@ enum AgentFolderRule {
 
     /// Comme le disque du Mac, qui plie les majuscules à la façon d'Unicode et pas seulement en minuscules : « .SSH »
     /// et « .ſſh » (s long) sont « .ssh », « é » s'écrit d'une seule façon.
-    private static func fold(_ path: String) -> String {
+    static func fold(_ path: String) -> String {
         path.folding(options: .caseInsensitive, locale: nil).precomposedStringWithCanonicalMapping
     }
 
@@ -288,47 +303,5 @@ enum AgentFolderRule {
         guard within(path, home) else { return path }
         let rest = (path as NSString).pathComponents.dropFirst((home as NSString).pathComponents.count)
         return rest.isEmpty ? "~" : "~/" + rest.joined(separator: "/")
-    }
-}
-
-/// Ce qu'a donné « Lancer dans VS Code ».
-enum AgentLaunchOutcome: Equatable, Sendable {
-    /// VS Code s'ouvre sur le dossier : la feuille se ferme et le toast le dit. `link` : Claude Code dans VS Code, à
-    /// ouvrir juste après avec le message préparé (`prompt`, à copier si ce lien ne s'ouvre pas).
-    case opened(message: String, link: URL?, prompt: String)
-    /// Rien n'est lancé (VS Code absent, refus du moteur) : la phrase s'affiche dans la feuille, qui reste ouverte.
-    case refused(String)
-    /// Le dossier est prêt mais VS Code ne s'est pas ouvert : la feuille le dit et propose de copier le message.
-    case notOpened(prompt: String)
-}
-
-/// Les étapes du lancement, avec le moteur et les gestes vers le Mac en paramètres (pour les essais).
-@MainActor
-enum AgentLaunch {
-    // dans la feuille
-    static let noVSCodeMessage = "VS Code n'est pas sur ton Mac : rien n'a été créé. Installe-le avec l'extension Claude Code, puis relance l'agent."
-    static let notOpenedMessage = "VS Code ne s'est pas ouvert. Le dossier est prêt : ouvre-le dans VS Code, puis colle le message dans Claude Code et envoie-le."
-    // dans le toast, une fois la feuille fermée
-    static let openedMessage = "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent"
-    static let linkFailedMessage = "Claude Code ne s'est pas ouvert dans VS Code : le message est copié, colle-le dans Claude Code et envoie-le"
-
-    /// VS Code d'abord (sans lui, le moteur n'est pas appelé : rien n'est créé), puis le moteur prépare le dossier,
-    /// puis VS Code s'ouvre dessus.
-    static func run(hasVSCode: Bool, folder: String,
-                    prepare: () async -> Result<WriteResult, ClientError>,
-                    openFolder: (String) -> Bool) async -> AgentLaunchOutcome {
-        guard hasVSCode else { return .refused(noVSCodeMessage) }
-        let result: WriteResult
-        switch await prepare() {
-        case .success(let prepared): result = prepared
-        case .failure(let error): return .refused(error.message)
-        }
-        let target = result.folder ?? folder
-        let prompt = result.prompt ?? result.briefFile.map { "Lis le fichier \($0) et suis ses consignes." }
-            ?? "Lis la consigne rangée dans \(target)/.vigie et suis-la."
-        guard openFolder(target) else { return .notOpened(prompt: prompt) }
-        // seulement l'adresse de Claude Code dans VS Code : rien d'autre ne s'ouvre d'ici
-        let link = result.openUrl.flatMap(URL.init(string:)).flatMap { $0.scheme == "vscode" ? $0 : nil }
-        return .opened(message: result.message ?? openedMessage, link: link, prompt: prompt)
     }
 }

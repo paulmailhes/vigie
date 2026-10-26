@@ -1,0 +1,15 @@
+{
+  "path": "/Users/alex/Code/cabinet-martin",
+  "exists": true,
+  "error": null,
+  "conversations": [
+    {
+      "id": "7c2e4a10-3b5d-4f8e-9a61-2d0c8b4e5f73",
+      "title": "Brief et références du Cabinet Martin",
+      "lastActivity": "2026-10-19T21:05:00.000Z",
+      "running": false,
+      "surface": "vscode"
+    }
+  ],
+  "sources": ["plaquette.pdf", "photos-equipe.zip"]
+}

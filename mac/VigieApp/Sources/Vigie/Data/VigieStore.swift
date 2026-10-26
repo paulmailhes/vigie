@@ -368,6 +368,13 @@ final class VigieStore {
         }
     }
 
+    /// Ce que le moteur sait du dossier d'un projet : existe-t-il, ses conversations, ce qu'il y a dans sources/. Lu
+    /// par la feuille de lancement seulement, quand le dossier change. nil sans réponse (moteur plus ancien,
+    /// injoignable, lecture annulée) : la feuille garde sa propre vérification, sans bandeau.
+    func agentFolder(_ path: String) async -> AgentFolderInfo? {
+        try? await client.get(AgentFolderInfo.route(path), as: AgentFolderInfo.self)
+    }
+
     // MARK: Application des données
 
     private func apply(_ overview: Overview) {
@@ -505,15 +512,17 @@ final class VigieStore {
         }
     }
 
-    /// POST vers le moteur, avec son erreur : pour choisir quoi faire selon la raison d'un refus.
-    func send(_ path: String, _ body: JSONValue) async -> Result<WriteResult, ClientError> {
-        writesInFlight += 1
+    /// POST vers le moteur, avec son erreur : pour choisir quoi faire selon la raison d'un refus. `patient` : la
+    /// réponse peut tarder (lancer un agent, jusqu'à 30 s) ; rien n'est changé d'avance à l'écran, les relevés
+    /// continuent donc pendant l'attente au lieu d'être écartés.
+    func send(_ path: String, _ body: JSONValue, patient: Bool = false) async -> Result<WriteResult, ClientError> {
+        if !patient { writesInFlight += 1 }
         defer {
-            writesInFlight -= 1
+            if !patient { writesInFlight -= 1 }
             lastWriteEnd = .now
         }
         do {
-            return .success(try await client.post(path, body))
+            return .success(try await client.post(path, body, patient: patient))
         } catch {
             let clientError = error as? ClientError ?? .unreadable
             if clientError == .unreachable { update(\.connection, .down) }

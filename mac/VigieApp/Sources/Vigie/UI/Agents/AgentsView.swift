@@ -52,7 +52,7 @@ struct AgentsView: View {
                 }
             } header: {
                 MCPSectionHeader(title: "Tes agents",
-                                 text: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code dans VS Code qui suit sa consigne.")
+                                 text: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.")
             } footer: {
                 footer(state)
             }
@@ -151,7 +151,7 @@ struct AgentRecipeRow: View {
             if agent.canLaunch {
                 Button("Lancer…", action: launch)
                     .glassButton(.primary)
-                    .help("Remplis son formulaire : Vigie prépare le dossier du projet et ouvre la conversation dans VS Code")
+                    .help("Remplis son formulaire : Vigie prépare le dossier du projet et ouvre la conversation dans VS Code ou dans l'app Claude")
             }
         }
         .padding(.vertical, 6)

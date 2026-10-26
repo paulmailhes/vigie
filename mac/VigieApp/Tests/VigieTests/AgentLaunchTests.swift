@@ -240,91 +240,312 @@ struct AgentFolderRuleTests {
     }
 }
 
-/// « Lancer dans VS Code » : VS Code vérifié avant le moteur, refus rendu à la feuille, ouverture vérifiée.
-@MainActor
+/// Ce que dit le moteur avant le lancement : ce que crée l'agent, où il peut s'ouvrir, et ce qu'il y a dans le dossier.
+struct AgentFormTests {
+    @Test func decodesCreatesAndSurfaces() throws {
+        let json = """
+        { "surfaces": { "available": ["vscode", "oups", "claude-app", "vscode"], "chosen": "claude-app" },
+          "agents": [ { "id": "demarrer-projet", "creates": ["Le dossier du projet", "  ", 3, "Le fichier Figma"],
+                        "fields": [ { "id": "brief", "type": "longtext" } ] },
+                      { "id": "ancien" } ] }
+        """
+        let library = try JSONDecoder().decode(AgentLibrary.self, from: Data(json.utf8))
+        // une valeur inconnue (moteur plus récent) ou en double est ignorée
+        #expect(library.surfaces?.available == [.vscode, .claudeApp])
+        #expect(library.surfaces?.chosen == .claudeApp)
+        let agent = try #require(library.agents.first)
+        #expect(agent.willCreate == ["Le dossier du projet", "Le fichier Figma"])
+        #expect(agent.dropField?.id == "brief")
+        #expect(library.agents[1].creates.isEmpty)
+        // moteur plus ancien : ni surfaces ni creates, la feuille marche quand même
+        let old = try JSONDecoder().decode(AgentLibrary.self, from: Data(#"{ "agents": [ { "id": "a" } ] }"#.utf8))
+        #expect(old.surfaces == nil)
+        #expect(old.agents.first?.willCreate == [])
+    }
+
+    @Test func prefersTheLastUsedSurfaceWhileItIsThere() {
+        #expect(AgentSurfaces(available: [.vscode, .claudeApp], chosen: .claudeApp).preferred == .claudeApp)
+        // l'app Claude retirée depuis : le premier disponible
+        #expect(AgentSurfaces(available: [.vscode], chosen: .claudeApp).preferred == .vscode)
+        #expect(AgentSurfaces(available: [.claudeApp], chosen: nil).preferred == .claudeApp)
+        #expect(AgentSurfaces(available: [], chosen: .vscode).preferred == nil)
+    }
+
+    /// Les fichiers se glissent dans le premier long texte ; à défaut, dans le premier champ d'adresses.
+    @Test func picksTheFieldThatTakesFiles() throws {
+        func agent(_ fields: String) throws -> AgentInfo {
+            try JSONDecoder().decode(AgentInfo.self, from: Data(#"{ "id": "a", "fields": [\#(fields)] }"#.utf8))
+        }
+        let mixed = try agent(#"{ "id": "refs", "type": "urls" }, { "id": "client", "type": "text" }, { "id": "notes", "type": "longtext" }"#)
+        #expect(mixed.dropField?.id == "notes")
+        #expect(try agent(#"{ "id": "refs", "type": "urls" }, { "id": "client" }"#).dropField?.id == "refs")
+        #expect(try agent(#"{ "id": "client" }"#).dropField == nil)
+    }
+
+    @Test func decodesTheFolder() throws {
+        let json = """
+        { "path": "/Users/alex/Code/cabinet-martin", "exists": true, "error": null,
+          "conversations": [ { "id": "c1", "title": "Brief", "lastActivity": "2026-10-26T21:09:00.000Z", "running": true, "surface": "vscode" },
+                             { "id": "c2", "title": "", "lastActivity": 1793000000000, "surface": "claude-app" },
+                             { "title": "sans id" } ],
+          "sources": ["charte.pdf", 4, "plaquette.pdf"] }
+        """
+        let info = try JSONDecoder().decode(AgentFolderInfo.self, from: Data(json.utf8))
+        #expect(info.exists && info.problem == nil)
+        #expect(info.conversations.map(\.id) == ["c1", "c2"])
+        #expect(info.conversations[0].running && info.conversations[0].lastActivity != nil)
+        #expect(info.conversations[1].title == nil && !info.conversations[1].running && info.conversations[1].lastActivity != nil)
+        #expect(info.sources == ["charte.pdf", "plaquette.pdf"])
+        #expect(info.note == ("Dossier existant · 2 fichiers dans sources/", false))
+
+        // dossier refusé : la raison en orange, rien à continuer
+        let refused = try JSONDecoder().decode(AgentFolderInfo.self, from: Data("""
+        { "path": "/Users/alex/.ssh", "exists": true, "error": "Dossier refusé : ~/.ssh est réservé (tes clés).",
+          "conversations": [ { "id": "c" } ], "sources": [] }
+        """.utf8))
+        #expect(refused.note == ("Dossier refusé : ~/.ssh est réservé (tes clés).", true))
+        #expect(refused.resumable.isEmpty)
+
+        #expect(AgentFolderInfo(exists: false).note == ("Nouveau dossier : Vigie le crée.", false))
+        #expect(AgentFolderInfo(exists: true).note == ("Dossier existant : Vigie y range la consigne de l'agent.", false))
+        #expect(AgentFolderInfo(exists: true, sources: ["a"]).note.text == "Dossier existant · 1 fichier dans sources/")
+        #expect(AgentFolderInfo(exists: true, sources: Array(repeating: "x", count: 50)).note.text
+            == "Dossier existant · 50 fichiers ou plus dans sources/")
+        // champs absents : rien ne tombe
+        let bare = try JSONDecoder().decode(AgentFolderInfo.self, from: Data("{}".utf8))
+        #expect(!bare.exists && bare.conversations.isEmpty && bare.sources.isEmpty && bare.problem == nil)
+    }
+
+    /// Le chemin entier arrive au moteur, même avec « & », « + » (lu comme une espace sinon) ou « # ».
+    @Test func asksForTheWholePath() {
+        #expect(AgentFolderInfo.route("/Users/alex/Code/cabinet-martin") == "/api/v2/agents/folder?path=/Users/alex/Code/cabinet-martin")
+        let odd = AgentFolderInfo.route("/Users/alex/Code/Martin & Fils+co #2?é=1")
+        #expect(odd == "/api/v2/agents/folder?path=/Users/alex/Code/Martin%20%26%20Fils%2Bco%20%232%3F%C3%A9%3D1")
+        let read = URLComponents(string: "http://127.0.0.1:4777" + odd)?.queryItems?.first { $0.name == "path" }?.value
+        #expect(read == "/Users/alex/Code/Martin & Fils+co #2?é=1")
+    }
+
+    @Test func describesAConversation() throws {
+        let now = try #require(ISODates.parse("2026-10-26T23:10:00Z"))
+        let earlier = ISODates.parse("2026-10-26T21:09:00Z")
+        #expect(AgentConversation(id: "c", title: "Brief", lastActivity: earlier, running: true, surface: "vscode").summary(now: now)
+            == "« Brief » · il y a 2 h · VS Code (en cours)")
+        #expect(AgentConversation(id: "c", surface: "claude-app").summary(now: now) == "Conversation sans titre · l'app Claude")
+        #expect(AgentConversation(id: "c", surface: "terminal").summary(now: now) == "Conversation sans titre · Terminal")
+        #expect(AgentConversation(id: "c", title: "T", running: true, surface: "autre").summary(now: now) == "« T » · en cours")
+    }
+}
+
+/// « Lancer » : la conversation à continuer, le bouton, ce qui part au moteur et ce qu'on fait de sa réponse. C'est le
+/// moteur qui ouvre VS Code ou l'app Claude ; l'app copie seulement le message quand il n'a pas pu être prérempli.
 struct AgentLaunchTests {
+    private static let prompt = "Lance l'agent « Démarrer un projet client » : lis le fichier /Users/alex/Code/cabinet-martin/.vigie/agent-demarrer-projet.md et suis ses consignes, dans le dossier /Users/alex/Code/cabinet-martin."
+
     /// La réponse du moteur à un lancement réussi (lib/agents.mjs, launch).
-    private static let launched = """
-    { "ok": true, "folder": "/Users/alex/Code/cabinet-martin",
-      "briefFile": "/Users/alex/Code/cabinet-martin/.vigie/agent-demarrer-projet.md",
-      "openUrl": "vscode://anthropic.claude-code/open?prompt=Lance%20l'agent",
-      "prompt": "Lance l'agent « Démarrer un projet » : lis le fichier /Users/alex/Code/cabinet-martin/.vigie/agent-demarrer-projet.md et suis ses consignes, dans le dossier /Users/alex/Code/cabinet-martin.",
-      "message": "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent." }
-    """
-
-    private static func result(_ json: String = launched) throws -> WriteResult {
-        try JSONDecoder().decode(WriteResult.self, from: Data(json.utf8))
+    private static func launched(_ opened: String, surface: String = "vscode", message: String? = nil) throws -> WriteResult {
+        let said = message.map { ", \"message\": \"\($0)\"" } ?? ""
+        let json = """
+        { "ok": true, "folder": "/Users/alex/Code/cabinet-martin",
+          "briefFile": "/Users/alex/Code/cabinet-martin/.vigie/agent-demarrer-projet.md",
+          "prompt": "\(prompt)", "surface": "\(surface)", "opened": "\(opened)",
+          "copied": ["sources/charte.pdf", "sources/plaquette (2).pdf"]\(said) }
+        """
+        return try JSONDecoder().decode(WriteResult.self, from: Data(json.utf8))
     }
 
-    @Test func readsThePreparedMessage() throws {
-        let result = try Self.result()
-        #expect(result.prompt?.hasPrefix("Lance l'agent « Démarrer un projet »") == true)
-        #expect(result.folder == "/Users/alex/Code/cabinet-martin")
+    @Test func continuesTheLatestConversationByDefault() {
+        let info = AgentFolderInfo(exists: true, conversations: [AgentConversation(id: "recente"), AgentConversation(id: "ancienne")])
+        #expect(AgentLaunch.session(info, pick: nil, startNew: false) == "recente")
+        #expect(AgentLaunch.session(info, pick: "ancienne", startNew: false) == "ancienne")
+        // une conversation qui n'est plus dans le dossier : la plus récente
+        #expect(AgentLaunch.session(info, pick: "partie", startNew: false) == "recente")
+        #expect(AgentLaunch.session(info, pick: "recente", startNew: true) == nil)
+        #expect(AgentLaunch.session(AgentFolderInfo(exists: true), pick: nil, startNew: false) == nil)
+        // pas de réponse du moteur (plus ancien, injoignable) : nouvelle conversation
+        #expect(AgentLaunch.session(nil, pick: "recente", startNew: false) == nil)
+        let refused = AgentFolderInfo(exists: true, error: "Dossier refusé.", conversations: [AgentConversation(id: "x")])
+        #expect(AgentLaunch.session(refused, pick: "x", startNew: false) == nil)
     }
 
-    /// Sans VS Code, le moteur n'est pas appelé : rien n'est créé, la feuille dit pourquoi.
-    @Test func withoutVSCodeNothingIsCreated() async throws {
-        let result = try Self.result()
-        var prepared = 0
-        var opened: [String] = []
-        let outcome = await AgentLaunch.run(hasVSCode: false, folder: "/Users/alex/Code/cabinet-martin",
-                                            prepare: { prepared += 1; return .success(result) },
-                                            openFolder: { opened.append($0); return true })
-        #expect(outcome == .refused(AgentLaunch.noVSCodeMessage))
-        #expect(prepared == 0)
-        #expect(opened.isEmpty)
+    @Test func namesTheButton() {
+        #expect(AgentLaunch.buttonTitle(surface: .vscode, continuing: false) == "Lancer dans VS Code")
+        #expect(AgentLaunch.buttonTitle(surface: .claudeApp, continuing: false) == "Lancer dans l'app Claude")
+        #expect(AgentLaunch.buttonTitle(surface: .vscode, continuing: true) == "Continuer dans VS Code")
+        #expect(AgentLaunch.buttonTitle(surface: .claudeApp, continuing: true) == "Continuer dans l'app Claude")
+        #expect(AgentLaunch.buttonTitle(surface: nil, continuing: false) == "Lancer")
+    }
+
+    /// `files`, `surface` et `session` ne partent que s'ils disent quelque chose.
+    @Test func sendsOnlyWhatIsChosen() {
+        let full = AgentLaunch.body(agent: "demarrer-projet", values: ["brief": "Bonjour"], folder: "/Users/alex/Code/cabinet-martin",
+                                    files: ["/Users/alex/Downloads/charte.pdf"], surface: .claudeApp, session: "c1")
+        #expect(full == ["id": "demarrer-projet", "values": ["brief": "Bonjour"], "folder": "/Users/alex/Code/cabinet-martin",
+                         "files": ["/Users/alex/Downloads/charte.pdf"], "surface": "claude-app", "session": "c1"])
+        let bare = AgentLaunch.body(agent: "a", values: [:], folder: "/Users/alex/Code/x", files: [], surface: nil, session: nil)
+        #expect(bare == ["id": "a", "values": [:], "folder": "/Users/alex/Code/x"])
+    }
+
+    @Test func readsTheLaunchAnswer() throws {
+        let result = try Self.launched("full")
+        #expect(result.opened == "full")
+        #expect(result.surface == "vscode")
+        #expect(result.copied == ["sources/charte.pdf", "sources/plaquette (2).pdf"])
+        #expect(result.prompt == Self.prompt)
+    }
+
+    /// Message prérempli : rien à copier, la feuille se ferme et le toast dit de l'envoyer.
+    @Test func fullOpeningCopiesNothing() throws {
+        let said = AgentLaunch.outcome(.success(try Self.launched("full", message: "VS Code s'ouvre.")), surface: .vscode)
+        #expect(said == .launched(message: "VS Code s'ouvre.", copy: nil, alert: false))
+        // sans phrase du moteur : celle de l'endroit où il a ouvert (sa réponse prime sur le choix de la feuille)
+        let app = AgentLaunch.outcome(.success(try Self.launched("full", surface: "claude-app")), surface: .vscode)
+        #expect(app == .launched(message: "L'app Claude s'ouvre sur le projet, avec le message prêt : envoie-le.", copy: nil, alert: false))
+    }
+
+    /// Le message n'a pas pu être prérempli : il est copié. Rien ne s'est ouvert : le toast est une alerte.
+    @Test func otherOpeningsCopyThePrompt() throws {
+        let folder = AgentLaunch.outcome(.success(try Self.launched("folder")), surface: .vscode)
+        #expect(folder == .launched(message: "VS Code est ouvert sur le projet, mais Claude Code n'a pas répondu à temps : le message est copié, colle-le dans Claude Code et envoie-le.",
+                                    copy: Self.prompt, alert: false))
+        let resumed = AgentLaunch.outcome(.success(try Self.launched("no-prompt", surface: "claude-app")), surface: .claudeApp)
+        #expect(resumed == .launched(message: "La conversation s'ouvre dans l'app Claude : le message est copié, colle-le (⌘V) et envoie-le.",
+                                     copy: Self.prompt, alert: false))
+        let none = AgentLaunch.outcome(.success(try Self.launched("none")), surface: .vscode)
+        #expect(none == .launched(message: "Le dossier est prêt, mais rien ne s'est ouvert : le message est copié, colle-le dans Claude Code.",
+                                  copy: Self.prompt, alert: true))
+        // une valeur inconnue (moteur plus récent) : la phrase du moteur, et le message copié par prudence
+        let future = AgentLaunch.outcome(.success(try Self.launched("ailleurs", message: "Ouvert ailleurs.")), surface: .vscode)
+        #expect(future == .launched(message: "Ouvert ailleurs.", copy: Self.prompt, alert: false))
+    }
+
+    /// Moteur plus ancien (pas de `opened`) : il a préparé le dossier sans rien ouvrir. Sa phrase (« VS Code s'ouvre »)
+    /// serait fausse : le message est copié, et le toast dit quoi faire et de mettre Vigie à jour.
+    @Test func olderEngineCopiesAndSaysToUpdate() throws {
+        let old = try JSONDecoder().decode(WriteResult.self, from: Data("""
+        { "ok": true, "folder": "/Users/alex/Code/x", "briefFile": "/Users/alex/Code/x/.vigie/agent-a.md",
+          "openUrl": "vscode://anthropic.claude-code/open?prompt=x", "prompt": "Lance l'agent",
+          "message": "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent." }
+        """.utf8))
+        #expect(AgentLaunch.outcome(.success(old), surface: nil) == .launched(message: AgentLaunch.legacyMessage, copy: "Lance l'agent", alert: false))
+        #expect(AgentLaunch.legacyMessage.contains("Mets Vigie à jour"))
+        // sans « prompt » : un message de secours qui nomme la consigne
+        let bare = try JSONDecoder().decode(WriteResult.self, from: Data(
+            #"{ "ok": true, "folder": "/Users/alex/Code/x", "briefFile": "/Users/alex/Code/x/.vigie/agent-a.md" }"#.utf8))
+        #expect(AgentLaunch.outcome(.success(bare), surface: nil)
+            == .launched(message: AgentLaunch.legacyMessage, copy: "Lis le fichier /Users/alex/Code/x/.vigie/agent-a.md et suis ses consignes.", alert: false))
     }
 
     /// Le refus du moteur revient à la feuille (qui le montre et reste ouverte), pas au toast de la fenêtre.
-    @Test func engineRefusalGoesBackToTheSheet() async {
-        var opened = 0
-        let refusal = "Dossier refusé : il doit être dans ton dossier perso."
-        let outcome = await AgentLaunch.run(hasVSCode: true, folder: "/Volumes/Data/martin",
-                                            prepare: { .failure(.refused(refusal)) },
-                                            openFolder: { _ in opened += 1; return true })
-        #expect(outcome == .refused(refusal))
-        #expect(opened == 0)
+    @Test func refusalGoesBackToTheSheet() {
+        let refusal = "Fichier joint introuvable : charte.pdf."
+        #expect(AgentLaunch.outcome(.failure(.refused(refusal)), surface: .vscode) == .refused(refusal))
+        #expect(AgentLaunch.outcome(.failure(.unreachable), surface: .vscode) == .refused(ClientError.unreachable.message))
+    }
+}
 
-        let down = await AgentLaunch.run(hasVSCode: true, folder: "/Users/alex/Code/x",
-                                         prepare: { .failure(.unreachable) }, openFolder: { _ in true })
-        #expect(down == .refused(ClientError.unreachable.message))
+/// Les fichiers joints de la feuille : sans doublon, 50 au plus, retirés à la demande.
+struct AgentAttachmentsTests {
+    private static func file(_ path: String, size: Int64 = 1000, copy: Bool = false) -> AgentAttachment {
+        AgentAttachment(path: path, size: size, isFolder: false, isCopy: copy)
     }
 
-    /// VS Code ne s'ouvre pas : la feuille le dit et propose de copier le message préparé par le moteur.
-    @Test func vsCodeThatDoesNotOpenKeepsTheMessage() async throws {
-        let result = try Self.result()
-        let prompt = try #require(result.prompt)
-        var opened: [String] = []
-        let outcome = await AgentLaunch.run(hasVSCode: true, folder: "~/Code/cabinet-martin",
-                                            prepare: { .success(result) },
-                                            openFolder: { opened.append($0); return false })
-        #expect(outcome == .notOpened(prompt: prompt))
-        // le dossier que le moteur a préparé, pas celui de la feuille
-        #expect(opened == ["/Users/alex/Code/cabinet-martin"])
-        // ouvrir le dossier d'abord : collé dans une autre fenêtre, le message partirait dans un autre projet
-        #expect(AgentLaunch.notOpenedMessage
-            == "VS Code ne s'est pas ouvert. Le dossier est prêt : ouvre-le dans VS Code, puis colle le message dans Claude Code et envoie-le.")
-
-        // moteur sans « prompt » : un message de secours qui nomme la consigne
-        let bare = try Self.result(#"{ "ok": true, "folder": "/Users/alex/Code/x", "briefFile": "/Users/alex/Code/x/.vigie/agent-a.md" }"#)
-        let fallback = await AgentLaunch.run(hasVSCode: true, folder: "/Users/alex/Code/x",
-                                             prepare: { .success(bare) }, openFolder: { _ in false })
-        #expect(fallback == .notOpened(prompt: "Lis le fichier /Users/alex/Code/x/.vigie/agent-a.md et suis ses consignes."))
+    @Test func addsWithoutDuplicates() {
+        var list = AgentAttachments()
+        #expect(list.add([Self.file("/Users/alex/Downloads/charte.pdf"), Self.file("/Users/alex/Downloads/plaquette.pdf")]) == nil)
+        // le même fichier glissé deux fois, ou écrit avec d'autres majuscules (le disque ne les distingue pas)
+        #expect(list.add([Self.file("/Users/alex/Downloads/charte.pdf"), Self.file("/Users/alex/downloads/CHARTE.pdf")]) == nil)
+        #expect(list.paths == ["/Users/alex/Downloads/charte.pdf", "/Users/alex/Downloads/plaquette.pdf"])
+        // la même pièce jointe de Mail déposée deux fois : deux copies, une seule ligne ; même nom, autre taille : une autre
+        let copies = "/private/var/folders/xy/T/vigie-fichiers-joints/A"
+        list.add([Self.file(copies + "/1/devis.pdf", size: 52_000, copy: true)])
+        list.add([Self.file(copies + "/2/devis.pdf", size: 52_000, copy: true)])
+        list.add([Self.file(copies + "/3/devis.pdf", size: 61_000, copy: true)])
+        #expect(list.items.map(\.name) == ["charte.pdf", "plaquette.pdf", "devis.pdf", "devis.pdf"])
+        #expect(list.items.last?.path == copies + "/3/devis.pdf")
     }
 
-    @Test func openedHandsOverTheClaudeCodeLink() async throws {
-        let result = try Self.result()
-        let message = try #require(result.message)
-        let link = try #require(result.openUrl.flatMap(URL.init(string:)))
-        let prompt = try #require(result.prompt)
-        let outcome = await AgentLaunch.run(hasVSCode: true, folder: "/Users/alex/Code/cabinet-martin",
-                                            prepare: { .success(result) }, openFolder: { _ in true })
-        #expect(outcome == .opened(message: message, link: link, prompt: prompt))
+    @Test func removesAndAllowsAddingAgain() {
+        var list = AgentAttachments([Self.file("/Users/alex/a.pdf"), Self.file("/Users/alex/b.pdf")])
+        #expect(list.remove("/Users/alex/a.pdf")?.name == "a.pdf")
+        #expect(list.remove("/Users/alex/absent.pdf") == nil)
+        #expect(list.paths == ["/Users/alex/b.pdf"])
+        list.add([Self.file("/Users/alex/a.pdf")])
+        #expect(list.paths == ["/Users/alex/b.pdf", "/Users/alex/a.pdf"])
+    }
 
-        // seulement Claude Code dans VS Code : une autre adresse ne s'ouvre pas d'ici
-        let other = try Self.result(#"{ "ok": true, "folder": "/Users/alex/Code/x", "openUrl": "https://exemple.test", "prompt": "p" }"#)
-        let safe = await AgentLaunch.run(hasVSCode: true, folder: "/Users/alex/Code/x",
-                                         prepare: { .success(other) }, openFolder: { _ in true })
-        #expect(safe == .opened(message: AgentLaunch.openedMessage, link: nil, prompt: "p"))
+    @Test func stopsAtFifty() {
+        var list = AgentAttachments()
+        #expect(list.add((1...52).map { Self.file("/Users/alex/f\($0).pdf") }) == AgentAttachments.tooMany)
+        #expect(list.items.count == AgentAttachments.maxCount)
+        // un doublon n'est pas un fichier de trop
+        #expect(list.add([Self.file("/Users/alex/f1.pdf")]) == nil)
+    }
+
+    @Test func describesEachLine() {
+        #expect(AgentAttachment(path: "/Users/alex/Projets", size: nil, isFolder: true, isCopy: false).detail == "Dossier")
+        #expect(Self.file("/Users/alex/a.pdf", size: 248_000).detail.contains("248"))
+        #expect(Self.file("/Users/alex/Downloads/Questionnaire client.pdf").name == "Questionnaire client.pdf")
+    }
+
+    /// iCloud Drive, Dropbox et les téléchargements de Mail sont dans ~/Library, que le moteur refuse : Vigie en copie
+    /// les fichiers ; pas un dossier entier.
+    @Test func copiesOnlyFilesFromLibrary() {
+        let home = "/Users/alex"
+        #expect(AgentAttachment.needsCopy("/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/brief.pdf", isFolder: false, home: home))
+        #expect(AgentAttachment.needsCopy("/Users/alex/library/CloudStorage/Dropbox/charte.pdf", isFolder: false, home: home))
+        #expect(!AgentAttachment.needsCopy("/Users/alex/Library/CloudStorage/Dropbox/Clients", isFolder: true, home: home))
+        #expect(!AgentAttachment.needsCopy("/Users/alex/Downloads/brief.pdf", isFolder: false, home: home))
+        #expect(!AgentAttachment.needsCopy("/Volumes/Cle/brief.pdf", isFolder: false, home: home))
+    }
+
+    /// Un vrai fichier et un vrai dossier, lus dans le dossier temporaire.
+    @Test func readsFromDisk() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "vigie-essai-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appending(path: "dossier"), withIntermediateDirectories: true)
+        try Data(count: 1234).write(to: root.appending(path: "charte.pdf"))
+        let file = try #require(AgentAttachment.read(root.appending(path: "charte.pdf")))
+        #expect(file.size == 1234 && !file.isFolder && !file.isCopy && file.name == "charte.pdf")
+        let folder = try #require(AgentAttachment.read(root.appending(path: "dossier"), isCopy: true))
+        #expect(folder.isFolder && folder.size == nil && folder.isCopy)
+        #expect(AgentAttachment.read(root.appending(path: "absent.pdf")) == nil)
+    }
+}
+
+/// La lecture du dossier : 400 ms après la dernière frappe, annulée si le dossier change encore.
+@MainActor
+struct AgentFolderCheckTests {
+    @MainActor
+    private final class Log {
+        var slept: [Duration] = []
+        var reads = 0
+    }
+
+    @Test func waitsThenReads() async {
+        let log = Log()
+        let value = await AgentFolderCheck.afterPause(AgentFolderCheck.pause, sleep: { log.slept.append($0) },
+                                                      read: { log.reads += 1; return 7 })
+        #expect(value == 7)
+        #expect(log.slept == [.milliseconds(400)])
+        #expect(log.reads == 1)
+    }
+
+    /// La première lecture (la feuille s'ouvre sur un dossier) part tout de suite.
+    @Test func firstReadDoesNotWait() async {
+        let log = Log()
+        let value = await AgentFolderCheck.afterPause(.zero, sleep: { log.slept.append($0) }, read: { log.reads += 1; return "dossier" })
+        #expect(value == "dossier")
+        #expect(log.slept.isEmpty)
+    }
+
+    /// Une frappe de plus pendant l'attente annule la lecture : le moteur n'est pas appelé.
+    @Test func cancelledDuringThePauseReadsNothing() async {
+        let log = Log()
+        let task = Task { @MainActor in
+            await AgentFolderCheck.afterPause(AgentFolderCheck.pause, read: { log.reads += 1; return 1 })
+        }
+        task.cancel()
+        #expect(await task.value == nil)
+        #expect(log.reads == 0)
     }
 }
