@@ -154,14 +154,24 @@ enum AgentSlug {
 }
 
 /// Le dossier d'un projet, vérifié dans la feuille comme le moteur le vérifiera au lancement (lib/agents.mjs,
-/// projectFolder) : dans le dossier perso mais pas lui-même, hors des dossiers de Vigie, du Mac, de Claude Code et des
-/// clés. Le chemin écrit compte, sans tenir compte des majuscules ni de la façon d'écrire les accents (le disque du Mac
-/// ne les distingue pas), et le dossier où il mène aussi, reconnu sur le disque quel que soit le chemin pris (lien,
-/// /System/Volumes/Data…). Le moteur reste l'arbitre ; ceci grise le bouton avant le clic.
+/// projectFolder) : dans le dossier perso mais pas lui-même, hors des dossiers réservés (Vigie, réglages du Mac et des
+/// apps, Claude Code, clés, Codex). Le chemin écrit compte, sans tenir compte des majuscules ni de la façon d'écrire
+/// les accents (le disque du Mac ne les distingue pas), et le dossier où il mène aussi, reconnu sur le disque quel que
+/// soit le chemin pris (lien, /System/Volumes/Data…). Le moteur reste l'arbitre ; ceci grise le bouton avant le clic.
 enum AgentFolderRule {
-    /// Sous le dossier perso (FORBIDDEN dans lib/agents.mjs).
-    static let reserved = [".vigie", "Library", ".claude", ".claude-comptes", ".ssh", ".codex"]
+    typealias Reserved = (name: String, reason: String)
+
+    /// Sous le dossier perso (FORBIDDEN dans lib/agents.mjs), avec la raison affichée, la même que dans le moteur.
+    static let reserved: [Reserved] = [
+        (".vigie", "dossier de Vigie"),
+        ("Library", "réglages du Mac et des apps, iCloud Drive et Dropbox compris"),
+        (".claude", "réglages de Claude Code"),
+        (".claude-comptes", "comptes Claude Code de Vigie"),
+        (".ssh", "tes clés"),
+        (".codex", "réglages de Codex"),
+    ]
     static let maxLength = 1024
+    private static let homeItself = "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
 
     static var home: String {
         var home = FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)
@@ -183,7 +193,7 @@ enum AgentFolderRule {
     }
 
     /// Ce qui empêche de lancer côté dossier ; nil : rien. `parent` : le dossier parent proposé par l'agent.
-    /// Les phrases du moteur, quand il refuserait la même chose.
+    /// Mêmes refus que le moteur ; phrases parfois plus précises.
     static func issue(_ raw: String, parent: String, home: String = AgentFolderRule.home) -> String? {
         guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Indique le dossier du projet." }
         let path = expanded(raw, home: home)
@@ -192,11 +202,13 @@ enum AgentFolderRule {
         }
         guard path.hasPrefix("/") else { return "Indique un chemin complet, par exemple ~/Code/cabinet-martin." }
         guard within(path, home) else { return "Dossier refusé : il doit être dans ton dossier perso." }
-        if same(path, home) || same(path, expanded(parent, home: home)) {
+        // le dossier perso d'abord, avec la phrase du moteur, même quand l'agent le propose comme dossier parent (~)
+        if same(path, home) { return homeItself }
+        if same(path, expanded(parent, home: home)) {
             return "Choisis un dossier rien que pour ce projet, pas \(tilde(path, home: home)) lui-même."
         }
         // le chemin écrit, même là où rien n'est encore créé
-        if let bad = reserved.first(where: { within(path, join(home, $0)) }) { return reservedIssue(bad) }
+        if let bad = reserved.first(where: { within(path, join(home, $0.name)) }) { return reservedIssue(bad) }
         return diskIssue(path, home: home)
     }
 
@@ -207,17 +219,15 @@ enum AgentFolderRule {
     /// disque. Au dossier perso, on s'arrête : le nom suivant compte aussi, pour un dossier réservé pas encore créé.
     private static func diskIssue(_ path: String, home: String) -> String? {
         guard let homeID = DiskID(home) else { return nil }
-        let reservedIDs = reserved.compactMap { name in DiskID(join(home, name)).map { (name: name, id: $0) } }
+        let reservedIDs = reserved.compactMap { entry in DiskID(join(home, entry.name)).map { (entry: entry, id: $0) } }
         let parts = realParts(path)
         for depth in stride(from: parts.count, through: 0, by: -1) {
             guard let id = DiskID("/" + parts.prefix(depth).joined(separator: "/")) else { continue } // pas encore là
-            if let hit = reservedIDs.first(where: { $0.id == id }) { return reservedIssue(hit.name) }
+            if let hit = reservedIDs.first(where: { $0.id == id }) { return reservedIssue(hit.entry) }
             guard id == homeID else { continue }
-            guard depth < parts.count else {
-                return "Dossier refusé : choisis un dossier dans ton dossier perso, pas le dossier perso lui-même."
-            }
+            guard depth < parts.count else { return homeItself }
             let next = fold(parts[depth])
-            return reserved.first(where: { fold($0) == next }).map(reservedIssue)
+            return reserved.first(where: { fold($0.name) == next }).map(reservedIssue)
         }
         return nil
     }
@@ -237,8 +247,8 @@ enum AgentFolderRule {
         }
     }
 
-    private static func reservedIssue(_ name: String) -> String {
-        "Dossier refusé : ~/\(name) est réservé (Vigie, réglages du Mac, Claude Code ou clés), choisis un autre dossier."
+    private static func reservedIssue(_ entry: Reserved) -> String {
+        "Dossier refusé : ~/\(entry.name) est réservé (\(entry.reason)). Choisis un dossier ailleurs, dans ~/Code par exemple."
     }
 
     /// Un dossier sur le disque (volume et numéro), quel que soit le chemin qui y mène ; nil s'il n'est pas là.
@@ -297,7 +307,7 @@ enum AgentLaunchOutcome: Equatable, Sendable {
 enum AgentLaunch {
     // dans la feuille
     static let noVSCodeMessage = "VS Code n'est pas sur ton Mac : rien n'a été créé. Installe-le avec l'extension Claude Code, puis relance l'agent."
-    static let notOpenedMessage = "VS Code ne s'est pas ouvert. Le dossier est prêt : copie le message et envoie-le dans Claude Code."
+    static let notOpenedMessage = "VS Code ne s'est pas ouvert. Le dossier est prêt : ouvre-le dans VS Code, puis colle le message dans Claude Code et envoie-le."
     // dans le toast, une fois la feuille fermée
     static let openedMessage = "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent"
     static let linkFailedMessage = "Claude Code ne s'est pas ouvert dans VS Code : le message est copié, colle-le dans Claude Code et envoie-le"
