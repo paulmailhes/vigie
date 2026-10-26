@@ -114,10 +114,15 @@ for pid in $(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true); do
   esac
 done
 run launchctl bootstrap "$GUI" "$LA/io.github.paulmailhes.vigie.engine.plist"
+# Une app ouverte à la main (installation par Terminal) n'est pas celle de l'agent « menu » : on la ferme, l'agent
+# relance la nouvelle. Jamais quand c'est l'app elle-même qui installe son moteur (VIGIE_FROM_APP).
+if [ -n "$MENU" ] && [ -z "$DRY" ] && [ -z "${VIGIE_FROM_APP:-}" ]; then pkill -x -U "$(id -u)" Vigie 2>/dev/null || true; fi
 if [ -n "$MENU" ]; then run launchctl bootstrap "$GUI" "$LA/io.github.paulmailhes.vigie.menu.plist"; fi
-# Mise à jour d'une app glissée dans Applications : elle vient d'être remplacée, on la relance au second plan.
-if [ -n "$STANDALONE" ] && [ -n "${VIGIE_UPDATE:-}" ] && [ -z "$DRY" ]; then
-  pkill -x Vigie 2>/dev/null || true
+# App glissée dans Applications, remplacée par une mise à jour (de Vigie, ou relancée par Terminal alors qu'elle était
+# ouverte) : on la relance au second plan, sinon l'ancienne resterait ouverte à côté de la nouvelle.
+if [ -n "$STANDALONE" ] && [ -z "$DRY" ] && [ -z "${VIGIE_FROM_APP:-}" ] \
+   && { [ -n "${VIGIE_UPDATE:-}" ] || pgrep -x -U "$(id -u)" Vigie >/dev/null 2>&1; }; then
+  pkill -x -U "$(id -u)" Vigie 2>/dev/null || true
   sleep 1
   open -g "$APP" || true
 fi

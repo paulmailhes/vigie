@@ -1,12 +1,17 @@
 import Foundation
 import Synchronization
 
-/// Jeton d'accès à l'API, posé par le moteur dans ~/.vigie/data/api-token (VIGIE_TOKEN_FILE pour les essais) :
-/// sans lui, le moteur refuse tout sauf son état de santé. Relu quand le moteur le refuse (moteur réinstallé).
+/// Jeton d'accès à l'API, posé par le moteur dans <dossier du moteur>/data/api-token : ~/.vigie, ou le dossier qui
+/// contient l'app (installation par Terminal ou depuis les sources : <dossier>/mac/Vigie.app) ; VIGIE_TOKEN_FILE pour
+/// les essais. Sans lui, le moteur refuse tout sauf son état de santé. Relu quand le moteur le refuse.
 enum APIToken {
     static let file: URL = {
         if let path = ProcessInfo.processInfo.environment["VIGIE_TOKEN_FILE"], !path.isEmpty {
             return URL(filePath: (path as NSString).expandingTildeInPath)
+        }
+        let root = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: root.appending(path: "server.mjs").path) {
+            return root.appending(path: "data/api-token")
         }
         return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".vigie/data/api-token")
     }()
@@ -27,6 +32,8 @@ enum ClientError: Error, Sendable, Equatable {
     case unreachable
     /// Réponse refusée par le moteur, avec sa phrase d'erreur.
     case refused(String)
+    /// Ce qu'on demande n'existe plus (conversation fermée depuis longtemps…), avec la phrase du moteur.
+    case notFound(String)
     /// Réponse illisible.
     case unreadable
     /// Fichier de démonstration manquant.
@@ -35,7 +42,7 @@ enum ClientError: Error, Sendable, Equatable {
     var message: String {
         switch self {
         case .unreachable: "Le moteur de Vigie ne répond pas"
-        case .refused(let text): text
+        case .refused(let text), .notFound(let text): text
         case .unreadable: "Réponse illisible du moteur de Vigie : réessaie"
         case .missingFixture(let name): "Fichier de démonstration absent : \(name)"
         }
@@ -158,7 +165,13 @@ struct VigieClient: Sendable {
                 throw ClientError.refused(error)
             }
         }
-        if http.statusCode == 404 { throw ClientError.refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)") }
+        if http.statusCode == 404 {
+            // « Adresse inconnue. » : la route n'existe pas (moteur trop ancien) ; sinon, c'est l'élément demandé
+            if let error = (try? JSONDecoder().decode(WriteResult.self, from: data))?.error, error != "Adresse inconnue." {
+                throw ClientError.notFound(error)
+            }
+            throw ClientError.refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)")
+        }
         if http.statusCode == 403 { throw ClientError.refused("Le moteur de Vigie a refusé la modification") }
         throw ClientError.refused("Le moteur de Vigie a eu un problème (\(http.statusCode)) : réessaie dans un instant")
     }

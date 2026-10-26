@@ -198,14 +198,14 @@ Toute erreur renvoie `{ "ok": false, "error": "phrase courte" }`, en lecture com
 | Statut | Cas |
 |---|---|
 | 400 | JSON illisible, corps qui n'est pas un objet, valeur refusée, action MCP ou compte refusée, adresse invalide (`//`) |
-| 401 | `X-Vigie-Token` absent ou faux (toute route `/api/` sauf `health`) |
+| 401 | `X-Vigie-Token` absent ou faux (toute route `/api/` sauf `/api/v2/health`) |
 | 403 | hôte autre que 127.0.0.1/localhost, `X-Vigie: 1` absent, `Origin` d'un autre site |
 | 404 | adresse inconnue ; conversation ou question introuvable (une conversation de plus de 48 h n'a plus de détail) |
 | 405 | méthode non prise en charge sur une adresse connue (ex. `GET /api/v2/settings`) |
 | 413 | corps de plus de 1 Mo |
 | 500 | erreur interne (`"Erreur interne de Vigie."`), détail dans le journal du serveur, masqué |
 Toutes les réponses portent `X-Frame-Options: DENY` et une `Content-Security-Policy` (`frame-ancestors 'none'`) ; aucune n'autorise CORS.
-`GET /api/v2/health` → `{ ok, version: 2, indexing, history }` (aussi `/api/health`, lu par `scripts/install.sh`).
+`GET /api/v2/health` → `{ ok, version: 2, indexing, history }` (sans jeton : lu par `scripts/install.sh` pour attendre le moteur).
 
 ### ConversationSummary
 - `accountId` : le compte noté pour la conversation (`data/accounts.json`), sinon `"travail1"` : sans choix noté, le lanceur la reprend sur Travail 1.

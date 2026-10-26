@@ -377,6 +377,7 @@ struct TestRow: View {
     private var result: String {
         switch test.outcome {
         case .pending: return "en cours"
+        case .unknown: return "résultat inconnu"
         case .expectedFail: return "échec attendu"
         case .passed:
             if let passed = test.passed, passed > 0 { return Fmt.count(passed, "réussi") }
@@ -399,6 +400,8 @@ struct TestRow: View {
             RowIcon(symbol: Theme.icon(for: test.testKind))
         case .expectedFail:
             RowIcon(symbol: Icon.testExpectedFail)
+        case .unknown:
+            RowIcon(symbol: "questionmark.circle")
         case .failed:
             Image(systemName: Icon.testFailed)
                 .font(.system(size: 15, weight: .semibold))

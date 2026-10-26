@@ -120,7 +120,7 @@ struct UpdateSettingsView: View {
                 }
                 LabeledContent("Version installée") {
                     if let update = store.updateStatus, update.available != true, let checked = update.checkedAt {
-                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.ago(checked, now: store.now))")
+                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.when(checked, now: store.now))")
                     } else {
                         Text(store.updateStatus?.current ?? "…")
                     }

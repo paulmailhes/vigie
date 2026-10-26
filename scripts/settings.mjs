@@ -63,17 +63,22 @@ for (const ev of Object.keys(hooks)) {
 }
 
 // Nos refus : retirés puis remis à l'installation, retirés à la désinstallation ; ceux de l'utilisateur restent.
+// Une forme inattendue (permissions ou deny qui ne sont pas un objet et une liste) n'est jamais réécrite : on avertit.
 const perms = settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions) ? settings.permissions : null;
+const denyOk = perms ? (perms.deny == null || Array.isArray(perms.deny)) : !('permissions' in settings);
 if (perms && Array.isArray(perms.deny)) {
   perms.deny = perms.deny.filter((r) => !DENY.includes(r));
   if (!perms.deny.length) delete perms.deny;
 }
 if (action === 'install') {
   for (const [ev, { matcher, timeout }] of Object.entries(WANTED)) {
+    if (hooks[ev] !== undefined && !Array.isArray(hooks[ev])) { console.error(`${SETTINGS} : hooks.${ev} n'est pas une liste, Vigie n'y touche pas.`); continue; }
     (hooks[ev] ||= []).push({ matcher, hooks: [{ type: 'command', command: COMMAND, timeout }] });
   }
-  settings.permissions = perms || {};
-  settings.permissions.deny = [...(settings.permissions.deny || []), ...DENY];
+  if (denyOk) {
+    settings.permissions = perms || {};
+    settings.permissions.deny = [...(settings.permissions.deny || []), ...DENY];
+  } else console.error(`${SETTINGS} : permissions de forme inattendue, refus de lecture du jeton de Vigie non posé.`);
   if (!fs.existsSync(STATE_FILE)) writeState({ ...structuredClone(DEFAULT_STATE), autoAccept: process.argv.includes('--on') });
 }
 

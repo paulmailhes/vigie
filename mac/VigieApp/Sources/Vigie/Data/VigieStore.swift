@@ -229,7 +229,8 @@ final class VigieStore {
         while !Task.isCancelled {
             guard windowVisible || isDemo else { return }
             let activity = latestConversations.first { $0.id == id }?.lastActivity
-            if details[id] == nil || activity != seen || ContinuousClock.now - readAt >= .seconds(30) {
+            let missing = details[id] == nil && !gone.contains(id)
+            if missing || activity != seen || ContinuousClock.now - readAt >= .seconds(30) {
                 seen = activity
                 readAt = .now
                 await refreshConversation(id)
@@ -246,15 +247,21 @@ final class VigieStore {
         do {
             let detail = try await client.get("/api/v2/conversation/\(encoded)", as: ConversationDetail.self)
             guard isFresh(started) else { return }
+            gone.remove(id)
             if details[id]?.raw != detail {
                 details[id] = await Task.detached(priority: .userInitiated) { ConversationDetailModel(detail) }.value
                 keepDetails(around: id)
             }
             readSucceeded()
+        } catch ClientError.notFound {
+            gone.insert(id)
         } catch {
             readFailed(error)
         }
     }
+
+    /// Conversations que le moteur ne connaît plus (404) : relues toutes les 30 s seulement.
+    @ObservationIgnored private var gone: Set<String> = []
 
     /// Détails gardés en mémoire : la conversation lue à l'instant et les 3 précédentes.
     @ObservationIgnored private var detailOrder: [String] = []
@@ -444,6 +451,8 @@ final class VigieStore {
             update(\.connection, .down)
         case .refused(let text):
             update(\.connection, .failing(text))
+        case .notFound:
+            break // l'élément n'existe plus : la page le dit, le moteur va bien
         case .unreadable, .missingFixture:
             if lastReadError != clientError.message {
                 lastReadError = clientError.message

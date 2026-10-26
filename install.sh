@@ -44,7 +44,7 @@ trap 'find "$TMP" -delete 2>/dev/null || true' EXIT
 say "… téléchargement de Vigie"
 curl -fsSL "$URL" -o "$TMP/vigie.tar.gz" || stop "Téléchargement impossible ($URL)."
 mkdir -p "$TMP/x"
-tar -xzf "$TMP/vigie.tar.gz" -C "$TMP/x" || stop "Archive illisible."
+tar -xpzf "$TMP/vigie.tar.gz" -C "$TMP/x" || stop "Archive illisible."
 NEW_APP="$TMP/x/mac/Vigie.app"
 ENGINE="$NEW_APP/Contents/Resources/engine"
 [ -d "$NEW_APP" ] && [ -f "$ENGINE/scripts/bootstrap.sh" ] || stop "Archive incomplète."

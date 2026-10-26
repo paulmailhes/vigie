@@ -50,6 +50,15 @@ if [ -n "$NOTARIZE" ]; then
   xcrun stapler staple "$APP" >/dev/null
   rm -f dist/Vigie-notarisation.zip
 fi
+# Les Vigie installés refusent une app d'une autre équipe ou non notarisée (lib/update.mjs, install.sh) : une telle
+# version ne se publie pas. VIGIE_LOCAL=1 : essai local, sans publier.
+TEAM_ID="CQ43U6XX4Z" # même valeur que TEAM_ID de lib/update.mjs
+if [ -z "${VIGIE_LOCAL:-}" ]; then
+  [ -n "$NOTARIZE" ] || { echo "App non notarisée : rien à publier (VIGIE_LOCAL=1 pour un essai local)." >&2; exit 1; }
+  SIG="$(codesign -dv --verbose=2 "$APP" 2>&1 || true)"
+  { printf '%s\n' "$SIG" | grep -qx "TeamIdentifier=$TEAM_ID" && spctl --assess --type execute "$APP" 2>/dev/null; } \
+    || { echo "App non signée par l'équipe de Vigie ou refusée par Gatekeeper : rien à publier." >&2; exit 1; }
+fi
 
 echo "5/6 Archive des mises à jour"
 tar -czf dist/vigie.tar.gz --exclude '.DS_Store' --exclude 'docs/images' "${ENGINE_FILES[@]}" docs mac/Vigie.app

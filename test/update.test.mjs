@@ -157,3 +157,16 @@ test('GitHub injoignable : rien proposé, erreur notée ; sans VERSION, version 
   assert.equal(t2.u.current(), '0.2.5');
   assert.equal((await t2.u.check()).available, true);
 });
+
+test('installation depuis les sources (clone git) : aucune mise à jour proposée ni lancée ; erreur périmée effacée', async () => {
+  const t = setup('0.2.6', [rel('0.2.7')]);
+  fs.mkdirSync(path.join(t.root, '.git'));
+  const u = createUpdater({ root: t.root, dataDir: t.data, fetchImpl: async () => ({ ok: true, json: async () => [rel('0.2.7')] }), spawnImpl: () => { throw new Error('jamais'); } });
+  const s = await u.check({ force: true });
+  assert.equal(s.available, false, 'pas de mise à jour pour un clone');
+  assert.equal(u.install().status, 409);
+  const t2 = setup('0.2.6', [rel('0.2.7')]);
+  fs.writeFileSync(path.join(t2.data, 'update.json'), JSON.stringify({ lastError: 'Mise à jour non installée : x.', releases: [{ version: '0.2.7' }] }));
+  t2.setVersion('0.2.7');
+  assert.equal(t2.u.status().lastError, null, 'à jour par un autre chemin : plus d\'erreur affichée');
+});

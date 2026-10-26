@@ -80,7 +80,7 @@ struct CardData: Equatable {
             case .passed:
                 passedKinds.insert(kind)
                 if testsLastOk == nil { record(run, ok: true) }
-            case .expectedFail:
+            case .expectedFail, .unknown:
                 continue
             case .failed:
                 if testsLastOk == nil { record(run, ok: false) }

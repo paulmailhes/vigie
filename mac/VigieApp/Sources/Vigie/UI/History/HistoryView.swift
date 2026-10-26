@@ -149,7 +149,7 @@ struct HistoryView: View {
                         .foregroundStyle(item.historyStatus.color)
                         .labelStyle(.titleAndIcon)
                 }
-                .width(min: 100, ideal: 130, max: 150)
+                .width(min: 110, ideal: 160, max: 190)
                 TableColumn("Action") { item in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title ?? item.tool ?? "Action").lineLimit(1)

@@ -119,7 +119,7 @@ struct ConversationView: View {
                 ContentUnavailableView {
                     Label("Conversation introuvable", systemImage: "questionmark.bubble")
                 } description: {
-                    Text("Elle date sans doute de plus de 7 jours.")
+                    Text("Elle a sans doute été fermée il y a plus de 48 h.")
                 } actions: {
                     Button("Retour à la vue d'ensemble") { store.route = .overview }
                 }

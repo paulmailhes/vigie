@@ -103,7 +103,7 @@ struct MCPView: View {
         let failed = allHealth.count { $0.contains { $0.mcpStatus == .failed } }
         if failed > 0 { parts.append("\(failed) en échec") }
         if let checked = allHealth.compactMap(MCPStatusStyle.lastCheck).max() {
-            parts.append("vérifié \(Fmt.ago(checked, now: store.now))")
+            parts.append("vérifié \(Fmt.when(checked, now: store.now))")
         }
         return parts.joined(separator: " · ")
     }

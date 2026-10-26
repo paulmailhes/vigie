@@ -194,13 +194,22 @@ extension VigieStore {
     func runInTerminal(_ command: String, cwd: String?) async {
         var body: [String: JSONValue] = ["kind": "terminal", "command": .string(command)]
         if let cwd { body["cwd"] = .string(cwd) }
-        if let result = await write("/api/v2/open", .object(body), quiet: true) {
+        switch await send("/api/v2/open", .object(body)) {
+        case .success(let result):
             show(info: result.message ?? "Terminal ouvert : relis la commande, appuie sur Entrée, puis tape ton mot de passe")
-            return
+        // le moteur explique pourquoi (commande vide, clé masquée…) : on le dit, sans rien copier
+        case .failure(.refused(let text)) where text != "Adresse inconnue.":
+            show(error: text)
+        // moteur trop ancien ou injoignable : copie et Terminal, jamais une commande masquée (elle ne marcherait pas)
+        case .failure:
+            guard !command.contains("••••") else {
+                show(error: "Cette commande contient une clé masquée : relance-la depuis la conversation")
+                return
+            }
+            SystemActions.copy(command)
+            SystemActions.openTerminal()
+            show(info: "Commande copiée : colle-la dans Terminal")
         }
-        SystemActions.copy(command)
-        SystemActions.openTerminal()
-        show(info: "Commande copiée : colle-la dans Terminal")
     }
 
     // MARK: Conversation

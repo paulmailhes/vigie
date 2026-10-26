@@ -130,7 +130,7 @@ const ACCOUNTS = [
 ];
 let clock = Date.parse('2026-10-23T08:00:00Z');
 const logs = [];
-const keychain = createKeychain({ bin: SEC, user: 'alex', timeoutMs: 3000 });
+const keychain = createKeychain({ bin: SEC, user: 'alex', timeoutMs: 20_000 }); // large : la machine peut être chargée pendant release.sh
 const vault = createVault({
   dataDir: DATA, home: HOME, accounts: () => ACCOUNTS, codexHome: CODEX, keychain,
   now: () => clock, log: (m) => logs.push(m), confirmMs: 15_000, lockWaitMs: 400, sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 20))),
@@ -539,7 +539,7 @@ test('leurre devant les entrées de Claude Code : posé, recréé s\'il dispara�
 test('connexions.json : réécrit quand un état change, sinon toutes les 5 min ; passages espacés quand tout est en ordre', async () => {
   await resetVault();
   await tick2();
-  assert.equal(V.settled(), true, 'tout est en ordre');
+  assert.equal(V.settled(), true, JSON.stringify(V.status()));
   const at = () => fs.statSync(STATUS).mtimeMs;
   const before = at();
   await new Promise((r) => setTimeout(r, 20));

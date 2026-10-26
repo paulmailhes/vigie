@@ -86,6 +86,9 @@ fi
 
 # 3. Le moteur : tout est remplacé, sauf data/ (réglages, historique, comptes), node/ (sa copie de Node.js) et
 #    mac/ (l'app, traitée plus haut).
+# Un clone git (installation depuis les sources) n'est jamais remplacé : rsync --delete y effacerait .git et le travail
+# en cours. On le met à jour avec git pull.
+if [ "$SRC" != "$DEST" ] && [ -e "$DEST/.git" ]; then stop "$DEST est un clone git : mets-le à jour avec git pull."; fi
 if [ "$SRC" != "$DEST" ]; then
   rsync -a --delete --exclude data --exclude node --exclude mac "$SRC/" "$DEST/"
 fi

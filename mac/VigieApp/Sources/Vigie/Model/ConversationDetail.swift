@@ -301,13 +301,14 @@ struct TestRun: Decodable, Equatable, Sendable {
 
     var testKind: TestKind { TestKind(raw: kind) }
 
-    enum Outcome: Sendable { case passed, failed, expectedFail, pending }
+    enum Outcome: Sendable { case passed, failed, expectedFail, pending, unknown }
 
+    /// Sans résultat lisible (ok absent : sortie non reconnue, Codex), ce n'est ni une réussite ni un échec.
     var outcome: Outcome {
         if pending == true { return .pending }
         if ok == true { return .passed }
         if expectedFail == true { return .expectedFail }
-        return .failed
+        return ok == false ? .failed : .unknown
     }
 }
 

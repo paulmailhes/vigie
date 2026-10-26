@@ -701,6 +701,22 @@ test('settings.mjs : branche, rebranche et débranche sans toucher au reste', ()
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 });
 
+test('settings.mjs : permissions ou hooks de forme inattendue jamais écrasés, installation menée quand même', () => {
+  for (const extra of [{ permissions: { deny: 'x' } }, { permissions: { deny: {} } }, { permissions: 'x' }, { hooks: { PreToolUse: {} } }]) {
+    const home = fs.mkdtempSync(path.join(TMP, 'home-'));
+    const data = fs.mkdtempSync(path.join(TMP, 'data-'));
+    const file = path.join(home, '.claude', 'settings.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(extra), { mode: 0o600 });
+    const r = spawnSync(process.execPath, [SETTINGS_SCRIPT, 'install'], { encoding: 'utf8', env: settingsEnv(home, data) });
+    assert.equal(r.status, 0, JSON.stringify(extra) + r.stderr);
+    const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (extra.permissions !== undefined) assert.deepEqual(s.permissions, extra.permissions, 'gardées telles quelles');
+    if (extra.hooks) assert.deepEqual(s.hooks.PreToolUse, {}, 'gardé tel quel');
+    assert.ok(s.hooks.PermissionRequest?.length, 'le reste du hook est branché');
+  }
+});
+
 test('settings.mjs : fichier absent ou illisible', () => {
   const home = fs.mkdtempSync(path.join(TMP, 'home-'));
   const data = fs.mkdtempSync(path.join(TMP, 'data-'));
