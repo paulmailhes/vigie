@@ -18,6 +18,8 @@ set -euo pipefail
 REPO="paulmailhes/vigie"
 DEST="${VIGIE_HOME:-$HOME/.vigie}"
 URL="${VIGIE_TARBALL:-https://github.com/$REPO/releases/latest/download/vigie.tar.gz}"
+# Un clone git (installation depuis les sources) se met à jour avec git pull, jamais par ici.
+if [ -e "$DEST/.git" ]; then printf '\n%s\n' "$DEST est un clone git : mets-le à jour avec git pull." >&2; exit 1; fi
 
 say() { printf '%s\n' "$*"; }
 stop() { printf '\n%s\n' "$*" >&2; exit 1; }

@@ -1,30 +1,44 @@
 import Foundation
 import Synchronization
 
-/// Jeton d'accès à l'API, posé par le moteur dans <dossier du moteur>/data/api-token : ~/.vigie, ou le dossier qui
-/// contient l'app (installation par Terminal ou depuis les sources : <dossier>/mac/Vigie.app) ; VIGIE_TOKEN_FILE pour
-/// les essais. Sans lui, le moteur refuse tout sauf son état de santé. Relu quand le moteur le refuse.
+/// Jeton d'accès à l'API, posé par le moteur dans <dossier du moteur>/data/api-token. Sans lui, le moteur refuse tout
+/// sauf son état de santé. Emplacements possibles : VIGIE_TOKEN_FILE seul (essais) ; sinon le dossier qui contient
+/// l'app quand un moteur y est (installation par Terminal ou depuis les sources : <dossier>/mac/Vigie.app), puis
+/// ~/.vigie. Le premier lisible sert ; sur un refus, les autres sont essayés et celui qui passe est retenu (moteur
+/// réinstallé, ou app d'un dossier de sources alors que le moteur qui tourne est celui de ~/.vigie).
 enum APIToken {
-    static let file: URL = {
+    static let files: [URL] = {
         if let path = ProcessInfo.processInfo.environment["VIGIE_TOKEN_FILE"], !path.isEmpty {
-            return URL(filePath: (path as NSString).expandingTildeInPath)
+            return [URL(filePath: (path as NSString).expandingTildeInPath)]
         }
+        let home = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".vigie/data/api-token")
         let root = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
-        if FileManager.default.fileExists(atPath: root.appending(path: "server.mjs").path) {
-            return root.appending(path: "data/api-token")
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".vigie/data/api-token")
+        let local = root.appending(path: "data/api-token")
+        guard FileManager.default.fileExists(atPath: root.appending(path: "server.mjs").path),
+              local.standardizedFileURL.path != home.standardizedFileURL.path else { return [home] }
+        return [local, home]
     }()
     private static let cache = Mutex<String?>(nil)
 
-    static func current(reload: Bool = false) -> String? {
+    private static func read(_ url: URL) -> String? {
+        let text = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text?.isEmpty == false ? text : nil
+    }
+
+    static func current() -> String? {
         cache.withLock { value in
-            if value == nil || reload {
-                value = (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+            if value == nil { value = files.lazy.compactMap(read).first }
             return value
         }
     }
+
+    /// Après un refus : les jetons lisibles autres que celui refusé.
+    static func others(than refused: String?) -> [String] {
+        var seen: Set<String> = refused.map { [$0] } ?? []
+        return files.compactMap(read).filter { seen.insert($0).inserted }
+    }
+
+    static func remember(_ token: String) { cache.withLock { $0 = token } }
 }
 
 enum ClientError: Error, Sendable, Equatable {
@@ -154,9 +168,14 @@ struct VigieClient: Sendable {
     // MARK: Réseau
 
     private static func send(_ request: URLRequest, acceptErrorBody: Bool = false) async throws -> Data {
-        var (data, http) = try await exchange(request, token: APIToken.current())
-        if http.statusCode == 401, let fresh = APIToken.current(reload: true) {
-            (data, http) = try await exchange(request, token: fresh)
+        let token = APIToken.current()
+        var (data, http) = try await exchange(request, token: token)
+        // refusé (avant toute action du moteur : rejouer un POST ne fait rien deux fois) : les autres jetons possibles
+        if http.statusCode == 401 {
+            for other in APIToken.others(than: token) {
+                (data, http) = try await exchange(request, token: other)
+                if http.statusCode != 401 { APIToken.remember(other); break }
+            }
         }
         if (200..<300).contains(http.statusCode) { return data }
         if http.statusCode == 401 { throw ClientError.refused("Vigie n'a plus accès à son moteur : quitte Vigie et rouvre-le") }

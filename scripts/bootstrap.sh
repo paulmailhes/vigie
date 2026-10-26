@@ -17,6 +17,9 @@ say() { printf '%s\n' "$*"; }
 stop() { printf '\n%s\n' "$*" >&2; exit 1; }
 TMP="$(mktemp -d)"
 trap 'find "$TMP" -delete 2>/dev/null || true' EXIT
+# Un clone git (installation depuis les sources) n'est jamais touché, ni son app ni son moteur : rsync --delete y
+# effacerait .git et le travail en cours. On le met à jour avec git pull.
+if [ "$SRC" != "$DEST" ] && [ -e "$DEST/.git" ]; then stop "$DEST est un clone git : mets-le à jour avec git pull."; fi
 
 # 1. Node.js : celui du PATH, sinon les emplacements habituels (Homebrew, Volta, nvm), sinon la copie de Vigie.
 node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 20 ]; }
@@ -86,9 +89,6 @@ fi
 
 # 3. Le moteur : tout est remplacé, sauf data/ (réglages, historique, comptes), node/ (sa copie de Node.js) et
 #    mac/ (l'app, traitée plus haut).
-# Un clone git (installation depuis les sources) n'est jamais remplacé : rsync --delete y effacerait .git et le travail
-# en cours. On le met à jour avec git pull.
-if [ "$SRC" != "$DEST" ] && [ -e "$DEST/.git" ]; then stop "$DEST est un clone git : mets-le à jour avec git pull."; fi
 if [ "$SRC" != "$DEST" ]; then
   rsync -a --delete --exclude data --exclude node --exclude mac "$SRC/" "$DEST/"
 fi

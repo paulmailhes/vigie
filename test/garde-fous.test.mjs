@@ -26,6 +26,12 @@ test('tout le dossier de Vigie installé et ce qui le lance : retenus', () => {
   assert.equal(bash('cp x.mjs ~/.vigie/lib/approvals.mjs'), 'config-claude-shell');
   assert.equal(bash('perl -pi -e s/a/b/ ~/.claude/settings.json'), 'config-claude-shell');
   assert.equal(bash('rm -rf ~/.vigie'), 'config-claude-shell');
+  for (const c of ['rm -rf ~/.ssh', 'rm -rf ~/.ssh/', 'rm -rf "$HOME/.ssh"', 'rm -f ~/.ssh/id_ed25519', 'rm ~/.ssh/id_*', 'cp ./deploy_key ~/.ssh/id_ed25519',
+    'mv ~/.ssh/id_rsa /tmp/', 'cat k > ~/.ssh/id_rsa', 'mv ~/.ssh ~/.ssh.bak']) {
+    assert.equal(bash(c), 'config-claude-shell', c);
+  }
+  assert.equal(rule('Write', { file_path: `${home}/.ssh/id_ed25519`, content: 'x' }), 'config-claude');
+  assert.equal(rule('Write', { file_path: `${home}/.ssh/known_hosts`, content: 'x' }), null);
   // le code d'un projet, même nommé « vigie-quelque-chose », reste libre
   assert.equal(rule('Write', { file_path: `${home}/Code/vigie-site/lib/state.mjs`, content: 'x' }), null);
   assert.equal(rule('Edit', { file_path: `${home}/Code/projet/notes.md`, old_string: 'a', new_string: 'b' }), null);
@@ -87,12 +93,19 @@ test('scripts téléchargés lancés autrement qu\'en tuyau, options avant la so
 test('jeton d\'accès de Vigie : ses lectures courantes sont retenues, même par une commande de lecture', () => {
   for (const c of ['cat ~/.vigie/data/api-token', 'cat ~/.vigie/data/*token*', 'cd ~/.vigie/data && cat api*', 'cat ../data/api-tok*',
     'D=~/.vigie/data; cat $D/api-token', 'cat ./api-token', 'cat ~/.vigie/data//api-token', 'cat ~/.vigie/*/api-token',
+    'cd ~/.vigie && cat */api-token', 'cd ~/.vigie; cat d*/api-token', 'cat ~/.vigie/data/API-TOKEN', 'cat ~/.vigie/data/api\\-token',
     'node -e "require(\'fs\').readFileSync(\'api-token\')"']) {
     assert.equal(bash(c), 'jeton-vigie', c);
     assert.equal(readOnlyShell('Bash', { command: c }), false, `${c} : jamais rangée dans les lectures anodines`);
   }
   assert.equal(rule('Read', { file_path: `${home}/.vigie/data/api-token` }), 'jeton-vigie-fichier');
   assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/data` }), 'jeton-vigie-fichier');
+  assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/data/` }), 'jeton-vigie-fichier');
+  assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie` }), 'jeton-vigie-fichier');
+  assert.equal(rule('Glob', { pattern: '**/api-token' }), 'jeton-vigie-fichier');
+  assert.equal(rule('Glob', { pattern: '**/api-token.ts' }), null, 'un fichier de projet');
+  assert.equal(rule('Read', { file_path: `${home}/.vigie/data/state.json` }), null);
+  assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/lib` }), null);
 });
 
 test('pas de faux positifs au quotidien : --api-token, X-Api-Token, api-token.ts, known_hosts, droits des clés', () => {
@@ -104,7 +117,12 @@ test('pas de faux positifs au quotidien : --api-token, X-Api-Token, api-token.ts
   // le mot cherché sans guillemets reste retenu : on ne sait pas s'il désigne le fichier de Vigie
   assert.equal(bash('grep -rn api-token ~/.vigie/data'), 'jeton-vigie');
   assert.equal(rule('Read', { file_path: `${home}/Code/projet/src/api-token.ts` }), null);
+  for (const c of ['cat src/*/api-token/index.ts', 'ls packages/*/api-token.ts', 'chmod 600 ~/.ssh/id_ed25519', 'chmod 700 ~/.ssh', 'mkdir -p ~/.ssh',
+    'cp id_ed25519.pub ~/.ssh/id_ed25519.pub', 'ssh -i ~/.ssh/id_ed25519 nas', 'ls -la ~/.ssh > liste.txt']) {
+    assert.equal(bash(c), null, c);
+  }
   assert.equal(rule('Grep', { pattern: 'api-token', path: `${home}/Code/projet` }), null);
+  assert.equal(rule('Grep', { pattern: 'x', glob: '**/api-token.ts', path: `${home}/Code/projet` }), null);
 });
 
 test('commandes de Codex sous d\'autres noms (exec_command, shell…) : mêmes règles', () => {
@@ -125,6 +143,9 @@ test('commande démesurée : jugée vite (pas de recherche quadratique)', () => 
   const t0 = performance.now();
   bash(long);
   bash(`${'4777 '.repeat(20_000)}`);
+  bash('security ' + '-p "x" '.repeat(40) + 'list');
+  bash('security ' + '-p '.repeat(30_000));
+  bash('security ' + '-p - '.repeat(30_000));
   assert.ok(performance.now() - t0 < 1500, `${Math.round(performance.now() - t0)} ms`);
 });
 
