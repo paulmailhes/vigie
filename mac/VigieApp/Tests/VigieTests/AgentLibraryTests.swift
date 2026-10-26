@@ -29,6 +29,8 @@ struct AgentLibraryTests {
         #expect(page.agents[0].source?.libraryID == "studio-agents")
         #expect(page.agents[5].source?.libraryID == "outils")
         #expect(page.agents.filter { $0.source?.isLibrary == true }.map(\.id) == ["demarrer-projet", "sans-nom"])
+        // le genre dit par le moteur est gardé (il repart au lancement) ; illisible : local
+        #expect(page.agents.map { $0.source?.kind } == ["library", "local", nil, "local", "plugin", "library", "library", nil])
         // un agent d'une bibliothèque se lance comme un autre
         #expect(page.agents.allSatisfy { $0.canLaunch })
     }
@@ -113,6 +115,26 @@ struct AgentLibraryTests {
             == "Mise à jour il y a 2 h · 2 agents")
     }
 
+    /// « propriétaire/dépôt » (deux dépôts du même nom restent distincts) : à l'écran, coupé après « / » s'il faut deux
+    /// lignes, jamais après un trait d'union.
+    @Test func namesALibraryByOwnerAndRepository() throws {
+        let json = """
+        { "agents": [ { "id": "a", "source": { "kind": "library", "id": "studio-agents", "name": "studio/agents" } },
+                      { "id": "b", "source": { "kind": "library", "id": "agents", "name": "alex/agents" } } ],
+          "libraries": [ { "id": "studio-agents", "name": "studio/agents" }, { "id": "agents", "name": "alex/agents" } ] }
+        """
+        let page = try JSONDecoder().decode(AgentsPage.self, from: Data(json.utf8))
+        #expect(page.libraries?.map(\.displayName) == ["studio/agents", "alex/agents"])
+        #expect(page.agents.map(\.libraryName) == ["studio/agents", "alex/agents"])
+
+        #expect(AgentLibraryName.wrapping("studio/agents") == "studio/\u{200B}agents")
+        #expect(AgentLibraryName.wrapping("mon-studio/agents-figma") == "mon-\u{2060}studio/\u{200B}agents-\u{2060}figma")
+        #expect(AgentLibraryName.wrapping("agents") == "agents")
+        // les caractères ajoutés ne se voient pas : le texte affiché reste le nom
+        let shown = AgentLibraryName.wrapping("mon-studio/agents-figma").unicodeScalars.filter { !["\u{200B}", "\u{2060}"].contains($0) }
+        #expect(String(String.UnicodeScalarView(shown)) == "mon-studio/agents-figma")
+    }
+
     @Test func shortensTheAddress() {
         #expect(AgentLibraryAddress.short("https://github.com/studio/agents") == "github.com/studio/agents")
         #expect(AgentLibraryAddress.short("https://github.com/studio/agents.git") == "github.com/studio/agents")
@@ -179,6 +201,63 @@ struct AgentLibraryTests {
         #expect(AgentLibraryAddress.check("https://alex:ghp_jeton@github.com/studio/agents")
             == .refused(AgentLibraryAddress.credentials))
         #expect(AgentLibraryAddress.check("https://alex@github.com/studio/agents") == .refused(AgentLibraryAddress.credentials))
+    }
+
+    /// L'adresse d'une page du dépôt, copiée du navigateur : refusée avec la phrase qui dit quoi coller.
+    @Test func refusesTheAddressOfAPage() {
+        for address in ["https://github.com/studio/agents/tree/main", "https://github.com/studio/agents/blob/main/AGENT.md",
+                        "https://gitlab.com/groupe/agents/-/tree/main", "github.com/studio/agents/tree/main"] {
+            #expect(AgentLibraryAddress.check(address) == .refused(AgentLibraryAddress.page), "\(address)")
+        }
+        // un dépôt qui s'appelle « tree » ou « blob » reste un dépôt
+        #expect(AgentLibraryAddress.check("https://github.com/studio/tree") == .ready("https://github.com/studio/tree"))
+        #expect(AgentLibraryAddress.check("https://github.com/blob/agents") == .ready("https://github.com/blob/agents"))
+    }
+
+    // MARK: Ajouter
+
+    /// La réponse du moteur : ajoutée, refusée (la phrase dans la feuille), ou délai dépassé (la liste relue dira).
+    @Test func readsTheAddAnswer() {
+        #expect(AgentLibraryAdd.outcome(.success(WriteResult(ok: true, message: "Bibliothèque ajoutée : 3 agents."))) == .added)
+        #expect(AgentLibraryAdd.outcome(.failure(.timedOut)) == nil)
+        #expect(AgentLibraryAdd.outcome(.failure(.refused("Cette bibliothèque est déjà là."))) == .refused("Cette bibliothèque est déjà là."))
+        // dans la feuille, le bandeau « Relancer » est caché : la phrase dit où il est
+        #expect(AgentLibraryAdd.outcome(.failure(.unreachable)) == .refused(AgentLibraryAdd.unreachable))
+        #expect(AgentLibraryAdd.unreachable.contains("Relancer"))
+    }
+
+    /// Délai dépassé : le moteur continue. La liste relue a la bibliothèque (adresse sous une autre forme comprise) :
+    /// ajoutée ; sinon toujours en cours, sans parler de panne.
+    @Test func afterATimeoutLooksForTheLibrary() throws {
+        func page(_ libraries: String) throws -> AgentsPage {
+            try JSONDecoder().decode(AgentsPage.self, from: Data(#"{ "agents": [], "libraries": \#(libraries) }"#.utf8))
+        }
+        let arrived = try page(#"[ { "id": "outils", "url": "https://github.com/studio/outils" },"#
+            + #" { "id": "studio-agents", "url": "https://github.com/Studio/Agents.git" } ]"#)
+        let url = "git@github.com:studio/agents.git"
+        #expect(AgentLibraryAdd.afterTimeout(url: url, before: ["outils"], page: arrived) == .added)
+        #expect(AgentLibraryAdd.afterTimeout(url: "https://github.com/studio/agents/", before: [], page: arrived) == .added)
+        // pas encore là
+        #expect(AgentLibraryAdd.afterTimeout(url: "https://github.com/studio/autres", before: ["outils"], page: arrived) == .stillRunning)
+        #expect(AgentLibraryAdd.afterTimeout(url: url, before: [], page: try page("[]")) == .stillRunning)
+        // déjà là avant l'envoi : ce n'est pas cet ajout
+        #expect(AgentLibraryAdd.afterTimeout(url: url, before: ["outils", "studio-agents"], page: arrived) == .stillRunning)
+        // relecture ratée, ou moteur sans bibliothèques
+        #expect(AgentLibraryAdd.afterTimeout(url: url, before: [], page: nil) == .stillRunning)
+        #expect(AgentLibraryAdd.afterTimeout(url: url, before: [], page: try JSONDecoder().decode(AgentsPage.self, from: Data(#"{ "agents": [] }"#.utf8)))
+            == .stillRunning)
+        #expect(AgentLibraryAdd.stillRunning == "Toujours en cours : attends un instant, puis rouvre la page Agents.")
+        #expect(AgentLibraryAdd.added == "Bibliothèque ajoutée.")
+    }
+
+    @Test func recognizesAnAddressWhateverItsForm() {
+        let key = AgentLibraryAddress.key("https://github.com/studio/agents")
+        #expect(key == "github.com/studio/agents")
+        for same in ["https://github.com/studio/agents.git", "https://GitHub.com/Studio/Agents/", "git@github.com:studio/agents.git",
+                     "ssh://git@github.com/studio/agents"] {
+            #expect(AgentLibraryAddress.key(same) == key, "\(same)")
+        }
+        #expect(AgentLibraryAddress.key("https://github.com/alex/agents") != key)
     }
 
     // MARK: Retirer

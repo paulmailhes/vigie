@@ -421,7 +421,9 @@ extension VigieStore {
     /// consigne remplie, puis ouvre VS Code ou l'app Claude, une fois la fenêtre du projet prête (jusqu'à 30 s :
     /// sinon le message partirait dans une autre fenêtre). Le message n'a pas pu être prérempli : il est copié ici.
     /// Un refus revient à la feuille, qui le montre et reste ouverte (le toast de la fenêtre serait caché derrière
-    /// elle) ; le reste s'affiche ici, une fois la feuille fermée.
+    /// elle) ; le reste s'affiche ici, une fois la feuille fermée. `agent` : celui que montre le formulaire ; sa source
+    /// part avec le lancement, le moteur refuse si l'agent de cet id vient d'ailleurs depuis (bibliothèque retirée,
+    /// conflit de noms), et la liste relue montre le nouvel agent.
     func launchAgent(_ agent: AgentInfo, values: [String: String], folder: String, files: [String],
                      surface: AgentSurface?, session: String?) async -> AgentLaunchOutcome {
         if isDemo {
@@ -429,7 +431,7 @@ extension VigieStore {
             show(info: "Démonstration : rien n'a été créé (pour de vrai, \(place) s'ouvrirait sur \(Fmt.shortPath(folder)))")
             return .launched(message: "", copy: nil, alert: false)
         }
-        let body = AgentLaunch.body(agent: agent.id, values: values, folder: folder, files: files,
+        let body = AgentLaunch.body(agent: agent.id, source: agent.source, values: values, folder: folder, files: files,
                                     surface: surface, session: session)
         let outcome = AgentLaunch.outcome(await send("/api/v2/agents/launch", body, patient: true), surface: surface)
         switch outcome {
@@ -446,22 +448,27 @@ extension VigieStore {
 
     // MARK: Bibliothèques d'agents
 
-    /// Ajoute une bibliothèque : le moteur clone le dépôt (jusqu'à 90 s, délai long), puis la liste se relit. nil :
-    /// ajoutée, la feuille se ferme et le toast dit combien d'agents elle apporte ; sinon la phrase du moteur, que la
-    /// feuille montre et qui la garde ouverte (le toast de la fenêtre serait caché derrière elle).
-    func addAgentLibrary(url: String) async -> String? {
+    /// Ajoute une bibliothèque : le moteur clone le dépôt (jusqu'à 90 s, délai long), puis la liste se relit. Ajoutée :
+    /// la feuille se ferme et le toast dit combien d'agents elle apporte ; refusée : la phrase du moteur, que la feuille
+    /// montre et qui la garde ouverte (le toast de la fenêtre serait caché derrière elle). Pas de réponse dans le délai :
+    /// le moteur continue de son côté ; la liste relue dit si elle est arrivée, sinon la feuille dit d'attendre.
+    func addAgentLibrary(url: String) async -> AgentLibraryAddOutcome {
         if isDemo {
             show(info: "Démonstration : rien n'a été ajouté")
-            return nil
+            return .added
         }
-        switch await send(AgentLibraryInfo.route, ["action": "add", "url": .string(url)], patient: true) {
-        case .success(let result):
-            show(info: result.message ?? "Bibliothèque ajoutée.")
-            await refreshAgents()
-            return nil
-        case .failure(let error):
-            return error.message
+        let before = Set(agentsState?.libraries?.map(\.id) ?? [])
+        let answer = await send(AgentLibraryInfo.route, ["action": "add", "url": .string(url)], patient: true)
+        if let outcome = AgentLibraryAdd.outcome(answer) {
+            if case .success(let result) = answer {
+                show(info: result.message ?? AgentLibraryAdd.added)
+                await refreshAgents()
+            }
+            return outcome
         }
+        let outcome = AgentLibraryAdd.afterTimeout(url: url, before: before, page: await refreshAgents())
+        if outcome == .added { show(info: AgentLibraryAdd.added) }
+        return outcome
     }
 
     /// Met à jour une bibliothèque tout de suite (sinon, toutes les heures) : « en cours » à l'écran pendant l'attente,
@@ -470,7 +477,13 @@ extension VigieStore {
         guard !isDemo else { return }
         setLibraryStatus(library.id, .updating)
         let answer = await send(AgentLibraryInfo.route, ["action": "update", "id": .string(library.id)], patient: true)
-        if case .failure(let error) = answer {
+        switch answer {
+        case .success:
+            break
+        case .failure(.timedOut):
+            // le moteur y travaille encore : la liste relue le dit (« Mise à jour en cours… »), sans message d'erreur
+            break
+        case .failure(let error):
             show(error: error.message)
             // rien n'a été tenté (moteur injoignable, refus) : l'état d'avant, sans attendre la relecture
             setLibraryStatus(library.id, library.status, error: library.error)
@@ -486,7 +499,8 @@ extension VigieStore {
         guard !isDemo else { return }
         let answer = await send(AgentLibraryInfo.route, ["action": "remove", "id": .string(library.id)], patient: true)
         removingLibraries.remove(library.id)
-        if case .failure(let error) = answer {
+        // pas de réponse à temps : le retrait a peut-être eu lieu, la liste relue le dit
+        if case .failure(let error) = answer, error != .timedOut {
             show(error: error.message)
             if let before { patchAgents { $0 = before } }
         }

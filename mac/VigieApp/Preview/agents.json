@@ -19,7 +19,7 @@
       "mcp": [],
       "creates": [],
       "error": "AGENT.md illisible : il manque la ligne « --- » qui ferme l'en-tête. Ouvre le fichier et ajoute-la.",
-      "source": { "kind": "library", "id": "studio-agents", "name": "studio-agents" }
+      "source": { "kind": "library", "id": "studio-agents", "name": "studio/studio-agents" }
     },
     {
       "id": "demarrer-projet",
@@ -47,7 +47,7 @@
         "Le fichier Figma du projet, monté sur le modèle du studio"
       ],
       "error": null,
-      "source": { "kind": "library", "id": "studio-agents", "name": "studio-agents" }
+      "source": { "kind": "library", "id": "studio-agents", "name": "studio/studio-agents" }
     },
     {
       "id": "revue-seo",
@@ -77,7 +77,7 @@
   "libraries": [
     {
       "id": "studio-agents",
-      "name": "studio-agents",
+      "name": "studio/studio-agents",
       "url": "https://github.com/studio/studio-agents",
       "addedAt": "2026-10-12T09:30:00.000Z",
       "updatedAt": "2026-10-19T21:05:00.000Z",

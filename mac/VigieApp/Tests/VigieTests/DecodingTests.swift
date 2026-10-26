@@ -107,6 +107,8 @@ struct DecodingTests {
                 // (dont un illisible, et celui de la feuille), et un agent local
                 let library = try #require(agents.libraries?.first, "\(name)")
                 #expect(library.problem != nil && library.updatedAt != nil && library.commit != nil, "\(name)")
+                // « propriétaire/dépôt », comme le moteur
+                #expect(library.displayName.contains("/"), "\(name)")
                 let fromLibrary = agents.agents.filter { $0.source?.libraryID == library.id }
                 #expect(fromLibrary.count == 2 && agents.agentCount(of: library) == 2, "\(name)")
                 #expect(fromLibrary.contains { !$0.canLaunch } && fromLibrary.contains { $0.canLaunch && $0.dropField != nil }, "\(name)")

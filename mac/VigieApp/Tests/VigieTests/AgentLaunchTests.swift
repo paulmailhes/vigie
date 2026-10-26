@@ -375,14 +375,60 @@ struct AgentLaunchTests {
         #expect(AgentLaunch.buttonTitle(surface: nil, continuing: false) == "Lancer")
     }
 
-    /// `files`, `surface` et `session` ne partent que s'ils disent quelque chose.
+    /// `files`, `surface` et `session` ne partent que s'ils disent quelque chose ; `source`, toujours.
     @Test func sendsOnlyWhatIsChosen() {
-        let full = AgentLaunch.body(agent: "demarrer-projet", values: ["brief": "Bonjour"], folder: "/Users/alex/Code/cabinet-martin",
+        let full = AgentLaunch.body(agent: "demarrer-projet", source: AgentSource(kind: "library", id: "studio-agents", name: "studio/agents"),
+                                    values: ["brief": "Bonjour"], folder: "/Users/alex/Code/cabinet-martin",
                                     files: ["/Users/alex/Downloads/charte.pdf"], surface: .claudeApp, session: "c1")
-        #expect(full == ["id": "demarrer-projet", "values": ["brief": "Bonjour"], "folder": "/Users/alex/Code/cabinet-martin",
-                         "files": ["/Users/alex/Downloads/charte.pdf"], "surface": "claude-app", "session": "c1"])
-        let bare = AgentLaunch.body(agent: "a", values: [:], folder: "/Users/alex/Code/x", files: [], surface: nil, session: nil)
-        #expect(bare == ["id": "a", "values": [:], "folder": "/Users/alex/Code/x"])
+        #expect(full == ["id": "demarrer-projet", "source": ["kind": "library", "id": "studio-agents"], "values": ["brief": "Bonjour"],
+                         "folder": "/Users/alex/Code/cabinet-martin", "files": ["/Users/alex/Downloads/charte.pdf"],
+                         "surface": "claude-app", "session": "c1"])
+        let bare = AgentLaunch.body(agent: "a", source: nil, values: [:], folder: "/Users/alex/Code/x", files: [], surface: nil, session: nil)
+        #expect(bare == ["id": "a", "source": ["kind": "local"], "values": [:], "folder": "/Users/alex/Code/x"])
+    }
+
+    /// `source` : celle de l'agent affiché dans le formulaire, telle que le moteur l'a donnée (le nom en moins) ; le
+    /// moteur refuse si l'agent de cet id vient d'ailleurs depuis l'ouverture.
+    @Test func sendsWhereTheAgentComesFrom() throws {
+        let json = """
+        { "agents": [
+            { "id": "demarrer-projet", "source": { "kind": "library", "id": "studio-agents", "name": "studio/agents" } },
+            { "id": "revue-seo", "source": { "kind": "local" } },
+            { "id": "ancien" },
+            { "id": "illisible", "source": "library" },
+            { "id": "futur", "source": { "kind": "plugin", "id": "x" } },
+            { "id": "sans-id", "source": { "kind": "library", "name": "studio/agents" } } ] }
+        """
+        let page = try JSONDecoder().decode(AgentsPage.self, from: Data(json.utf8))
+        func sent(_ index: Int) -> JSONValue? {
+            let agent = page.agents[index]
+            guard case .object(let body) = AgentLaunch.body(agent: agent.id, source: agent.source, values: [:], folder: "/Users/alex/Code/x",
+                                                            files: [], surface: .vscode, session: nil) else { return nil }
+            return body["source"]
+        }
+        #expect(sent(0) == ["kind": "library", "id": "studio-agents"])
+        // local, moteur plus ancien (pas de source), source illisible : local
+        #expect(sent(1) == ["kind": "local"])
+        #expect(sent(2) == ["kind": "local"])
+        #expect(sent(3) == ["kind": "local"])
+        // un genre que le moteur ajouterait plus tard : renvoyé tel quel, il saura le vérifier
+        #expect(sent(4) == ["kind": "plugin", "id": "x"])
+        // bibliothèque sans id : rien d'inventé (le nom n'est pas un id), le moteur arbitre
+        #expect(sent(5) == ["kind": "library"])
+        #expect(AgentSource().launchValue == ["kind": "local"])
+    }
+
+    /// 409 « Cet agent a changé depuis l'ouverture du formulaire » : la phrase du moteur revient à la feuille, comme
+    /// les autres refus.
+    @Test func changedAgentGoesBackToTheSheet() throws {
+        let changed = "Cet agent a changé depuis l'ouverture du formulaire : ferme-le et rouvre-le."
+        let body = Data(#"{ "ok": false, "error": "\#(changed)" }"#.utf8)
+        let error = VigieClient.refusal(status: 409, data: body, acceptErrorBody: true)
+        #expect(error == .refused(changed))
+        #expect(AgentLaunch.outcome(.failure(error), surface: .vscode) == .refused(changed))
+        // sans phrase du moteur : une phrase qui dit quoi faire
+        #expect(VigieClient.refusal(status: 409, data: Data(), acceptErrorBody: true)
+            == .refused("Le moteur de Vigie a eu un problème (409) : réessaie dans un instant"))
     }
 
     @Test func readsTheLaunchAnswer() throws {
@@ -440,6 +486,32 @@ struct AgentLaunchTests {
         let refusal = "Fichier joint introuvable : charte.pdf."
         #expect(AgentLaunch.outcome(.failure(.refused(refusal)), surface: .vscode) == .refused(refusal))
         #expect(AgentLaunch.outcome(.failure(.unreachable), surface: .vscode) == .refused(ClientError.unreachable.message))
+    }
+}
+
+/// Une requête sans réponse : délai dépassé (le moteur y travaille peut-être encore) ou moteur injoignable ; et les
+/// réponses hors 2xx, en phrases.
+struct ClientErrorTests {
+    @Test func tellsATimeoutFromAnUnreachableEngine() {
+        #expect(VigieClient.transportError(URLError(.timedOut)) == .timedOut)
+        #expect(VigieClient.transportError(URLError(.cannotConnectToHost)) == .unreachable)
+        #expect(VigieClient.transportError(URLError(.networkConnectionLost)) == .unreachable)
+        #expect(VigieClient.transportError(CancellationError()) == .unreachable)
+        #expect(ClientError.timedOut.message.contains("réessaie"))
+    }
+
+    @Test func readsRefusals() {
+        let said = Data(#"{ "ok": false, "error": "Dossier refusé : choisis-en un autre." }"#.utf8)
+        #expect(VigieClient.refusal(status: 400, data: said, acceptErrorBody: true) == .refused("Dossier refusé : choisis-en un autre."))
+        // une lecture ne prend pas la phrase d'un 400
+        #expect(VigieClient.refusal(status: 400, data: said, acceptErrorBody: false)
+            == .refused("Le moteur de Vigie a eu un problème (400) : réessaie dans un instant"))
+        #expect(VigieClient.refusal(status: 404, data: Data(#"{ "error": "Conversation introuvable." }"#.utf8), acceptErrorBody: false)
+            == .notFound("Conversation introuvable."))
+        #expect(VigieClient.refusal(status: 404, data: Data(#"{ "error": "Adresse inconnue." }"#.utf8), acceptErrorBody: false)
+            == .refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)"))
+        #expect(VigieClient.refusal(status: 401, data: said, acceptErrorBody: true)
+            == .refused("Vigie n'a plus accès à son moteur : quitte Vigie et rouvre-le"))
     }
 }
 
