@@ -51,8 +51,9 @@ sample "$P" 15 1 -file /tmp/sample-app.txt   # puis lire « Sort by top of stack
 
 Mesuré le 2026-10-26 avant le ménage : app ≈ 7 % d'un cœur fenêtre ouverte (pointes à 25 %), ≈ 5 Mo téléchargés par
 minute ; moteur ≈ 3 % avec 4 conversations actives ; hook ≈ 3 % (22 lancements par minute) ; rafale de 21 `claude`
-toutes les 20 min (jusqu'à 520 Mo). Objectifs : app fenêtre cachée proche de 0 %, aucune rafale de `claude` hors
-du relevé MCP horaire.
+toutes les 20 min (jusqu'à 520 Mo). Après (0.3.4, même Mac, fenêtre ouverte) : app ≈ 3 % d'un cœur et ≈ 1,3 Mo par
+minute. Objectifs encore à mesurer : app fenêtre cachée proche de 0 %, aucune rafale de `claude` hors du relevé MCP
+horaire.
 
 Ce qui coûte, et la règle qui va avec :
 - **Processus lancés** (`claude mcp list`, `claude -p`) : une fois par heure au plus, un à la fois, priorité basse
