@@ -83,6 +83,11 @@ final class SnapshotRunner {
             await settle(0.9)
             await capture(window, "11-mcp-\(theme)")
 
+            store.route = .agents
+            _ = await waitUntil(seconds: 5) { self.store.agentsState != nil }
+            await settle(0.9)
+            await capture(window, "16-agents-\(theme)")
+
             if let question {
                 store.route = .overview
                 await settle(0.5)
@@ -103,6 +108,9 @@ final class SnapshotRunner {
             await captureAlone(OnboardingView(start: .mcps), "14-accueil-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
             await captureAlone(OnboardingView(start: .ready), "14-accueil-pret-\(theme)", appearance: NSAppearance(named: appearanceName))
             await captureAlone(MCPLibrarySheet(), "15-bibliotheque-mcp-\(theme)", appearance: NSAppearance(named: appearanceName))
+            if let agent = store.agentsState?.agents.first(where: \.canLaunch) {
+                await captureAlone(AgentLaunchSheet(agent: agent), "17-feuille-agent-\(theme)", appearance: NSAppearance(named: appearanceName))
+            }
         }
 
         finish(code: 0, message: "\(written.count) captures dans \(folder.path)")

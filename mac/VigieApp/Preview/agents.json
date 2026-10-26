@@ -1,0 +1,65 @@
+{
+  "dir": "/Users/alex/.vigie/data/agents",
+  "account": {
+    "id": "travail1",
+    "label": "Travail 1"
+  },
+  "agents": [
+    {
+      "id": "creer-page",
+      "name": "Créer une page",
+      "description": null,
+      "icon": null,
+      "folder": "/Users/alex/Code",
+      "fields": [],
+      "mcp": [],
+      "error": "AGENT.md illisible : il manque la ligne « --- » qui ferme l'en-tête. Ouvre le fichier et ajoute-la."
+    },
+    {
+      "id": "demarrer-projet",
+      "name": "Démarrer un projet client",
+      "description": "Brief, références et préparation du premier rendez-vous",
+      "icon": "wand.and.stars",
+      "folder": "/Users/alex/Code",
+      "fields": [
+        {
+          "id": "client",
+          "label": "Nom du client",
+          "type": "text",
+          "required": true,
+          "help": "Il sert aussi à nommer le dossier du projet",
+          "placeholder": "Cabinet Martin"
+        },
+        {
+          "id": "site",
+          "label": "Site actuel",
+          "type": "url",
+          "required": false,
+          "help": "Laisse vide s'il n'y en a pas encore",
+          "placeholder": "https://cabinet-exemple.fr"
+        },
+        {
+          "id": "references",
+          "label": "Sites de référence",
+          "type": "urls",
+          "required": false,
+          "help": "Ceux que le client aime ou cite dans le questionnaire",
+          "placeholder": null
+        },
+        {
+          "id": "questionnaire",
+          "label": "Questionnaire avant le premier rendez-vous",
+          "type": "longtext",
+          "required": false,
+          "help": "Colle le texte tel quel, même long : l'agent en tire le brief et les questions",
+          "placeholder": null
+        }
+      ],
+      "mcp": [
+        { "name": "figma-pro", "status": "connected" },
+        { "name": "webflow-pro", "status": "needs-auth" }
+      ],
+      "error": null
+    }
+  ]
+}

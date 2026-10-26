@@ -85,6 +85,8 @@ struct DetailView: View {
             AccountsView(highlight: id)
         case .mcp:
             MCPView()
+        case .agents:
+            AgentsView()
         case .history:
             HistoryView()
         }

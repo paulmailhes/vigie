@@ -87,6 +87,10 @@ final class VigieStore {
     private(set) var details: [String: ConversationDetailModel] = [:]
     private(set) var mcp: MCPState?
     private(set) var accountsState: AccountsState?
+    /// Les agents (recettes à lancer) et le compte sur lequel ils partiraient.
+    private(set) var agentsState: AgentLibrary?
+    /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
+    private(set) var agentsProblem: String?
     /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
     private(set) var usageSeries: [Int: UsageSeries] = [:]
     /// Le moteur ne fournit pas (encore) GET /api/v2/usage/series.
@@ -332,6 +336,33 @@ final class VigieStore {
             guard isFresh(started) else { return }
             update(\.accountsState, state)
             readSucceeded()
+        } catch {
+            readFailed(error)
+        }
+    }
+
+    /// Suit la page Agents (toutes les 30 s : un AGENT.md ajouté, un MCP connecté entre-temps).
+    func followAgents() async {
+        while !Task.isCancelled {
+            guard windowVisible || isDemo else { return }
+            await refreshAgents()
+            if isDemo { return }
+            try? await Task.sleep(for: .seconds(30), tolerance: .seconds(5))
+        }
+    }
+
+    func refreshAgents() async {
+        if isDemo, agentsState != nil { return }
+        let started = ContinuousClock.now
+        do {
+            let state = try await client.get("/api/v2/agents", as: AgentLibrary.self)
+            guard isFresh(started) else { return }
+            update(\.agentsState, state)
+            update(\.agentsProblem, nil)
+            readSucceeded()
+        } catch ClientError.refused(let text) {
+            // moteur sans la page Agents (trop ancien) : la page le dit ; un bandeau reviendrait toutes les 30 s
+            if !Task.isCancelled { update(\.agentsProblem, text) }
         } catch {
             readFailed(error)
         }
