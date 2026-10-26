@@ -103,7 +103,7 @@ Tu prépares le premier rendez-vous avec {{client}}.
 | `description` | non | une phrase sous le nom |
 | `icon` | non | nom de symbole SF (`wand.and.stars`) |
 | `mcp` | non | MCP nécessaires, par leur nom dans Claude Code (`figma-pro`, ou `Gmail` pour un connecteur claude.ai) ; la page montre leur état |
-| `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance ») : sinon l'agent est listé avec une erreur et ne se lance pas |
+| `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance »), sauf qu'il peut être le dossier perso lui-même (`~` : projets rangés en `~/<client>`) ; sinon l'agent est listé avec une erreur et ne se lance pas |
 | `fields` | non | le formulaire : une liste de champs (30 au plus) |
 
 Chaque champ : `id` (minuscules, chiffres et `_`, commence par une lettre, unique), `label` (obligatoire), `type`
@@ -125,8 +125,9 @@ Un `AGENT.md` mal écrit ne bloque rien : l'agent est listé avec une phrase qui
 guillemets non fermés. »), et ne peut pas être lancé.
 
 **Consigne** : tout ce qui suit l'en-tête. `{{id}}` d'un champ d'une ligne (`text`, `url`) y est remplacé par la
-valeur saisie, telle quelle (« {{client}} — Projet » donne « Cabinet Martin — Projet ») ; en début de ligne, un signe
-Markdown en tête de la valeur (`#`, `` ` ``, `~`, `>`, `-`…) est neutralisé, pour qu'elle n'ouvre ni titre ni bloc.
+valeur saisie, telle quelle (« {{client}} — Projet » donne « Cabinet Martin — Projet »). En début de ligne, même
+derrière `- `, `1. ` ou `> `, un début de valeur qui ouvrirait un titre ou un bloc Markdown (`## `, ```` ``` ````,
+`~~~`, `> `, `- `, `<`…) est neutralisé par une barre oblique inverse. « +33 6… » ou « -20 % » restent tels quels.
 `{{id}}` d'un long texte ou d'une liste d'adresses (`longtext`, `urls`) n'y recopie jamais la valeur : il devient un
 renvoi, « Questionnaire avant le premier rendez-vous » (plus haut, dans « Ce que tu m'as donné »). Un questionnaire
 collé ne peut donc pas écrire ses propres consignes. Champ vide : « (non fourni) ».
@@ -140,10 +141,12 @@ propres fichiers (scripts, images, modèles) et la consigne les cite par `{{doss
 2. **Lancer** ouvre le formulaire et le dossier du projet (proposé : `folder` + le nom du client).
 3. Vigie vérifie le formulaire (champs obligatoires, tailles) et le dossier : dans ton dossier perso, jamais le dossier
    perso lui-même, ni `~/.vigie`, `~/Library`, `~/.claude`, `~/.claude-comptes`, `~/.ssh`, `~/.codex`. Les
-   majuscules ne comptent pas, comme pour le disque du Mac : `~/.SSH` est `~/.ssh`.
+   majuscules ne comptent pas, comme pour le disque du Mac : `~/.SSH` est `~/.ssh`. Un lien, ou un autre chemin du
+   même disque (`/System/Volumes/Data/…`), vers l'un d'eux est refusé aussi.
 4. Vigie crée le dossier s'il manque, et y écrit `.vigie/agent-<id>.md` : le nom de l'agent, la date, ce que tu as
-   saisi, puis la consigne remplie. Le dossier `.vigie` a toujours son `.gitignore` (ajouté s'il manque, gardé s'il
-   est déjà là) : le brief (questionnaire du client…) ne part jamais dans git.
+   saisi, puis la consigne remplie. Le dossier `.vigie` a toujours son `.gitignore` : le brief (questionnaire du
+   client…) ne part jamais dans git. Il est ajouté s'il manque. Déjà là, il est gardé s'il ignore le brief (une ligne
+   `*`, par exemple) ; sinon Vigie n'écrit pas le brief et te dit quoi y ajouter.
 5. L'app ouvre VS Code sur le dossier, puis un onglet Claude Code avec le message prêt (« Lance l'agent … : lis le
    fichier … et suis ses consignes ») : tu l'envoies, la conversation lit le brief et le suit.
 
