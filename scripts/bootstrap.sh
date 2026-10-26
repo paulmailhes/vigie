@@ -52,7 +52,6 @@ say "✓ Node.js $("$NODE" -v) ($NODE)"
 
 [ -f "$SRC/server.mjs" ] || stop "Fichiers de Vigie incomplets ($SRC)."
 mkdir -p "$DEST"
-chmod 700 "$DEST"
 
 # 2. L'app. Celle glissée dans Applications est remplacée sur place (nouvelle copie à côté, puis échange) ;
 #    sinon, celle de l'installation par Terminal, dans ~/.vigie/mac.
@@ -90,6 +89,7 @@ fi
 if [ "$SRC" != "$DEST" ]; then
   rsync -a --delete --exclude data --exclude node --exclude mac "$SRC/" "$DEST/"
 fi
+chmod 700 "$DEST" # après la copie : rsync reprend les droits du dossier source
 say "✓ Vigie est dans $DEST"
 
 # 4. Hooks et lancement au démarrage.
