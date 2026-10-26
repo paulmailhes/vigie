@@ -412,6 +412,34 @@ extension VigieStore {
         await reloadAfterWrite(mcp: true)
     }
 
+    // MARK: Agents
+
+    /// Lance un agent : le moteur crée le dossier du projet et y range la consigne remplie ; VS Code s'ouvre sur ce
+    /// dossier, puis Claude Code avec le message préparé, un instant plus tard (la fenêtre du dossier doit d'abord être
+    /// devant, sinon le message part dans une autre). Renvoie false si le moteur refuse : son message s'affiche.
+    func launchAgent(_ agent: AgentInfo, values: [String: String], folder: String) async -> Bool {
+        if isDemo {
+            show(info: "Démonstration : rien n'a été créé (pour de vrai, VS Code s'ouvrirait sur \(Fmt.shortPath(folder)))")
+            return true
+        }
+        let body: JSONValue = ["id": .string(agent.id), "values": .object(values.mapValues(JSONValue.string)),
+                               "folder": .string(folder)]
+        guard let result = await write("/api/v2/agents/launch", body) else {
+            await refreshAgents() // AGENT.md modifié entre-temps : la carte le montre
+            return false
+        }
+        SystemActions.openInVSCode(path: result.folder ?? folder)
+        // seulement l'adresse de Claude Code dans VS Code : rien d'autre ne s'ouvre d'ici
+        if let link = result.openUrl, URL(string: link)?.scheme == "vscode" {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                SystemActions.open(link)
+            }
+        }
+        show(info: result.message ?? "Dossier prêt : VS Code s'ouvre, envoie le message préparé pour lancer l'agent")
+        return true
+    }
+
     // MARK: Outils
 
     /// Le résumé vivant (vue d'ensemble, toutes les 3 s), complété par le détail (branche, début…).

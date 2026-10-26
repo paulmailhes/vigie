@@ -94,6 +94,11 @@ struct DecodingTests {
             case "accounts.json":
                 let accounts = try decoder.decode(AccountsState.self, from: data)
                 #expect(!accounts.accounts.isEmpty, "\(name)")
+            case "agents.json":
+                let agents = try decoder.decode(AgentLibrary.self, from: data)
+                #expect(agents.dir != nil, "\(name)")
+                #expect(agents.agents.contains { $0.canLaunch && !$0.fields.isEmpty && !$0.mcp.isEmpty }, "\(name)")
+                #expect(agents.agents.contains { !$0.canLaunch }, "\(name)")
             case let usage where usage.hasPrefix("usage-series-"):
                 let series = try decoder.decode(UsageSeries.self, from: data)
                 #expect(!series.conversations.isEmpty, "\(name)")
@@ -144,6 +149,70 @@ struct DecodingTests {
         #expect(series.accounts.isEmpty)
     }
 
+    /// GET /api/v2/agents : un champ, un MCP ou un agent illisible ne fait pas tomber la liste.
+    @Test func decodesAgentsTolerantly() throws {
+        let json = """
+        { "dir": "/Users/alex/.vigie/data/agents", "account": "oups",
+          "agents": [
+            { "id": "demarrer-projet", "name": "Démarrer un projet client", "icon": "wand.and.stars", "folder": "/Users/alex/Code",
+              "fields": [ { "id": "client", "label": "Nom du client", "type": "text", "required": true, "help": "", "placeholder": "Cabinet Martin" },
+                          { "id": "refs", "type": "urls", "required": "oui" },
+                          { "id": "notes", "label": "Notes", "type": "dessin" },
+                          { "label": "sans id" }, 7 ],
+              "mcp": [ { "name": "figma-pro", "status": "connected" }, { "name": "webflow-pro", "status": "needs-auth" },
+                       "obsidian", { "name": "x", "status": "nouvel-etat" }, { "status": "connected" } ],
+              "error": null, "champInconnu": 1 },
+            { "id": "casse", "fields": null, "mcp": null, "error": "AGENT.md illisible : il manque la ligne « --- »." },
+            { "name": "sans id" } ] }
+        """
+        let state = try JSONDecoder().decode(AgentLibrary.self, from: Data(json.utf8))
+        #expect(state.dir == "/Users/alex/.vigie/data/agents")
+        #expect(state.account == nil)
+        #expect(state.agents.map(\.id) == ["demarrer-projet", "casse"])
+
+        let agent = try #require(state.agents.first)
+        #expect(agent.canLaunch)
+        #expect(agent.fields.map(\.id) == ["client", "refs", "notes"])
+        #expect(agent.fields[0].required && agent.fields[0].help == nil && agent.fields[0].placeholder == "Cabinet Martin")
+        #expect(agent.fields[1].kind == .urls && !agent.fields[1].required && agent.fields[1].label == "refs")
+        #expect(agent.fields[2].kind == .text)
+        #expect(agent.mcp.map(\.name) == ["figma-pro", "webflow-pro", "obsidian", "x"])
+        #expect(agent.mcp.map(\.mcpStatus) == [.connected, .needsAuth, .unknown, .unknown])
+        #expect(agent.mcpToFix.map(\.name) == ["webflow-pro"])
+        #expect(agent.namingField?.id == "client")
+
+        let broken = state.agents[1]
+        #expect(!broken.canLaunch)
+        #expect(broken.displayName == "casse")
+        #expect(broken.fields.isEmpty && broken.mcp.isEmpty)
+
+        let account = try JSONDecoder().decode(AgentLibrary.self, from: Data("""
+        { "account": { "id": "travail1", "label": "Travail 1" }, "agents": [] }
+        """.utf8)).account
+        #expect(account?.displayName == "Travail 1")
+    }
+
+    /// Dossier proposé : <dossier parent>/<nom du client sans accents ni ponctuation>, 60 caractères au plus.
+    @Test func agentFolderNames() throws {
+        #expect(AgentSlug.make("Cabinet Martin") == "cabinet-martin")
+        #expect(AgentSlug.make("  Œuvre d'Été & Fils !  ") == "oeuvre-d-ete-fils")
+        #expect(AgentSlug.make("L'Atelier — Café 2") == "l-atelier-cafe-2")
+        #expect(AgentSlug.make("???") == "")
+        let long = AgentSlug.make(String(repeating: "abc ", count: 30))
+        #expect(long.count <= AgentSlug.maxLength && !long.hasSuffix("-"))
+
+        let agent = try JSONDecoder().decode(AgentInfo.self, from: Data("""
+        { "id": "demarrer-projet", "folder": "/Users/alex/Code/",
+          "fields": [ { "id": "site", "type": "url" }, { "id": "note", "type": "text" }, { "id": "client", "type": "text", "required": true } ] }
+        """.utf8))
+        #expect(agent.namingField?.id == "client")
+        #expect(agent.suggestedFolder(values: ["client": "Cabinet Martin", "note": "x"]) == "/Users/alex/Code/cabinet-martin")
+        #expect(agent.suggestedFolder(values: [:]) == "/Users/alex/Code/")
+
+        let bare = try JSONDecoder().decode(AgentInfo.self, from: Data(#"{ "id": "Revue SEO" }"#.utf8))
+        #expect(bare.suggestedFolder(values: [:]) == "~/Code/revue-seo")
+    }
+
     @Test func fineFormats() {
         #expect(Fmt.rate(1.2) == "1,2 %/h")
         #expect(Fmt.pctFine(0.034) == "0,03 %")
@@ -172,6 +241,7 @@ struct DecodingTests {
         #expect(VigieClient.fixtureName(for: "/api/v2/overview") == "overview.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/conversation/abc") == "conversation-abc.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/mcp") == "mcp.json")
+        #expect(VigieClient.fixtureName(for: "/api/v2/agents") == "agents.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/usage/series?window=600") == "usage-series-600.json")
         #expect(VigieClient.fixtureName(for: "/api/v2/usage/series") == "usage-series-60.json")
     }

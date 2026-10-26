@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Barre latérale (verre automatique) : Vue d'ensemble, Conversations, Comptes, puis les outils (MCP, Historique).
+/// Barre latérale (verre automatique) : Vue d'ensemble, Conversations, Comptes, puis les outils (MCP, Agents,
+/// Historique).
 struct SidebarView: View {
     @Environment(VigieStore.self) private var store
     @State private var showClosed = false
@@ -62,6 +63,9 @@ struct SidebarView: View {
                 SidebarLabel("MCP", symbol: "puzzlepiece.extension")
                     .tag(Route.mcp)
                     .standInHighlight(standIn && store.route == .mcp)
+                SidebarLabel("Agents", symbol: Icon.recipe)
+                    .tag(Route.agents)
+                    .standInHighlight(standIn && store.route == .agents)
                 SidebarLabel("Historique", symbol: "clock.arrow.circlepath")
                     .tag(Route.history)
                     .standInHighlight(standIn && store.route == .history)
@@ -201,7 +205,7 @@ extension VigieStore {
 
 /// La barre latérale ne prend pas le focus clavier : sa sélection reste la sélection système discrète
 /// (grise), au lieu d'un bloc plein de la couleur d'accent. Le clic sélectionne toujours normalement ;
-/// ⌘1, ⌘2, ⌘3 et le menu Affichage restent pour le clavier.
+/// ⌘1 à ⌘5 et le menu Aller restent pour le clavier.
 struct CalmSidebarSelection: NSViewRepresentable {
     func makeNSView(context: Context) -> Probe { Probe() }
 

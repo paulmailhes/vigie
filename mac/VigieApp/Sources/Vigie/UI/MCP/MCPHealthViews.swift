@@ -22,6 +22,18 @@ enum MCPStatusStyle {
         }
     }
 
+    /// Les mêmes symboles que les lignes d'état sous un MCP.
+    static func symbol(_ status: MCPStatus) -> String {
+        switch status {
+        case .connected: "checkmark.circle"
+        case .needsAuth: "person.crop.circle.badge.exclamationmark"
+        case .failed: "xmark.octagon.fill"
+        case .pendingApproval: "hourglass"
+        case .disabled: "pause.circle"
+        case .unknown: "circle.dashed"
+        }
+    }
+
     /// Plein = état sûr ; cerclé = en attente, coupé ou inconnu.
     static func isFilled(_ status: MCPStatus) -> Bool {
         switch status {
