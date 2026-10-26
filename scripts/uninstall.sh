@@ -19,15 +19,19 @@ PORT="${VIGIE_PORT:-4777}"
 # un Vigie arrêté. Leurs jetons, gardés par Vigie, sont oubliés : chaque compte se reconnectera au service.
 if [ -z "$DRY" ]; then
   "$NODE" --input-type=module -e '
+const fs = await import("node:fs");
 const base = `http://127.0.0.1:${process.argv[1]}/api/v2`;
+let token = "";
+try { token = fs.readFileSync(process.argv[2], "utf8").trim(); } catch { /* moteur d avant le jeton */ }
+const auth = { "x-vigie-token": token };
 let names = [];
-try { names = Object.keys((await (await fetch(`${base}/mcp`)).json()).gateway || {}); } catch { process.exit(0); }
+try { names = Object.keys((await (await fetch(`${base}/mcp`, { headers: auth })).json()).gateway || {}); } catch { process.exit(0); }
 for (const name of names) {
-  const r = await fetch(`${base}/gateway`, { method: "POST", headers: { "content-type": "application/json", "x-vigie": "1" }, body: JSON.stringify({ action: "restore", name }) })
+  const r = await fetch(`${base}/gateway`, { method: "POST", headers: { ...auth, "content-type": "application/json", "x-vigie": "1" }, body: JSON.stringify({ action: "restore", name }) })
     .then((x) => x.json()).catch((e) => ({ error: String(e) }));
   console.log(r.ok ? `MCP ${name} : rebranché en direct` : `MCP ${name} : ${r.error}`);
 }
-' "$PORT" || echo "MCP : passerelle non vérifiée."
+' "$PORT" "$ROOT/data/api-token" || echo "MCP : passerelle non vérifiée."
 fi
 
 "$NODE" "$ROOT/scripts/settings.mjs" uninstall

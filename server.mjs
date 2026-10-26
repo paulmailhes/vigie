@@ -45,6 +45,19 @@ const VAULT_EVERY_MS = 20_000;
 
 process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée :', clean(e)));
 
+// Données de Vigie lisibles par l'utilisateur seul (commandes, comptes, adresses e-mail) : fichiers créés en 0600,
+// dossiers en 0700 ; l'existant remis d'aplomb au démarrage (avant 0.3.4 : data/ en 0755, fichiers en 0644).
+process.umask(0o077);
+function privatize(dir, depth = 2) {
+  let entries;
+  try { fs.chmodSync(dir, 0o700); entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    try { if (e.isDirectory()) { if (depth > 0) privatize(p, depth - 1); } else if (e.isFile()) fs.chmodSync(p, 0o600); } catch { /* suivant */ }
+  }
+}
+privatize(DATA);
+
 const indexer = new Indexer({ windowHours: Number(process.env.VIGIE_WINDOW_HOURS || 48), usageDays: 7 });
 const conv = createConversations(indexer);
 // Conversations Codex (OpenAI), lues dans ~/.codex/sessions : même liste, même détail, compte « Codex ».
@@ -71,6 +84,27 @@ const vault = SECURITY_BIN ? createVault({
   dataDir: DATA, home: HOME, codexHome: codex.paths.codexHome, keychain: createKeychain({ bin: SECURITY_BIN }),
   accounts: () => accounts.load().accounts.map((a) => ({ id: a.id, label: a.label, configDir: a.configDir, expectedEmail: a.expectedEmail })),
 }) : null;
+// Jeton d'accès à l'API (data/api-token, 0600), exigé sur toutes les routes /api/ sauf /api/v2/health. L'app et les
+// scripts de Vigie le lisent ; un autre compte du Mac, un conteneur (host.docker.internal) ou une commande lancée par
+// une conversation atteignent bien 127.0.0.1, mais n'ont rien sans lui. Sa lecture par une conversation est retenue
+// par le garde-fou (règle jeton-vigie). Recréé s'il disparaît.
+const TOKEN_FILE = path.join(DATA, 'api-token');
+const API_TOKEN = (() => {
+  try { const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim(); if (/^[0-9a-f]{64}$/.test(t)) return t; } catch { /* premier démarrage */ }
+  return crypto.randomBytes(32).toString('hex');
+})();
+function keepToken() {
+  try { if (fs.readFileSync(TOKEN_FILE, 'utf8').trim() === API_TOKEN) return; } catch { /* absent : on le repose */ }
+  try {
+    fs.mkdirSync(DATA, { recursive: true, mode: 0o700 });
+    const tmp = `${TOKEN_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${API_TOKEN}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, TOKEN_FILE);
+  } catch (e) { console.error('[vigie] jeton d\'accès :', String(e?.message || e)); }
+}
+keepToken();
+const TOKEN_BUF = Buffer.from(API_TOKEN);
+const tokenOk = (v) => { const b = Buffer.from(String(v || '')); return b.length === TOKEN_BUF.length && crypto.timingSafeEqual(b, TOKEN_BUF); };
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
 const mcp = createMcp({
   home: HOME,
@@ -1550,6 +1584,9 @@ async function handle(req, res) {
   const relay = /^\/mcp\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
   if (relay) return gateway.proxy(req, res, decodeURIComponent(relay[1]), relay[2] || '', url.search);
   if (req.method === 'GET' && url.pathname === '/oauth/callback') return oauthCallback(url, res);
+  if (url.pathname.startsWith('/api/') && url.pathname !== '/api/v2/health' && !tokenOk(req.headers['x-vigie-token'])) {
+    return send(res, 401, { ok: false, error: 'Accès refusé : jeton de Vigie absent ou périmé. Quitte Vigie et rouvre-le.' });
+  }
 
   const found = ROUTES.map(([method, re, fn]) => ({ method, m: re.exec(url.pathname), fn })).filter((r) => r.m);
   if (!found.length) {
@@ -1574,14 +1611,18 @@ async function handle(req, res) {
   return send(res, status, out);
 }
 
-const server = http.createServer((req, res) => {
+function onRequest(req, res) {
   handle(req, res).catch((e) => {
     if (e instanceof HttpError) return send(res, e.status, { ok: false, error: e.message });
-    if (e instanceof SyntaxError && /regular expression/i.test(e.message)) return send(res, 400, { ok: false, error: 'Expression régulière invalide.' });
     console.error('[vigie] requête :', clean(e));
     send(res, 500, { ok: false, error: 'Erreur interne de Vigie.' });
   });
-});
+}
+const server = http.createServer(onRequest);
+// Le même port sur ::1 : « localhost » (adresse de retour des autorisations MCP) peut viser IPv6 d'abord, et aucun
+// autre programme ne doit pouvoir y attendre ces retours à la place de Vigie. Sans IPv6 local : rien.
+const server6 = http.createServer(onRequest);
+server6.on('error', () => {});
 
 // ---------- tâches de fond ----------
 // Le Mac est-il calme ? Pas pendant ses 5 premières minutes, ni dans les 2 minutes qui suivent le démarrage du moteur,
@@ -1633,6 +1674,7 @@ async function tick() {
     // les comptes qui ne travaillent pas (requête minimale, au plus toutes les 10 min par compte).
     if (Date.now() - lastHealth > 60_000) {
       lastHealth = Date.now();
+      keepToken();
       healthNotices = accounts.health().notices || [];
       accounts.autoRefresh({ calm: calm() });
     }
@@ -1671,6 +1713,7 @@ function ensureWrapper() {
 
 server.listen(PORT, HOST, () => {
   console.log(`[vigie] http://${HOST}:${server.address().port}`);
+  server6.listen(server.address().port, '::1');
   ensureWrapper();
   vaultTick();
   setInterval(vaultTick, VAULT_EVERY_MS);

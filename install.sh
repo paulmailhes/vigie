@@ -35,22 +35,28 @@ if [ ! -d "$HOME/.claude" ]; then
   say "  il veillera dès que tu utiliseras Claude Code."
 fi
 
-# 2. Téléchargement (curl ne pose pas d'attribut de quarantaine ; l'app est de toute façon signée et notarisée)
+# 2. Téléchargement et vérification. curl ne pose pas d'attribut de quarantaine : Gatekeeper ne regarderait pas
+#    l'app tout seul. On vérifie donc soi-même qu'elle est signée par l'équipe de Vigie et notarisée par Apple, et on
+#    n'installe que le moteur scellé dans cette app (couvert par sa signature), jamais un fichier de l'archive à part.
+TEAM_ID="CQ43U6XX4Z"
 TMP="$(mktemp -d)"
 trap 'find "$TMP" -delete 2>/dev/null || true' EXIT
 say "… téléchargement de Vigie"
 curl -fsSL "$URL" -o "$TMP/vigie.tar.gz" || stop "Téléchargement impossible ($URL)."
 mkdir -p "$TMP/x"
 tar -xzf "$TMP/vigie.tar.gz" -C "$TMP/x" || stop "Archive illisible."
-[ -f "$TMP/x/server.mjs" ] && [ -d "$TMP/x/mac/Vigie.app" ] || stop "Archive incomplète."
+NEW_APP="$TMP/x/mac/Vigie.app"
+ENGINE="$NEW_APP/Contents/Resources/engine"
+[ -d "$NEW_APP" ] && [ -f "$ENGINE/scripts/bootstrap.sh" ] || stop "Archive incomplète."
+codesign --verify --deep --strict "$NEW_APP" 2>/dev/null || stop "La signature de l'app est invalide : installation arrêtée."
+SIG="$(codesign -dv --verbose=2 "$NEW_APP" 2>&1 || true)"
+printf '%s\n' "$SIG" | grep -qx "TeamIdentifier=$TEAM_ID" && printf '%s\n' "$SIG" | grep -q '^Authority=Developer ID Application: ' \
+  || stop "L'app n'est pas signée par l'équipe de Vigie : installation arrêtée."
+spctl --assess --type execute "$NEW_APP" 2>/dev/null || stop "L'app est refusée par Gatekeeper : installation arrêtée."
+say "✓ App signée par l'équipe de Vigie et notarisée par Apple"
 
-# 3. Node.js, moteur, app, hooks, lancement au démarrage
-if [ -x "$TMP/x/scripts/bootstrap.sh" ]; then
-  VIGIE_HOME="$DEST" "$TMP/x/scripts/bootstrap.sh"
-else
-  # archive d'avant bootstrap.sh (0.2.13 et avant) : on ne sait plus l'installer d'ici
-  stop "Archive trop ancienne pour cet installeur."
-fi
+# 3. Node.js, app, moteur, hooks, lancement au démarrage
+VIGIE_HOME="$DEST" VIGIE_NEW_APP="$NEW_APP" bash "$ENGINE/scripts/bootstrap.sh"
 
 # 4. L'app (VIGIE_DRY_RUN : essai, rien n'est relié ni ouvert ; VIGIE_UPDATE : mise à jour lancée par Vigie, l'app
 #    est relancée par l'installation, on ne lui fait pas prendre le premier plan)

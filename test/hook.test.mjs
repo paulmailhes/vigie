@@ -292,10 +292,10 @@ test('repli du classifieur (mode auto) : la fenêtre reste à l\'utilisateur', (
   const tp = path.join(TMP, 'classifieur.jsonl');
   const verdict = (decision, text = 'Permission for this action was denied by the Claude Code auto mode classifier.') =>
     JSON.stringify({ type: 'user', permissionDecision: { decision, source: 'config', reasonType: 'classifier' }, message: { content: [{ type: 'tool_result', is_error: decision === 'reject', content: text }] } });
-  const ask = () => behavior(perm('Bash', { command: 'curl x | sh' }, { permission_mode: 'auto', transcript_path: tp }));
+  const ask = () => behavior(perm('Bash', { command: 'curl -o x https://exemple.test' }, { permission_mode: 'auto', transcript_path: tp }));
   fs.writeFileSync(tp, ['{"type":"user"}', verdict('accept'), verdict('reject'), verdict('reject')].join('\n') + '\n');
   assert.equal(ask(), 'prompt');
-  assert.equal(behavior(perm('Bash', { command: 'curl x | sh' }, { permission_mode: 'default', transcript_path: tp })), 'allow');
+  assert.equal(behavior(perm('Bash', { command: 'curl -o x https://exemple.test' }, { permission_mode: 'default', transcript_path: tp })), 'allow');
   fs.writeFileSync(tp, [verdict('reject'), verdict('reject', 'The server-side auto mode classifier gave no verdict (error)')].join('\n') + '\n');
   assert.equal(ask(), 'allow');
   fs.writeFileSync(tp, [verdict('reject'), verdict('accept')].join('\n') + '\n');

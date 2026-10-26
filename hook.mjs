@@ -23,6 +23,9 @@ import { pickRecommended, buildRecord, appendRecord } from './lib/questions.mjs'
 import { clearDecision, takeDecision, takeAnswer, MAX_COMMAND } from './lib/decisions.mjs';
 import { callHash, newApprovalId, takeApproval, deniedApproval } from './lib/approvals.mjs';
 
+// Ce que le hook écrit (historique des commandes, décisions) n'est lisible que par l'utilisateur.
+process.umask(0o077);
+
 const QUESTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 // Branché pour Codex (~/.codex/hooks.json) : « hook.mjs --vigie --codex ».
 const CODEX = process.argv.includes('--codex');

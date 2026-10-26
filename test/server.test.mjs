@@ -213,9 +213,11 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
-function raw(method, p, { body, headers = {} } = {}) {
+// Jeton d'accès posé par le moteur au démarrage ; `token: null` pour un appel sans lui.
+const token = () => fs.readFileSync(path.join(DATA, 'api-token'), 'utf8').trim();
+function raw(method, p, { body, headers = {}, token: tok = token() } = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: PORT, method, path: p, headers }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, method, path: p, headers: tok ? { 'X-Vigie-Token': tok, ...headers } : headers }, (res) => {
       let d = '';
       res.on('data', (c) => { d += c; });
       res.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { /* texte */ } resolve({ status: res.statusCode, headers: res.headers, text: d, body: j }); });
@@ -533,6 +535,23 @@ test('réglages généraux : valeurs vérifiées, saisie vide refusée, en-tête
   assert.equal(rj(path.join(DATA, 'state.json')).autoAccept, true);
   r = await post('/api/v2/settings', { questionsAuto: false, questionWaitMin: 20, connectorsDefault: 'off', guard: { waitMin: 10, rules: [{ id: 'sudo', disabled: false }] } });
   assert.equal(r.status, 200);
+});
+
+test('jeton d\'accès : exigé partout sur /api/ (lecture comprise), sauf l\'état de santé ; fichier privé', async () => {
+  const file = path.join(DATA, 'api-token');
+  assert.match(token(), /^[0-9a-f]{64}$/);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  for (const p of ['/api/v2/overview', '/api/v2/history', '/api/v2/accounts', `/api/v2/conversation/${SID_A}`]) {
+    assert.equal((await raw('GET', p, { token: null })).status, 401, p);
+    assert.equal((await raw('GET', p, { token: 'f'.repeat(64) })).status, 401, `${p} : mauvais jeton`);
+  }
+  const before = rj(path.join(DATA, 'state.json')).autoAccept;
+  const r = await raw('POST', '/api/v2/settings', { body: { autoAccept: !before }, headers: { 'Content-Type': 'application/json', 'X-Vigie': '1' }, token: null });
+  assert.equal(r.status, 401);
+  assert.match(r.body.error, /jeton/);
+  assert.equal(rj(path.join(DATA, 'state.json')).autoAccept, before, 'rien n\'a changé');
+  assert.equal((await raw('GET', '/api/v2/health', { token: null })).status, 200, 'l\'installeur attend le moteur sans jeton');
+  assert.equal((await get('/api/v2/overview')).status, 200);
 });
 
 test('réglages d\'une conversation, et bascule de compte', async () => {

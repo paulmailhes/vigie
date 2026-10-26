@@ -243,11 +243,17 @@ struct RoadmapSection: View {
     }
 }
 
-/// Texte Markdown d'un document (gras, code, liens), retours à la ligne gardés.
+/// Texte Markdown d'un document (gras, code, liens), retours à la ligne gardés. Ce texte vient d'un agent : seuls
+/// les liens web (http, https) s'ouvrent ; un lien vers un fichier ou un partage du Mac (file:, smb:…) reste inerte.
 @MainActor
 func markdown(_ text: String) -> some View {
-    let attributed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+    var attributed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
         ?? AttributedString(text)
+    for run in attributed.runs {
+        if let link = run.link, !["http", "https"].contains(link.scheme?.lowercased() ?? "") {
+            attributed[run.range].link = nil
+        }
+    }
     return Text(attributed)
         .fixedSize(horizontal: false, vertical: true)
         .textSelection(.enabled)

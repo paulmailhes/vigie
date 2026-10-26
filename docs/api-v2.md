@@ -1,7 +1,7 @@
 # API v2 de Vigie (contrat entre le moteur et l'app Mac)
 
 Serveur : `http://127.0.0.1:4777`. JSON UTF-8. Dates en ISO 8601 UTC (`"2026-10-20T01:14:00.000Z"`), l'app les affiche en heure locale.
-Écritures : `POST` avec `Content-Type: application/json` **et** `X-Vigie: 1` (sinon 403). Réponse d'écriture : `{ "ok": true, ... }` ou `{ "ok": false, "error": "phrase courte en français" }` avec un code 4xx.
+Accès : chaque requête sur `/api/` porte l'en-tête `X-Vigie-Token` (le jeton écrit par le moteur dans `data/api-token`, privé), sinon 401 ; seul `GET /api/v2/health` s'en passe. Écritures : `POST` avec `Content-Type: application/json` **et** `X-Vigie: 1` (sinon 403). Réponse d'écriture : `{ "ok": true, ... }` ou `{ "ok": false, "error": "phrase courte en français" }` avec un code 4xx.
 Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en français et courts : l'app les affiche tels quels.
 
 ## Types communs
@@ -198,6 +198,7 @@ Toute erreur renvoie `{ "ok": false, "error": "phrase courte" }`, en lecture com
 | Statut | Cas |
 |---|---|
 | 400 | JSON illisible, corps qui n'est pas un objet, valeur refusée, action MCP ou compte refusée, adresse invalide (`//`) |
+| 401 | `X-Vigie-Token` absent ou faux (toute route `/api/` sauf `health`) |
 | 403 | hôte autre que 127.0.0.1/localhost, `X-Vigie: 1` absent, `Origin` d'un autre site |
 | 404 | adresse inconnue ; conversation ou question introuvable (une conversation de plus de 48 h n'a plus de détail) |
 | 405 | méthode non prise en charge sur une adresse connue (ex. `GET /api/v2/settings`) |
@@ -427,7 +428,7 @@ L'utilisateur refuse : `POST /api/v2/approvals` `{ approvalId, decision: "deny" 
 - Mode `vigie` : le hook refuse aussitôt (conversation VS Code, terminal ou agent de fond), journalise `garde-fou-en-attente-vigie` (`approvalId` 16 hex, `hash` = empreinte SHA-256 de conversation + outil + paramètres exacts, `action` = commande complète, 4000 caractères au plus, `rule`, `ruleId`). Le délai `guard.waitMin` ne sert qu'au mode `vscode`. L'auto-accept coupé passe avant tout : fenêtre normale.
 - Élément `toReview` : `id` = `v:<approvalId>`, `kind: "blocked"`, `state: "awaiting"`, `approvalId`, `command` (masquée), `rule`, `ruleId`, `conversationId`, `cwd`, `byAgent`, `needsPassword`, `approved` (autorisée, relance pas encore faite), `approvedUntil`. Un seul élément par appel identique (le dernier refus), listé 24 h, rangé avec ce qui attend l'utilisateur maintenant. Retiré une fois l'appel relancé avec l'autorisation (`garde-fou-autorise-vigie`), refusé par l'utilisateur, ou écarté (`POST /review/v:<id>/dismiss`). Une autorisation expirée sans relance : l'élément redevient simplement à autoriser. `needsYou` le compte ; `status` de la conversation n'est pas changé (elle continue).
 - `POST /api/v2/approvals` : `{ ok, approvalId, decision: "allow", expiresAt, message, delivered: false, openUrl, needsPassword }` ; `openUrl` = `vscode://anthropic.claude-code/open?session=<uuid>&prompt=<message>` (encodé pour survivre aux deux décodages, comme `questions/:id/review`), `null` si l'identifiant de conversation n'est pas un UUID. Refus : `{ ok, approvalId, decision: "deny", message }` (une autorisation pas encore utilisée pour le même appel est retirée). Erreurs : 400 décision autre que `allow`/`deny` ou `approvalId` illisible ; 404 élément introuvable, déjà relancé, refusé ou de plus de 24 h ; 503 fichier verrouillé.
-- `data/approvals.json` : `{ "<approvalId>": { decision, sessionId, tool, hash, ts, expiresAt? } }`, écrit sous verrou ; le hook retire l'autorisation qu'il consomme (usage unique). Comme `decisions.json`, une conversation ne peut pas l'écrire (garde-fous `config-claude`, `config-claude-shell`, `api-vigie`).
+- `data/approvals.json` : `{ "<approvalId>": { decision, sessionId, tool, hash, ts, expiresAt? } }`, écrit sous verrou ; le hook retire l'autorisation qu'il consomme (usage unique). Comme `decisions.json`, les garde-fous `config-claude`, `config-claude-shell`, `api-vigie` et `jeton-vigie` retiennent une conversation qui l'écrirait ou lirait le jeton. Limite : une conversation dont les commandes sont acceptées d'office a les droits de l'utilisateur ; un agent décidé à contourner Vigie (un script écrit puis lancé) le peut. Les garde-fous protègent des erreurs et des consignes piégées ordinaires, pas d'un programme hostile.
 - Journal : `garde-fou-en-attente-vigie` → `accepted[].decision = "blocked"` et compté dans `sinceSummary.blocked` ; `garde-fou-autorise-vigie` → `you`.
 
 ## Ajouts du 2026-10-20 (bascule de compte)

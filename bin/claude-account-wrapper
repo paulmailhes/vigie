@@ -224,7 +224,10 @@ vigie_route() {
 # data/launches/<pid> : le serveur y lit sur quel compte tourne chaque processus (exec garde le pid)
 # et épingle les conversations neuves. data/launches.log : l'historique, pour comprendre après coup.
 # Troisième argument « annexe » : pas de fiche de processus (ce n'est pas une conversation).
-vigie_log() {
+# Dans un sous-shell à umask 077 : ces fichiers ne sont lisibles que par l'utilisateur, et la conversation lancée
+# ensuite garde son umask habituel (les fichiers de ses projets ne changent pas de droits).
+vigie_log() (
+  umask 077
   [ -n "$DATA" ] && [ -d "$DATA" ] || return 0
   local f="$DATA/launches.log" sz line
   line="$(/bin/date +%s)	$$	$1	${V_SID:--}	$2"
@@ -240,7 +243,7 @@ vigie_log() {
   fi
   printf '%s\n' "$line" >> "$f" 2>/dev/null
   return 0
-}
+)
 
 DATA=$(vigie_data 2>/dev/null) || DATA=""
 

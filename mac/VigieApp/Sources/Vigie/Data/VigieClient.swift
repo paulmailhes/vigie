@@ -1,4 +1,26 @@
 import Foundation
+import Synchronization
+
+/// Jeton d'accès à l'API, posé par le moteur dans ~/.vigie/data/api-token (VIGIE_TOKEN_FILE pour les essais) :
+/// sans lui, le moteur refuse tout sauf son état de santé. Relu quand le moteur le refuse (moteur réinstallé).
+enum APIToken {
+    static let file: URL = {
+        if let path = ProcessInfo.processInfo.environment["VIGIE_TOKEN_FILE"], !path.isEmpty {
+            return URL(filePath: (path as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".vigie/data/api-token")
+    }()
+    private static let cache = Mutex<String?>(nil)
+
+    static func current(reload: Bool = false) -> String? {
+        cache.withLock { value in
+            if value == nil || reload {
+                value = (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return value
+        }
+    }
+}
 
 enum ClientError: Error, Sendable, Equatable {
     /// Le moteur ne répond pas (connexion refusée, délai dépassé…).
@@ -125,6 +147,25 @@ struct VigieClient: Sendable {
     // MARK: Réseau
 
     private static func send(_ request: URLRequest, acceptErrorBody: Bool = false) async throws -> Data {
+        var (data, http) = try await exchange(request, token: APIToken.current())
+        if http.statusCode == 401, let fresh = APIToken.current(reload: true) {
+            (data, http) = try await exchange(request, token: fresh)
+        }
+        if (200..<300).contains(http.statusCode) { return data }
+        if http.statusCode == 401 { throw ClientError.refused("Vigie n'a plus accès à son moteur : quitte Vigie et rouvre-le") }
+        if acceptErrorBody, (400..<500).contains(http.statusCode) {
+            if let result = try? JSONDecoder().decode(WriteResult.self, from: data), let error = result.error {
+                throw ClientError.refused(error)
+            }
+        }
+        if http.statusCode == 404 { throw ClientError.refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)") }
+        if http.statusCode == 403 { throw ClientError.refused("Le moteur de Vigie a refusé la modification") }
+        throw ClientError.refused("Le moteur de Vigie a eu un problème (\(http.statusCode)) : réessaie dans un instant")
+    }
+
+    private static func exchange(_ request: URLRequest, token: String?) async throws -> (Data, HTTPURLResponse) {
+        var request = request
+        if let token { request.setValue(token, forHTTPHeaderField: "X-Vigie-Token") }
         let data: Data
         let response: URLResponse
         do {
@@ -133,15 +174,7 @@ struct VigieClient: Sendable {
             throw ClientError.unreachable
         }
         guard let http = response as? HTTPURLResponse else { throw ClientError.unreadable }
-        if (200..<300).contains(http.statusCode) { return data }
-        if acceptErrorBody, (400..<500).contains(http.statusCode) {
-            if let result = try? JSONDecoder().decode(WriteResult.self, from: data), let error = result.error {
-                throw ClientError.refused(error)
-            }
-        }
-        if http.statusCode == 404 { throw ClientError.refused("Le moteur ne connaît pas encore cette page (API v2)") }
-        if http.statusCode == 403 { throw ClientError.refused("Le moteur a refusé l'écriture") }
-        throw ClientError.refused("Erreur du moteur (\(http.statusCode))")
+        return (data, http)
     }
 }
 

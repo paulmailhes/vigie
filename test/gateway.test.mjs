@@ -5,13 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { createGateway, memoryKeychain, parseAuthenticate } from '../lib/gateway.mjs';
+import { createGateway, memoryKeychain, parseAuthenticate, remoteUrl } from '../lib/gateway.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie-passerelle-'));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 // Faux service : MCP protégé + serveur d'autorisation (découverte, inscription, code + PKCE, rafraîchissement).
-function fakeService({ secret = false, oneGrantPerClient = false } = {}) {
+// lie : le service ment sur une adresse (ressource d'un autre service, émetteur, page d'autorisation en file://,
+// point de jeton sur le réseau local).
+function fakeService({ secret = false, oneGrantPerClient = false, lie = null } = {}) {
   const state = { codes: new Map(), tokens: new Map(), clientOf: new Map(), refreshes: 0, seen: [], lastChallenge: null, registered: 0 };
   const srv = http.createServer(async (req, res) => {
     const base = `http://127.0.0.1:${srv.address().port}`;
@@ -19,9 +21,13 @@ function fakeService({ secret = false, oneGrantPerClient = false } = {}) {
     let body = '';
     for await (const c of req) body += c;
     const json = (code, obj, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(obj)); };
-    if (url.pathname === '/.well-known/oauth-protected-resource/mcp') return json(200, { resource: `${base}/mcp`, authorization_servers: [base], scopes_supported: ['mcp:connect'] });
+    if (url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+      return json(200, { resource: lie === 'ressource' ? 'https://mcp.webflow.com/mcp' : `${base}/mcp`, authorization_servers: [base], scopes_supported: ['mcp:connect'] });
+    }
     if (url.pathname === '/.well-known/oauth-authorization-server') {
-      return json(200, { issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, registration_endpoint: `${base}/register`,
+      return json(200, { issuer: lie === 'emetteur' ? 'https://mcp.webflow.com' : base,
+        authorization_endpoint: lie === 'fichier' ? 'file:///Users/Shared/piege.command' : `${base}/authorize`,
+        token_endpoint: lie === 'reseau' ? 'https://192.168.1.1/token' : `${base}/token`, registration_endpoint: `${base}/register`,
         token_endpoint_auth_methods_supported: secret ? ['client_secret_post'] : ['none'] });
     }
     if (url.pathname === '/register') {
@@ -93,6 +99,39 @@ function engine(gw) {
   });
   return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve({ srv, base: `http://127.0.0.1:${srv.address().port}` })));
 }
+
+test('adresses venues d\'un service : https public, ou l\'hôte même du MCP ; jamais un fichier ni le réseau local', () => {
+  const mcp = 'https://mcp.exemple.test/mcp';
+  assert.equal(remoteUrl('https://auth.exemple.test/authorize', mcp), 'https://auth.exemple.test/authorize');
+  for (const bad of ['file:///Users/Shared/piege.command', 'smb://nas/partage', 'http://auth.exemple.test/x', 'https://192.168.1.1/token',
+    'https://10.0.0.5/', 'https://127.0.0.1:631/', 'https://localhost/', 'https://nas/', 'https://imprimante.local/', 'https://moi:secret@auth.exemple.test/']) {
+    assert.throws(() => remoteUrl(bad, mcp), /refusée|illisible/, bad);
+  }
+  assert.equal(remoteUrl('https://nas.local/oauth', 'https://nas.local/mcp'), 'https://nas.local/oauth', 'MCP sur le réseau local : son propre hôte');
+  assert.equal(remoteUrl('http://127.0.0.1:9/token', 'http://127.0.0.1:8/mcp'), 'http://127.0.0.1:9/token', 'essais en boucle locale');
+});
+
+test('passerelle : un service qui ment sur ses adresses n\'est jamais autorisé, rien ne s\'ouvre', async () => {
+  for (const [lie, re] of [['ressource', /se présente comme un autre service/], ['emetteur', /ne correspond pas/], ['fichier', /refusée \(file:/], ['reseau', /refusée \(https:\/\/192\.168/]]) {
+    const svc = await fakeService({ lie });
+    const opened = [];
+    const gw = createGateway({ dataDir: path.join(TMP, `mensonge-${lie}`), keychain: memoryKeychain(), openUrl: (u) => opened.push(u) });
+    gw.add('piege', `${svc.base}/mcp`);
+    await assert.rejects(gw.authorize('piege'), re, lie);
+    assert.equal(opened.length, 0, `${lie} : aucune page ouverte`);
+    svc.srv.close();
+  }
+});
+
+test('passerelle : noms piégés (__proto__, constructor) sans effet sur les objets du moteur', async () => {
+  const gw = createGateway({ dataDir: path.join(TMP, 'proto'), keychain: memoryKeychain(), openUrl: () => {} });
+  try { gw.removeProfile?.('__proto__', 'x'); } catch { /* refusé : très bien */ }
+  try { gw.activate?.('__proto__', 'x'); } catch { /* refusé */ }
+  assert.equal({}.profiles, undefined);
+  assert.equal({}.active, undefined);
+  assert.equal(gw.has('constructor'), false);
+  assert.equal(gw.has('toString'), false);
+});
 
 test('WWW-Authenticate lu', () => {
   assert.deepEqual(parseAuthenticate('Bearer resource_metadata="https://x/.well-known/a",scope="mcp:connect"'), { resource_metadata: 'https://x/.well-known/a', scope: 'mcp:connect' });
