@@ -21,11 +21,13 @@ struct AgentLaunchSheet: View {
                 .padding(.bottom, 14)
             Divider()
             ScrollView {
+                // Le dossier juste sous le champ qui le nomme : visible sans défiler, même avec un long formulaire
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(agent.fields) { field in
                         fieldView(field)
+                        if field.id == agent.namingField?.id { folderView }
                     }
-                    folderView
+                    if agent.namingField == nil { folderView }
                 }
                 .padding(24)
             }
