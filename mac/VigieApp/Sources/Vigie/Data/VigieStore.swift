@@ -36,28 +36,41 @@ final class VigieStore {
     /// que là ; sinon la vue d'ensemble l'est toutes les 15 s (60 s écran en veille), pour la barre des menus et les
     /// notifications.
     private(set) var windowVisible = true
-    @ObservationIgnored var menuPanelOpen = false { didSet { if menuPanelOpen { Task { await refreshOverview() } } } }
+    @ObservationIgnored var menuPanelOpen = false { didSet { pollingChanged() } }
+    @ObservationIgnored private var windowShown = true
     @ObservationIgnored private var screensAsleep = false
 
     /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, la part de la semaine,
     /// les tokens relus et les compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit
-    /// change au-delà de ce qui s'affiche : comparés sans eux (débit arrondi), ils ne redessinent plus toute la fenêtre
-    /// toutes les 3 s.
-    static func screenKey(_ list: [ConversationSummary]) -> [ConversationSummary] {
+    /// change au-delà de ce qui s'affiche : comparés sans eux (débit pris tel qu'il s'écrit à l'écran), ils ne
+    /// redessinent plus toute la fenêtre toutes les 3 s.
+    struct ScreenRow: Equatable {
+        var conversation: ConversationSummary
+        var rate: String
+        var tokens: String
+        var spark: [Double]
+        var trend: String?
+    }
+
+    static func screenKey(_ list: [ConversationSummary]) -> [ScreenRow] {
         list.map { conversation in
             var c = conversation
             c.lastActivity = nil
             c.weekPct = nil
             c.contextTokens = nil
             c.accepted = nil
-            if var rate = c.rate {
-                rate.weekPctPerHour = rate.weekPctPerHour.map { ($0 * 10).rounded() / 10 }
-                rate.tokensPerMin = rate.tokensPerMin.map { ($0 / 1000).rounded() }
-                rate.spark = rate.spark.map { ($0 * 20).rounded() / 20 }
-                c.rate = rate
-            }
-            return c
+            let rate = c.rate
+            c.rate = nil
+            return ScreenRow(conversation: c, rate: rate?.weekPctPerHour.map(Fmt.rate) ?? "",
+                             tokens: rate?.tokensPerMin.map(Fmt.tokensPerMin) ?? "",
+                             spark: shape(rate?.spark ?? []), trend: rate?.trend)
         }
+    }
+
+    /// Forme de la mini-courbe, à 1/20 de sa hauteur : elle est dessinée par rapport à son maximum.
+    private static func shape(_ values: [Double]) -> [Double] {
+        guard let top = values.max(), top > 0 else { return values }
+        return values.map { ($0 / top * 20).rounded() }
     }
 
     static func stableOrder(_ list: [ConversationSummary]) -> [ConversationSummary] {
@@ -159,21 +172,39 @@ final class VigieStore {
                 guard let self else { return }
                 await self.refreshOverview()
                 if self.isDemo && self.loadedOnce { return }
-                let seconds = self.windowVisible || self.menuPanelOpen ? 3 : self.screensAsleep ? 60 : 15
+                let seconds = self.pollSeconds
                 try? await Task.sleep(for: .seconds(seconds), tolerance: .seconds(seconds / 3 + 1))
             }
         }
     }
 
-    func setWindowVisible(_ visible: Bool) {
-        guard visible != windowVisible else { return }
-        windowVisible = visible
-        if visible { Task { await refreshOverview() } }
+    private var pollSeconds: Int { windowVisible || menuPanelOpen ? 3 : screensAsleep ? 60 : 15 }
+
+    /// Fenêtre principale à l'écran ou non (WindowVisibility) ; écran en veille : comme cachée.
+    func setWindowVisible(_ shown: Bool) {
+        windowShown = shown
+        pollingChanged()
     }
 
     func setScreensAsleep(_ asleep: Bool) {
         screensAsleep = asleep
-        if !asleep { Task { await refreshOverview() } }
+        pollingChanged()
+    }
+
+    /// Le rythme change : la boucle repart tout de suite (relecture immédiate), au lieu de finir une attente de 15 ou
+    /// 60 s ; les pages repartent d'elles-mêmes avec `windowVisible` (`.task(id:)`).
+    @ObservationIgnored private var lastPollSeconds = 3
+    private func pollingChanged() {
+        let visible = windowShown && !screensAsleep
+        if visible != windowVisible { windowVisible = visible }
+        let seconds = pollSeconds
+        guard seconds != lastPollSeconds else { return }
+        let faster = seconds < lastPollSeconds
+        lastPollSeconds = seconds
+        guard faster, pollTask != nil else { return }
+        pollTask?.cancel()
+        pollTask = nil
+        start()
     }
 
     func refreshOverview() async {
@@ -405,6 +436,8 @@ final class VigieStore {
     }
 
     private func readFailed(_ error: any Error) {
+        // relevé interrompu exprès (fenêtre cachée, rythme changé, page quittée) : ce n'est pas une panne du moteur
+        if Task.isCancelled { return }
         let clientError = error as? ClientError ?? .unreadable
         switch clientError {
         case .unreachable:

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ROOT, STATE_FILE, DEFAULT_STATE, DEFAULT_GUARDS, writeState } from '../lib/state.mjs';
+import { ROOT, DATA, STATE_FILE, DEFAULT_STATE, writeState, PRETOOL_MATCHER } from '../lib/state.mjs';
 
 const SETTINGS = process.env.VIGIE_CLAUDE_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json');
 // Le Node.js choisi par l'installateur (VIGIE_NODE), sinon celui de Homebrew (chemin stable d'une mise à jour à
@@ -16,15 +16,17 @@ const HOOK = path.join(ROOT, 'hook.mjs');
 const COMMAND = `"${NODE}" "${HOOK}" --vigie`;
 const ours = (c) => /\s--vigie\b/.test(c) || c.includes('auto-accept/hook.mjs') || c.includes(HOOK);
 
-// Outils MCP : seulement ceux que visent les garde-fous (paiement, e-mail, réseaux sociaux, suppression en ligne).
-// Avant, le hook démarrait avant CHAQUE appel MCP (Webflow, Figma…), pour rien : ~0,1 s de calcul à chaque fois.
-// « .* » au bout : la même forme convient que Claude Code ancre le motif ou non.
-const MCP_GUARDED = DEFAULT_GUARDS.filter((r) => !r.match && /mcp__/.test(r.tool || '')).map((r) => `(?:${r.tool}).*`).join('|');
+// Refus natif de Claude Code (permissions.deny, partagé par tous les comptes comme settings.json) : son outil de lecture
+// n'ouvre jamais le jeton d'accès de Vigie, même là où il lit sans rien demander. ~/… dans le dossier perso, //… sinon.
+const TOKEN_FILE = path.join(DATA, 'api-token');
+const tokenRel = path.relative(os.homedir(), TOKEN_FILE);
+const DENY = [`Read(${tokenRel.startsWith('..') || path.isAbsolute(tokenRel) ? `/${TOKEN_FILE}` : `~/${tokenRel}`})`];
+
 const WANTED = {
   // 7300 s : au-delà de l'attente maximale réglable (120 min) ; le hook s'arrête seul juste avant.
   PermissionRequest: { matcher: '*', timeout: 7300 },
   // Questions, et actions sensibles : la fenêtre de la conversation s'affiche (permissionDecision « ask »).
-  PreToolUse: { matcher: `AskUserQuestion|ExitPlanMode|Bash|Monitor|PowerShell|Write|Edit|MultiEdit|NotebookEdit|${MCP_GUARDED}`, timeout: 7300 },
+  PreToolUse: { matcher: PRETOOL_MATCHER, timeout: 7300 },
   PermissionDenied: { matcher: '*', timeout: 30 },
 };
 
@@ -60,14 +62,23 @@ for (const ev of Object.keys(hooks)) {
   if (hooks[ev].length === 0) delete hooks[ev];
 }
 
+// Nos refus : retirés puis remis à l'installation, retirés à la désinstallation ; ceux de l'utilisateur restent.
+const perms = settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions) ? settings.permissions : null;
+if (perms && Array.isArray(perms.deny)) {
+  perms.deny = perms.deny.filter((r) => !DENY.includes(r));
+  if (!perms.deny.length) delete perms.deny;
+}
 if (action === 'install') {
   for (const [ev, { matcher, timeout }] of Object.entries(WANTED)) {
     (hooks[ev] ||= []).push({ matcher, hooks: [{ type: 'command', command: COMMAND, timeout }] });
   }
+  settings.permissions = perms || {};
+  settings.permissions.deny = [...(settings.permissions.deny || []), ...DENY];
   if (!fs.existsSync(STATE_FILE)) writeState({ ...structuredClone(DEFAULT_STATE), autoAccept: process.argv.includes('--on') });
 }
 
 if (Object.keys(hooks).length) settings.hooks = hooks; else delete settings.hooks;
+if (settings.permissions && !Object.keys(settings.permissions).length) delete settings.permissions;
 fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
 let backup = null;
 if (raw !== null) {

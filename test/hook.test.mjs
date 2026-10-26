@@ -671,7 +671,7 @@ test('settings.mjs : branche, rebranche et débranche sans toucher au reste', ()
   const file = path.join(home, '.claude', 'settings.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const other = { type: 'command', command: 'echo autre-hook' };
-  fs.writeFileSync(file, JSON.stringify({ permissions: { defaultMode: 'auto' }, hooks: {
+  fs.writeFileSync(file, JSON.stringify({ permissions: { defaultMode: 'auto', deny: ['Bash(rm:*)'] }, hooks: {
     PreToolUse: [{ matcher: 'Bash', hooks: [other] }],
     PermissionRequest: [{ matcher: '*', hooks: [{ type: 'command', command: '/opt/homebrew/bin/node /Users/alex/Code/auto-accept/hook.mjs', timeout: 7300 }] }],
   } }), { mode: 0o600 });
@@ -681,6 +681,7 @@ test('settings.mjs : branche, rebranche et débranche sans toucher au reste', ()
   let s = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(oursCount(s), 3, 'trois entrées Vigie, l\'ancienne v1 remplacée');
   assert.equal(s.permissions.defaultMode, 'auto');
+  assert.deepEqual(s.permissions.deny, ['Bash(rm:*)', `Read(/${path.join(data, 'api-token')})`], 'le jeton de Vigie refusé à l\'outil de lecture, une fois, règles de l\'utilisateur gardées');
   assert.deepEqual(s.hooks.PreToolUse.find((g) => g.matcher === 'Bash').hooks, [other]);
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'droits du fichier gardés');
   assert.ok(fs.readdirSync(path.dirname(file)).some((f) => f.startsWith('settings.json.bak-vigie-')));
@@ -695,6 +696,7 @@ test('settings.mjs : branche, rebranche et débranche sans toucher au reste', ()
   assert.equal(exec('uninstall').status, 0);
   s = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(oursCount(s), 0);
+  assert.deepEqual(s.permissions, { defaultMode: 'auto', deny: ['Bash(rm:*)'] }, 'notre refus retiré, le reste gardé');
   assert.deepEqual(s.hooks.PreToolUse.find((g) => g.matcher === 'Bash').hooks, [other]);
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 });

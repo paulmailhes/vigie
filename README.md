@@ -129,7 +129,7 @@ L'app embarque le moteur et l'installe dans `~/.vigie` au premier lancement ; se
 
 ### Sécurité
 
-- **API locale protégée** : le moteur n'écoute que ton Mac, refuse les pages web (hôte et origine vérifiés) et exige un jeton d'accès (`~/.vigie/data/api-token`, lisible par toi seul) : un autre compte du Mac, un conteneur ou une commande lancée au hasard n'ont rien sans lui. Le garde-fou retient une conversation qui voudrait le lire.
+- **API locale protégée** : le moteur n'écoute que ton Mac, refuse les pages web (hôte et origine vérifiés) et exige un jeton d'accès (`~/.vigie/data/api-token`, lisible par toi seul) : un autre compte du Mac, un conteneur ou une commande lancée au hasard n'ont rien sans lui. Claude Code refuse de l'ouvrir avec son outil de lecture, et le garde-fou retient les commandes courantes qui le liraient ; ce n'est pas un rempart contre une conversation décidée à le chercher (voir la limite plus bas).
 - **Mises à jour vérifiées** : signature de l'app par l'équipe de Vigie, accord de Gatekeeper, version attendue ; seul le moteur scellé dans l'app est installé.
 - **MCP par Vigie** : un MCP qui se présente comme un autre service, ou qui désigne une adresse du réseau local ou un fichier du Mac, n'est jamais connecté.
 - **Limite des garde-fous** : ils protègent des erreurs et des consignes piégées ordinaires (une page web qui demande à Claude de lancer une commande). Une conversation dont les commandes sont acceptées d'office a tes droits sur le Mac : un programme vraiment décidé à contourner Vigie le pourrait. Pour du code dont tu ne te fies pas, coupe l'auto-accept.

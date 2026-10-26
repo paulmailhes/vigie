@@ -18,7 +18,8 @@ const home = os.homedir();
 
 test('tout le dossier de Vigie installé et ce qui le lance : retenus', () => {
   for (const f of ['~/.vigie/lib/decisions.mjs', `${home}/.vigie/server.mjs`, `${home}/.vigie/bin/claude-account-wrapper`,
-    `${home}/Library/LaunchAgents/io.github.paulmailhes.vigie.engine.plist`, `${home}/.codex/hooks.json`, `${home}/.ssh/authorized_keys`]) {
+    `${home}/Library/LaunchAgents/io.github.paulmailhes.vigie.engine.plist`, `${home}/.codex/hooks.json`, `${home}/.ssh/authorized_keys`,
+    `${home}/.ssh/config`]) {
     assert.equal(rule('Write', { file_path: f, content: 'x' }), 'config-claude', f);
   }
   assert.equal(bash('rsync -a lib/ ~/.vigie/lib/'), 'config-claude-shell');
@@ -64,11 +65,25 @@ test('nouvelles règles : script lancé par un shell, mots de passe du trousseau
   assert.equal(bash('claude mcp list'), null);
 });
 
-test('jeton d\'accès de Vigie : sa lecture est retenue, même par une commande de lecture', () => {
-  const cat = 'cat ~/.vigie/data/api-token';
-  assert.equal(bash(cat), 'jeton-vigie');
-  assert.equal(readOnlyShell('Bash', { command: cat }), false, 'jamais rangée dans les lectures anodines');
-  assert.equal(rule('Read', { file_path: `${home}/.vigie/data/api-token` }), 'jeton-vigie');
+test('jeton d\'accès de Vigie : ses lectures courantes sont retenues, même par une commande de lecture', () => {
+  for (const c of ['cat ~/.vigie/data/api-token', 'cat ~/.vigie/data/*token*', 'cd ~/.vigie/data && cat api*', 'cat ../data/api-tok*',
+    'node -e "require(\'fs\').readFileSync(\'api-token\')"']) {
+    assert.equal(bash(c), 'jeton-vigie', c);
+    assert.equal(readOnlyShell('Bash', { command: c }), false, `${c} : jamais rangée dans les lectures anodines`);
+  }
+  assert.equal(rule('Read', { file_path: `${home}/.vigie/data/api-token` }), 'jeton-vigie-fichier');
+  assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/data` }), 'jeton-vigie-fichier');
+});
+
+test('pas de faux positifs au quotidien : --api-token, X-Api-Token, api-token.ts, known_hosts, droits des clés', () => {
+  for (const c of ['wrangler deploy --api-token "$CF"', 'curl -H "X-Api-Token: $T" https://exemple.test', 'cat src/routes/api-token.ts',
+    'ssh-keyscan nas.exemple.test >> ~/.ssh/known_hosts', 'chmod 600 ~/.ssh/id_ed25519', 'grep -rn "api-token" src/']) {
+    assert.equal(bash(c), null, c);
+  }
+  // le mot cherché sans guillemets reste retenu : on ne sait pas s'il désigne le fichier de Vigie
+  assert.equal(bash('grep -rn api-token ~/.vigie/data'), 'jeton-vigie');
+  assert.equal(rule('Read', { file_path: `${home}/Code/projet/src/api-token.ts` }), null);
+  assert.equal(rule('Grep', { pattern: 'api-token', path: `${home}/Code/projet` }), null);
 });
 
 test('commandes de Codex sous d\'autres noms (exec_command, shell…) : mêmes règles', () => {
@@ -90,4 +105,22 @@ test('commande démesurée : jugée vite (pas de recherche quadratique)', () => 
   bash(long);
   bash(`${'4777 '.repeat(20_000)}`);
   assert.ok(performance.now() - t0 < 1500, `${Math.round(performance.now() - t0)} ms`);
+});
+
+test('hook lancé avant les outils MCP visés, quelle que soit la casse (connecteurs claude.ai) ; pas avant Webflow ou Figma', async () => {
+  const { PRETOOL_MATCHER, anyCase } = await import('../lib/state.mjs');
+  const loose = new RegExp(PRETOOL_MATCHER);                  // Claude Code sans ancrage
+  const anchored = new RegExp(`^(?:${PRETOOL_MATCHER})$`);    // ou avec
+  const names = ['mcp__stripe__create_refund', 'mcp__claude_ai_Stripe__create_refund', 'mcp__claude_ai_Stripe__create_payment_link',
+    'mcp__claude_ai_PENNYLANE__run_operations', 'mcp__claude_ai_Qonto__create_transfer', 'mcp__claude_ai_GoCardless__create_payment',
+    'mcp__claude_ai_Gmail__delete_message', 'mcp__claude_ai_Gmail__send_message', 'mcp__claude_ai_Vercel__create_or_transfer_domain',
+    'mcp__claude_ai_Google_Drive__trash_file', 'mcp__claude_ai_Notion__notion-delete', 'mcp__Metricool__createScheduledPost',
+    'mcp__webflow-pro__data_element_tool', 'mcp__figma-perso__get_screenshot', 'mcp__claude_ai_Gmail__search_threads'];
+  for (const n of names) {
+    const guarded = !!rule(n, {});
+    assert.equal(loose.test(n), guarded, `${n} : motif sans ancrage`);
+    assert.equal(anchored.test(n), guarded, `${n} : motif ancré`);
+  }
+  assert.ok(!loose.test('mcp__webflow-pro__data_element_tool') && !loose.test('mcp__figma-perso__get_screenshot'), 'Webflow et Figma : pas de hook');
+  assert.equal(anyCase('a[_-]?\\b(?!x)'), '[aA][_-]?\\b(?![xX])', 'classes et échappements gardés');
 });

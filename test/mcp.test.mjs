@@ -1045,6 +1045,24 @@ describe('état réel des MCP (claude mcp list, faux binaire)', () => {
     } finally { delete process.env.FAKE_SLEEP_MS; }
   });
 
+  test('demande de l\'utilisateur pendant un relevé de fond : le fond s\'arrête après celui en cours, la demande passe aussitôt', async () => {
+    seedHome();
+    const { ALPHA, BACK } = seedLists();
+    process.env.FAKE_SLEEP_MS = '120';
+    try {
+      const mcp = mk({ checkPaths: () => [ALPHA, BACK] });
+      const bg = mcp.checkHealth({ background: true });
+      await waitFor(() => calls().some((c) => c.ev === 'start'));
+      const mine = mcp.checkHealth({ accounts: ['perso'], paths: [ALPHA] });
+      const r = await bg;
+      assert.ok(r.runs < 6, `le fond s'est arrêté tôt (${r.runs} relevés sur 6)`);
+      await mine;
+      const starts = calls().filter((c) => c.ev === 'start');
+      assert.equal(starts.at(-1).cwd, ALPHA, 'la demande de l\'utilisateur a bien tourné');
+      assert.equal(starts.at(-1).nice, 0, 'à priorité normale');
+    } finally { delete process.env.FAKE_SLEEP_MS; }
+  });
+
   test('délai dépassé : la CLI et les MCP qu\'elle a lancés sont arrêtés, l\'état reste « unknown »', async () => {
     seedHome(); seedLists();
     process.env.FAKE_HANG = '1';
