@@ -60,6 +60,8 @@ Reprends-les dans chaque consigne (voir `ourama-demarrer-projet/AGENT.md`, l'age
 - **Ne rien publier, ne rien envoyer** (pas de push, pas de publication Webflow, pas d'e-mail) : on prépare, on montre.
 - **Documenter dans le dossier du projet** (`CLAUDE.md`, `README.md`, `docs/`), puis un commit git local.
 - **Compte rendu court** : les liens, ce qui est fait, ce qui reste à faire (des actions, pas des questions).
+- **Le rapport pour Vigie** : le brief demande déjà à l'agent de tenir `.vigie/rapport-<id>.json` à jour (la page
+  Agents le montre) ; dis dans la consigne ce qui va dans `todo` (seulement les actions de l'utilisateur) et `links`.
 - Seulement les MCP que tout le monde a (Figma, Webflow…), pas d'outil personnel.
 
 ## Les scripts (Figma, Webflow…)

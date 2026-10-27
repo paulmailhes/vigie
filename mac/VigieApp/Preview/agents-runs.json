@@ -1,0 +1,37 @@
+{
+  "runs": [
+    {
+      "id": "8d3c1f2a-0b7e-4c55-9a61-2f4e7d1c9b30",
+      "agent": "webflow-controle-publication",
+      "name": "Contrôler un site Webflow avant publication",
+      "icon": "checkmark.seal",
+      "folder": "/Users/alex/Code/cabinet-martin",
+      "surface": "vscode",
+      "conversation": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+      "at": "2026-10-27T15:10:00Z",
+      "changedAt": "2026-10-27T15:31:00Z",
+      "report": {
+        "status": "done", "level": "block", "title": "Contrôle avant publication", "verdict": "Pas prêt : 1 point bloquant et 3 actions dans Webflow",
+        "counts": { "ok": 41, "warn": 3, "block": 1 }, "report": "docs/controle-publication-2026-10-27.md", "links": [],
+        "done": ["12 titres SEO réécrits", "8 descriptions ajoutées", "23 textes alternatifs d'images", "Données structurées LegalService sur l'accueil"],
+        "todo": [
+          { "index": 0, "text": "Brancher le domaine cabinet-martin.fr et le choisir par défaut", "where": "Site settings › Publishing", "severity": "block", "done": false },
+          { "index": 1, "text": "Relier les cartes de la liste Actualités à leur article", "where": "Designer › page Actualités › carte › Link settings", "severity": "warn", "done": false },
+          { "index": 2, "text": "Envoyer les formulaires vers l'adresse du cabinet", "where": "Site settings › Forms", "severity": "warn", "done": true }
+        ]
+      }
+    },
+    {
+      "id": "5a9e7b14-3c2d-4f80-8e6a-1b0c9d8e7f61",
+      "agent": "demarrer-projet",
+      "name": "Démarrer un projet client",
+      "icon": "sparkles",
+      "folder": "/Users/alex/Code/atelier-durand",
+      "surface": "vscode",
+      "conversation": null,
+      "at": "2026-10-27T15:40:00Z",
+      "changedAt": "2026-10-27T15:42:00Z",
+      "report": { "status": "running", "title": "Démarrer le projet Atelier Durand", "verdict": "Captures des sites de référence", "links": [], "done": ["Dossier et documentation"], "todo": [] }
+    }
+  ]
+}

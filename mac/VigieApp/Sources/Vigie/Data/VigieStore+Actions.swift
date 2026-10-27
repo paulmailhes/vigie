@@ -405,6 +405,27 @@ extension VigieStore {
         if mcp != nil { await refreshMCP() }
     }
 
+    /// Coche ou décoche une action d'un rapport d'agent : tout de suite à l'écran, en arrière si le moteur refuse.
+    func setAgentTodo(_ run: RecipeRun, _ todo: AgentTodo, done: Bool) async {
+        let before = agentRuns
+        if var list = agentRuns, let r = list.runs.firstIndex(where: { $0.id == run.id }),
+           let t = list.runs[r].report?.todo.firstIndex(where: { $0.index == todo.index }) {
+            list.runs[r].report?.todo[t].done = done
+            agentRuns = list
+        }
+        guard !isDemo else { return }
+        let body: JSONValue = ["action": "todo", "id": .string(run.id), "index": .int(todo.index), "done": .bool(done)]
+        if await write("/api/v2/agents/runs", body) == nil { agentRuns = before }
+    }
+
+    /// Retire un lancement de la liste (son rapport reste dans le dossier du projet).
+    func hideAgentRun(_ run: RecipeRun) async {
+        let before = agentRuns
+        agentRuns?.runs.removeAll { $0.id == run.id }
+        guard !isDemo else { return }
+        if await write("/api/v2/agents/runs", ["action": "hide", "id": .string(run.id)]) == nil { agentRuns = before }
+    }
+
     /// Les MCP qu'un agent utilisera (ceux choisis), vérifiés sur le compte des nouvelles conversations.
     func verifyAgentMCP(_ agent: AgentInfo) async {
         await verifyMCP(agent.mcp.compactMap(\.chosen), accountId: agentsState?.account?.id)
@@ -454,13 +475,31 @@ extension VigieStore {
         }
         let body = AgentLaunch.body(agent: agent.id, values: values, folder: folder, files: files,
                                     surface: surface, session: session, mcp: mcp)
-        let outcome = AgentLaunch.outcome(await send("/api/v2/agents/launch", body, patient: true), surface: surface)
+        // Envoi tout seul (accès Accessibilité) : il guette pendant que le moteur prépare et ouvre (et, dans VS Code,
+        // répond oui à la confiance du dossier du projet pour que l'extension démarre).
+        let auto = AgentAutoSend.allowed ? AgentAutoSend(surface: surface ?? .vscode, folder: folder, marker: ".vigie/agent-\(agent.id).md") : nil
+        let watching = auto.map { job in Task { await job.run() } }
+        let answer = await send("/api/v2/agents/launch", body, patient: true)
+        let outcome = AgentLaunch.outcome(answer, surface: surface)
         switch outcome {
         case .refused:
-            break
+            watching?.cancel()
         case .launched(let message, let copy, let alert):
-            if let copy { SystemActions.copy(copy) }
-            if alert { show(error: message) } else { show(info: message) }
+            if case .success(let result) = answer { auto?.answered(prompt: result.prompt) }
+            if let watching, !alert {
+                show(info: "\(surface?.label ?? "VS Code") s'ouvre : Vigie envoie le message à Claude…")
+                Task {
+                    if await watching.value == .sent {
+                        show(info: "Message envoyé : l'agent travaille. Son rapport s'affiche dans « Derniers lancements ».")
+                    } else {
+                        if let copy { SystemActions.copy(copy) }
+                        show(info: message)
+                    }
+                }
+            } else {
+                if let copy { SystemActions.copy(copy) }
+                if alert { show(error: message) } else { show(info: message) }
+            }
         }
         // AGENT.md modifié entre-temps (la carte le montre), ou l'endroit choisi, retenu par le moteur
         await refreshAgents()

@@ -102,6 +102,9 @@ struct DecodingTests {
                 #expect(agents.agents.contains { $0.canLaunch && $0.fields.count == 1 && $0.dropField != nil && !$0.willCreate.isEmpty },
                         "\(name)")
                 #expect(agents.surfaces?.available == [.vscode, .claudeApp], "\(name)")
+            case "agents-runs.json":
+                let runs = try decoder.decode(RecipeRunList.self, from: data)
+                #expect(runs.runs.contains { $0.report?.todo.isEmpty == false } && runs.runs.contains { $0.report?.isRunning == true }, "\(name)")
             case "agents-folder.json":
                 let folder = try decoder.decode(AgentFolderInfo.self, from: data)
                 #expect(folder.exists && folder.problem == nil, "\(name)")
@@ -245,6 +248,37 @@ struct DecodingTests {
           "spaces": [ { "id": "p1", "label": "Principal" }, { "id": "p2", "label": "Novelo" }, { "label": "sans id" } ] }
         """.utf8))
         #expect(webflow.spaces.map(\.label) == ["Principal", "Novelo"] && webflow.spaceLabel == "Novelo")
+    }
+
+    /// Les derniers lancements d'agents : leur rapport, son état en un mot ; une entrée illisible ne fait pas tomber la liste.
+    @Test func decodesRecipeRuns() throws {
+        let list = try JSONDecoder().decode(RecipeRunList.self, from: Data("""
+        { "runs": [
+          { "id": "a", "agent": "controle", "name": "Contrôler", "folder": "/Users/alex/Code/cabinet-martin", "at": "2026-10-27T15:10:00Z",
+            "report": { "status": "done", "level": "warn", "verdict": "Prêt après 2 actions", "counts": { "ok": 3 },
+                        "todo": [ { "index": 0, "text": "Brancher le domaine", "severity": "block", "done": true },
+                                  { "index": 2, "text": "Relier les fiches", "severity": "warn", "done": false }, { "text": "sans index" } ],
+                        "done": ["Titres"], "links": [ { "label": "Figma", "url": "https://figma.com/x" } ] } },
+          { "id": "b", "agent": "demarrer", "folder": "/Users/alex/Code/atelier", "report": { "status": "running" } },
+          { "id": "c", "agent": "x", "folder": "/x", "report": "illisible" },
+          { "agent": "sans id" } ] }
+        """.utf8))
+        #expect(list.runs.map(\.id) == ["a", "b", "c"])
+        let a = list.runs[0]
+        #expect(a.project == "cabinet-martin" && a.displayName == "Contrôler" && a.at != nil)
+        #expect(a.report?.todo.map(\.index) == [0, 2] && a.report?.openTodo.map(\.text) == ["Relier les fiches"])
+        #expect(RecipeRunState(a.report) == .todo(1))
+        #expect(RecipeRunState(list.runs[1].report) == .running && list.runs[1].displayName == "demarrer")
+        #expect(list.runs[2].report == nil && RecipeRunState(nil) == .running)
+        var blocked = a.report
+        blocked?.todo[0].done = false
+        #expect(RecipeRunState(blocked) == .blocked)
+        blocked?.status = "blocked"
+        #expect(RecipeRunState(blocked) == .stopped)
+        var clean = a.report
+        clean?.todo = []
+        clean?.level = "ok"
+        #expect(RecipeRunState(clean) == .ready && RecipeRunState.ready.color == Theme.live)
     }
 
     /// Des cases à cocher : leurs choix, un symbole par choix, ceux cochés d'avance (seulement parmi les choix) ; sans

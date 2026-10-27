@@ -185,6 +185,8 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
 | `POST /api/v2/mcp/project` | `{ action: "add"\|"update"\|"remove", path, name, config? }` | édite `<path>/.mcp.json` (sauvegarde) |
 | `POST /api/v2/mcp/disable` | `{ path, name, disabled: bool }` | coupe ou rallume un MCP pour un projet |
 | `POST /api/v2/accounts` | `{ action: "create", label }`, `{ action: "rename", id, label }`, `{ action: "setDefault", id }`, `{ action: "connect", id }`, `{ action: "wrapper", enable: bool }`, `{ action: "refresh", id? }` | gestion des comptes ; refresh relève l'usage (session, semaine) du compte (ou de tous) par une requête minimale, au plus une fois toutes les 10 min par compte |
+| `GET /api/v2/agents/runs` | — | les derniers lancements d'agents (50 au plus, le dernier par agent et par dossier) et le rapport de chacun : `{ runs: [{ id, agent, name, icon, folder, surface, session, conversation, at, report, reportFile, unreadable, changedAt }] }` (voir « Rapports d'agents ») |
+| `POST /api/v2/agents/runs` | `{ action: "todo", id, index, done }` ou `{ action: "hide", id }` | coche ou décoche une action du rapport (le fichier est réécrit, le reste intact) ; retire un lancement de la liste (le rapport reste dans le dossier du projet) ; 404 lancement inconnu, 400 action introuvable |
 | `POST /api/v2/agents/launch` | `{ id, values: { "<champ>": "texte" }, folder, files?, surface?, session?, mcp? }` | prépare le dossier d'un agent (fichiers joints copiés, consigne écrite) et l'ouvre dans VS Code ou l'app Claude (voir « Agents » plus bas) |
 
 `config` d'un MCP : la forme de Claude Code, `{ "type": "stdio", "command": "…", "args": [], "env": {} }` ou `{ "type": "http", "url": "…", "headers": {} }`.
@@ -517,6 +519,17 @@ Ce que le formulaire montre pour le dossier choisi (l'app le demande à chaque c
 - `sources` : noms rangés dans `<path>/sources/` (fichiers et dossiers, sans les fichiers cachés), triés, 50 au plus ;
   `[]` si `sources/` n'existe pas ou n'est pas un dossier ordinaire (un lien n'est pas lu).
 - 400 `Indique un dossier.` si `path` manque ou est vide.
+
+### Rapports d'agents
+
+Chaque lancement est noté (`data/agent-runs.json`) et son rapport part « en cours » : `<dossier>/.vigie/rapport-<id>.json`.
+Le brief dit à l'agent de le tenir à jour (section « Le rapport pour Vigie ») : `status` (`running`, `done`,
+`blocked`), `title`, `verdict`, `level` (`ok`, `warn`, `block`), `counts` (`ok`, `warn`, `block`), `report` (chemin
+du rapport détaillé, dans le dossier), `links` (`https` seulement), `done` (ce que l'agent a fait), `todo` (ce qui reste
+à l'utilisateur : `{ text, where, severity: block | warn | info, done }`). Le moteur le relit à chaque appel, vérifié
+et borné (un fichier, pas un lien, 256 Ko au plus ; textes sur une ligne ; 100 actions, 50 lignes « fait », 10 liens) :
+chaque action porte son `index` dans le fichier. Il surveille les dossiers `.vigie` des lancements montrés : un rapport
+réécrit réveille `GET /api/v2/changes`.
 
 ### POST /api/v2/agents/launch
 

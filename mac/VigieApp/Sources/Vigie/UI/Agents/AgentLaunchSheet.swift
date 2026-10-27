@@ -32,6 +32,8 @@ struct AgentLaunchSheet: View {
     @State private var launchIssue: String?
     /// Le MCP choisi par service quand plusieurs conviennent (deux Figma) ; sinon celui que propose Vigie.
     @State private var mcpPicks: [String: String] = [:]
+    /// Vigie peut envoyer le message tout seul (accès Accessibilité), relu tant que la feuille est ouverte.
+    @State private var autoSend = AgentAutoSend.allowed
     @FocusState private var focused: Focus?
 
     private enum Focus: Hashable {
@@ -547,6 +549,23 @@ struct AgentLaunchSheet: View {
     @ViewBuilder
     private var notes: some View {
         let account = store.agentsState?.account?.displayName
+        if !autoSend {
+            HStack(spacing: 8) {
+                Label("Pour que l'agent démarre tout seul, autorise Vigie dans Accessibilité (une fois) : il appuiera sur Entrée dans le champ de Claude, et fera confiance au dossier du projet dans VS Code.",
+                      systemImage: "keyboard")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Autoriser…") { AgentAutoSend.requestAccess() }
+                    .controlSize(.small)
+            }
+            .font(.callout)
+            .task {
+                while !Task.isCancelled && !autoSend {
+                    try? await Task.sleep(for: .seconds(2))
+                    autoSend = AgentAutoSend.allowed
+                }
+            }
+        }
         if account != nil || !missing.isEmpty || surfaceIssue != nil {
             VStack(alignment: .leading, spacing: 4) {
                 // l'app Claude a son propre compte : celui de Vigie ne vaut que pour VS Code

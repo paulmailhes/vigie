@@ -89,6 +89,8 @@ final class VigieStore {
     private(set) var accountsState: AccountsState?
     /// Les agents (recettes à lancer) et le compte sur lequel ils partiraient.
     private(set) var agentsState: AgentLibrary?
+    /// Les derniers lancements d'agents et leurs rapports (GET /api/v2/agents/runs).
+    var agentRuns: RecipeRunList?
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
     /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
@@ -390,6 +392,10 @@ final class VigieStore {
             update(\.agentsState, state)
             update(\.agentsProblem, nil)
             readSucceeded()
+            // les rapports : un moteur plus ancien n'en a pas, la page reste sans
+            if let list = try? await client.get("/api/v2/agents/runs", as: RecipeRunList.self), isFresh(started) {
+                update(\.agentRuns, list)
+            }
         } catch ClientError.refused(let text) {
             // moteur sans la page Agents (trop ancien) : la page le dit ; un bandeau reviendrait toutes les 30 s
             if !Task.isCancelled { update(\.agentsProblem, text) }

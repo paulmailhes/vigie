@@ -1143,6 +1143,21 @@ Prépare le projet de {{client}}.
   assert.ok(!choisi.includes('stripe :'), 'aucun MCP : rien à nommer');
   assert.match(choisi, /- webflow : « webflow-essai », espace « Agence » \(il ne voit que celui-là\) \(ses outils commencent par `mcp__webflow-essai__`\)/);
   assert.ok(choisi.indexOf('## MCP à utiliser') < choisi.indexOf('## Consignes'));
+  // le lancement est noté, son rapport « en cours » ; le rapport écrit par l'agent réveille l'app ; cocher, retirer
+  let lances = (await get('/api/v2/agents/runs')).body.runs;
+  const lance = lances.find((x) => x.folder === choix && x.agent === 'demarrer-projet');
+  assert.deepEqual([lance.name, lance.report.status, lance.surface], ['Démarrer un projet client', 'running', 'vscode']);
+  const v0 = (await get('/api/v2/changes')).body.version;
+  const attente = get(`/api/v2/changes?since=${v0}`);
+  fs.writeFileSync(path.join(choix, '.vigie', 'rapport-demarrer-projet.json'), JSON.stringify({ status: 'done', verdict: 'Prêt', todo: ['Relire le brief'] }));
+  assert.ok((await attente).body.version > v0, 'rapport changé : l\'app est prévenue');
+  assert.equal((await post('/api/v2/agents/runs', { action: 'todo', id: lance.id, index: 0, done: true })).status, 200);
+  lances = (await get('/api/v2/agents/runs')).body.runs;
+  assert.deepEqual(lances.find((x) => x.id === lance.id).report.todo.map((t) => [t.text, t.done]), [['Relire le brief', true]]);
+  assert.equal((await post('/api/v2/agents/runs', { action: 'todo', id: lance.id, index: 4, done: true })).status, 400);
+  assert.equal((await post('/api/v2/agents/runs', { action: 'hide', id: lance.id })).status, 200);
+  assert.ok(!(await get('/api/v2/agents/runs')).body.runs.some((x) => x.id === lance.id));
+  assert.equal((await post('/api/v2/agents/runs', { action: 'autre' })).status, 400);
   const again = noDates((await get('/api/v2/agents')).body.agents.find((x) => x.id === 'demarrer-projet').mcp);
   assert.deepEqual(again.filter((m) => m.service === 'figma').map((m) => [m.chosen, m.status, m.connect]),
     [['figma-equipe', 'needs-auth', null], ['figma-equipe', 'needs-auth', null]], 'le choix est retenu, pour les deux demandes de Figma');

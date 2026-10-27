@@ -54,6 +54,28 @@ Les agents sont **livrés avec Vigie** : un agent = un dossier du dépôt, `agen
 au nom invalide ou sans `AGENT.md` n'est pas listé ; un `AGENT.md` de plus de 256 Ko est listé avec une erreur, sans
 pouvoir être lancé. `node --test test/agents.test.mjs` vérifie que chaque agent livré se lit sans erreur.
 
+## Lancer sans rien faire de plus
+
+L'extension Claude Code de VS Code et l'app Claude ne font que **préremplir** le message d'un lien (un lien ne doit
+pas pouvoir faire travailler Claude). Avec l'accès « Accessibilité » de macOS (une fois, depuis le formulaire), l'app
+Vigie l'envoie toute seule (`mac/…/Data/AgentAutoSend.swift`) :
+- elle appuie sur Entrée seulement dans le champ de Claude (« Message input » dans VS Code) et seulement s'il contient
+  le message de l'agent (le chemin de son brief), puis vérifie qu'il est parti ;
+- dans VS Code, un dossier tout neuf : VS Code demande s'il fait confiance à ses auteurs et l'extension Claude Code ne
+  démarre pas avant (`untrustedWorkspaces: false`) ; Vigie répond oui pour ce dossier-là seulement, dans la fenêtre du
+  projet ;
+- une conversation déjà ouverte dans VS Code : l'extension refuse le message (« Session is already open ») ; Vigie le
+  colle dans son champ s'il est vide (jamais par-dessus un brouillon), puis l'envoie.
+
+Sans l'accès, rien ne change : le message attend dans le champ.
+
+## Le rapport pour Vigie
+
+Le brief demande à chaque agent de tenir à jour `<dossier>/.vigie/rapport-<id>.json` (forme dans `api-v2.md`,
+« Rapports d'agents »). La page Agents le montre dans « Derniers lancements », à la seconde : en cours ou terminé, le
+verdict, les décomptes, ce que l'agent a fait, ce qui reste à valider (l'utilisateur coche), le rapport détaillé, la
+conversation et le dossier. Rien à écrire dans `AGENT.md` pour ça ; une phrase qui dit quoi mettre dans `todo` aide.
+
 ## Format d'AGENT.md
 
 Un en-tête entre deux lignes `---`, puis la consigne en Markdown, écrite pour Claude.

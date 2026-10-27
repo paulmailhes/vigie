@@ -21,6 +21,7 @@ import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { createAgents, folderConversations } from './lib/agents.mjs';
+import { createRuns } from './lib/agent-runs.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
@@ -143,6 +144,41 @@ const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessions
 // Agents : recettes livrées avec Vigie (agents/<id>/AGENT.md, remplacées à chaque mise à jour), lancées dans une
 // conversation de VS Code ou de l'app Claude (lib/agents.mjs). Personne n'en ajoute : elles arrivent avec les versions.
 const agents = createAgents({ dir: AGENTS, home: HOME });
+// Lancements d'agents et leurs rapports (<dossier>/.vigie/rapport-<id>.json, lib/agent-runs.mjs) ; un rapport changé
+// prévient l'app (GET /api/v2/changes) : le moteur surveille les dossiers .vigie des lancements montrés.
+const runs = createRuns({ dataDir: DATA });
+const runWatchers = new Map();
+function watchRuns() {
+  let dirs = [];
+  try { dirs = runs.watched(); } catch { /* liste illisible : rien à suivre */ }
+  for (const [d, w] of runWatchers) if (!dirs.includes(d)) { w.close(); runWatchers.delete(d); }
+  for (const d of dirs) {
+    if (runWatchers.has(d)) continue;
+    try {
+      const w = fs.watch(d, (_, f) => { if (!f || /^rapport-.*\.json$/.test(String(f))) stateChanged(); });
+      w.on('error', () => { w.close(); runWatchers.delete(d); });
+      w.unref?.();
+      runWatchers.set(d, w);
+    } catch { /* dossier parti : rien à suivre */ }
+  }
+}
+// GET /api/v2/agents/runs : les lancements, leur rapport, et la conversation à rouvrir (celle reprise, sinon la plus
+// récente du dossier depuis le lancement).
+function runsView() {
+  return [200, { runs: runs.list().map((r) => {
+    let conversation = r.session;
+    if (!conversation) {
+      try { conversation = conversationsIn(r.folder, 5).find((c) => !c.lastActivity || c.lastActivity >= r.at)?.id ?? null; } catch { conversation = null; }
+    }
+    return { ...r, conversation };
+  }) }];
+}
+function postRuns(body) {
+  const r = body?.action === 'todo' ? runs.setTodo({ id: body.id, index: body.index, done: body.done })
+    : body?.action === 'hide' ? runs.hide({ id: body.id }) : { ok: false, status: 400, error: 'Action : todo ou hide.' };
+  if (r.ok) { watchRuns(); stateChanged(); return [200, r]; }
+  return bad(r.error, r.status || 400);
+}
 // Ouvreur : VS Code (le lien part quand la fenêtre du dossier est prête) ou l'app Claude (lib/opener.mjs).
 // VIGIE_IDE_WAIT_MS : attente maximale de la fenêtre (25 s ; plus courte dans les essais).
 const IDE_WAIT_MS = Number(process.env.VIGIE_IDE_WAIT_MS);
@@ -1667,6 +1703,11 @@ async function postAgentLaunch(body) {
       writeState(s);
     }
   } catch (e) { console.error('[vigie] surface et MCP des agents :', clean(e)); }
+  try {
+    runs.record({ agent: known?.id ?? body.id, name: known?.name ?? body.id, icon: known?.icon ?? null, folder: r.folder, surface, session });
+    watchRuns();
+    stateChanged();
+  } catch (e) { console.error('[vigie] lancement non noté :', clean(e)); }
   const localId = session && surface === 'claude-app' ? desktop.claudeSessions().get(session)?.localId ?? null : null;
   let opened = 'none';
   try { opened = await opener.launch({ surface, folder: r.folder, prompt: r.prompt, session, localId }); } catch (e) { console.error('[vigie] ouverture de l\'agent :', clean(e)); }
@@ -1753,6 +1794,8 @@ const ROUTES = [
   ['GET', /^\/api\/v2\/agents$/, () => agentsView()],
   ['GET', /^\/api\/v2\/agents\/folder$/, (_, __, url) => agentFolder(url)],
   ['POST', /^\/api\/v2\/agents\/launch$/, (_, b) => postAgentLaunch(b)],
+  ['GET', /^\/api\/v2\/agents\/runs$/, () => runsView()],
+  ['POST', /^\/api\/v2\/agents\/runs$/, (_, b) => postRuns(b)],
   ['POST', new RegExp(`^/api/v2/pending/${S}$`), ([id], b) => postPending(id, b)],
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],
   ['POST', /^\/api\/v2\/review\/([^/]{1,400})\/dismiss$/, ([id]) => postDismiss(id)],
@@ -1905,6 +1948,7 @@ function ensureWrapper() {
 server.listen(PORT, HOST, () => {
   console.log(`[vigie] http://${HOST}:${server.address().port}`);
   server6.listen(server.address().port, '::1');
+  watchRuns();
   ensureWrapper();
   vaultTick();
   setInterval(vaultTick, VAULT_EVERY_MS);

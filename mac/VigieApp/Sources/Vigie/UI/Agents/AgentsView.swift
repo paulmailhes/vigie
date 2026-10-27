@@ -50,6 +50,9 @@ struct AgentsView: View {
             } footer: {
                 footer(state)
             }
+            if let runs = store.agentRuns?.runs, !runs.isEmpty {
+                RecipeRunsSection(runs: runs)
+            }
         }
         .pageForm()
     }

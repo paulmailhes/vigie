@@ -113,7 +113,11 @@ d'abord.
 
 ## 6. Le compte rendu
 
-Court (quinze lignes au plus), sans liste de questions :
+Le rapport pour Vigie (plus haut) suit chaque étape : « en cours » pendant l'analyse, puis le verdict, le décompte
+(✅ ok, ⚠️ warn, ⛔ block), le chemin du rapport détaillé, ce que tu as corrigé (`done`) et ce qui reste à
+l'utilisateur dans Webflow (`todo`, avec `where` : l'écran et le chemin), le plus grave d'abord.
+
+Dans la conversation, court (quinze lignes au plus), sans liste de questions :
 - le verdict et le décompte ; le lien du rapport ;
 - ce que tu as corrigé ;
 - **à faire de ton côté** : les actions dans Webflow, les plus graves d'abord, puis « publie depuis Webflow quand la

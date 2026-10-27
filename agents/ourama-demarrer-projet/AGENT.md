@@ -170,7 +170,11 @@ Mets le lien du fichier dans `CLAUDE.md`, `README.md` et `docs/premier-rdv.md`.
 
 ## 7. Le compte rendu
 
-Court (une quinzaine de lignes au plus), sans liste de questions :
+Le rapport pour Vigie (plus haut) suit chaque étape : « en cours » au début, puis le verdict à la fin, le lien du
+fichier Figma dans `links`, ce que tu as fait (`done`) et ce qui reste à l'utilisateur (`todo` : fichiers à récupérer,
+captures ratées, envoi du lien au client…).
+
+Dans la conversation, court (une quinzaine de lignes au plus), sans liste de questions :
 - le lien du fichier Figma (rangé dans Ourama-projet, ou « dans tes brouillons : glisse-le dans Ourama-projet » si
   Figma a refusé le dossier) et le dossier du projet ;
 - ce que tu as compris du projet, en trois lignes ;
