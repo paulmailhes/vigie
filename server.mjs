@@ -12,7 +12,7 @@ import { createCodex } from './lib/codex.mjs';
 import { createConversations } from './lib/conversations.mjs';
 import { createAccounts, MAIN_ID, chosenAccount } from './lib/accounts.mjs';
 import { createVault, createKeychain } from './lib/vault.mjs';
-import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
+import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, SERVICE_OTHER, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
 import { ROOT, DATA, AGENTS, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
@@ -1504,6 +1504,10 @@ function postAccounts(body) {
 // conversations (celui sur lequel partira la conversation de l'agent, comme le lanceur). MCP de la passerelle : prêt
 // s'il est autorisé ; les autres : dernier relevé de `claude mcp list` pour ce compte, MCP du Mac (dossier perso), et
 // à défaut le connecteur claude.ai de ce nom (« Gmail » comme « claude.ai Gmail »).
+// Un MCP demandé par un service (« figma », ou un nom qui le dit : « figma-pro ») se contente de n'importe quel MCP de
+// ce service, quel que soit son nom (Mac, passerelle, connecteur claude.ai), le mieux connecté d'abord ; aucun :
+// « missing ». Un autre nom : ce MCP-là. `connect` : le nom à passer à POST /api/v2/mcp/connect (pas la passerelle).
+const NEED_RANK = ['connected', 'pending-approval', 'needs-auth', 'failed', 'unknown', 'disabled'];
 function agentsView() {
   const model = accounts.load();
   const accountId = chosenAccount(model, null);
@@ -1515,12 +1519,32 @@ function agentsView() {
       return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
     } catch { return 'unknown'; }
   };
+  let gw = {};
+  try { gw = gateway.status(); } catch { /* passerelle illisible : sans elle */ }
+  const need = (req) => {
+    const svc = mcpService(req);
+    if (svc === SERVICE_OTHER) return { name: req, service: null, status: status(req), servers: [req], connect: gateway.has(req) ? null : req };
+    const found = new Map();
+    for (const [n, g] of Object.entries(gw)) if (mcpService(n, { url: g.url }) === svc) found.set(n, status(n));
+    try {
+      for (const s of mcp.forProject(HOME, { accountId })) if (s.service === svc && !found.has(s.name)) found.set(s.name, status(s.name));
+      // les connecteurs claude.ai, sous leur nom court (« Figma ») ; les MCP d'un projet ne comptent pas (pas dans le
+      // dossier du nouveau projet)
+      for (const [n, st] of mcp.seenFor(accountId)) {
+        const short = n.replace(/^claude\.ai\s+/, '');
+        if (short !== n && mcpService(n) === svc && !found.has(short)) found.set(short, st);
+      }
+    } catch { /* relevés illisibles : ce qu'on a */ }
+    const servers = [...found].sort(([, a], [, b]) => NEED_RANK.indexOf(a) - NEED_RANK.indexOf(b)).map(([n]) => n);
+    const best = servers[0];
+    return { name: req, service: svc, status: best ? found.get(best) : 'missing', servers, connect: best && !gateway.has(best) ? best : null };
+  };
   const available = desktop.agentSurfaces();
   return [200, {
     account: acc ? { id: acc.id, label: acc.label || acc.id } : null,
     // où un agent peut s'ouvrir, et celui proposé (le dernier utilisé s'il est encore là)
     surfaces: { available, chosen: chooseSurface(available, readState().agentsSurface) },
-    agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map((name) => ({ name, status: status(name) })) })),
+    agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map(need) })),
   }];
 }
 

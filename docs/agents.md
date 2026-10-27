@@ -63,7 +63,7 @@ Un en-tête entre deux lignes `---`, puis la consigne en Markdown, écrite pour 
 name: Démarrer un projet client
 description: Brief, références et préparation du premier rendez-vous
 icon: wand.and.stars
-mcp: [figma-pro]
+mcp: [figma]
 folder: ~/Code
 creates:
   - Le dossier du projet et sa documentation (brief, questionnaire, références, premier rendez-vous)
@@ -96,7 +96,7 @@ Tu prépares le premier rendez-vous de ce projet, à partir de « Ce que tu as �
 | `name` | oui | nom affiché (120 caractères au plus) |
 | `description` | non | une phrase sous le nom |
 | `icon` | non | nom de symbole SF (`wand.and.stars`) |
-| `mcp` | non | MCP nécessaires, par leur nom dans Claude Code (`figma-pro`, ou `Gmail` pour un connecteur claude.ai) ; la page montre leur état |
+| `mcp` | non | MCP nécessaires, par leur service (`figma`, `webflow`, `gmail`…) : n'importe quel MCP de ce service fait l'affaire, quel que soit son nom (`figma-pro`, connecteur `claude.ai Figma`…), le mieux connecté compte ; un nom sans service connu (`outil-maison`) : ce MCP-là. La page montre leur état et propose d'ajouter ou de connecter ce qui manque |
 | `folder` | non | dossier parent proposé pour le projet, absolu ou en `~/…` (défaut `~/Code`). Il suit la règle du dossier du projet (voir « Comment il se lance »), sauf qu'il peut être le dossier perso lui-même (`~` : projets rangés en `~/<client>`) ; sinon l'agent est listé avec une erreur (« « folder » : ~/.ssh est réservé (tes clés). Change-le dans AGENT.md. ») et ne se lance pas |
 | `creates` | non | ce que l'agent crée, montré dans le formulaire (« Ce que l'agent va créer ») : des phrases courtes en lignes `- …` (ou une seule phrase), 12 au plus, 200 caractères chacune |
 | `fields` | non | le formulaire : une liste de champs (30 au plus). Souvent un seul, de type `longtext`, où l'on colle tout ce qu'on a |

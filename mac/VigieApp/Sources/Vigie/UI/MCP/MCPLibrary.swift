@@ -49,13 +49,28 @@ struct MCPLibraryEntry: Identifiable, Hashable {
     ]
 }
 
+extension MCPLibraryEntry {
+    /// Avec autorisation : par la passerelle (une autorisation pour tous les comptes, le navigateur s'ouvre une fois).
+    /// Sans autorisation, ancien format SSE, ou service qui refuse la passerelle (Figma) : déclaré tel quel dans tous
+    /// les comptes connectés, puis connecté compte par compte.
+    @MainActor func add(in store: VigieStore) async -> Bool {
+        if open || type != "http" || !viaGateway {
+            let accounts = store.accounts.filter { !$0.isCodex && $0.isConnected }.map(\.id)
+            let config: JSONValue = ["type": .string(type), "url": .string(url), "headers": .object([:])]
+            let ok = await store.mcpUser("add", name: id, config: config, accounts: accounts)
+            if ok && !open { await store.mcpConnectEverywhere(name: id) }
+            return ok
+        }
+        return await store.gateway("add", name: id, ["url": .string(url)])
+    }
+}
+
 struct MCPLibrarySheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     @State private var added: Set<String> = []
 
-    private var accounts: [Account] { store.accounts.filter { !$0.isCodex && $0.isConnected } }
     /// Les MCP du Mac qui pointent déjà vers ce serveur (même adresse, quel que soit leur nom).
     private func present(_ entry: MCPLibraryEntry) -> [String] {
         let url = entry.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -125,17 +140,7 @@ struct MCPLibrarySheet: View {
         }
     }
 
-    /// Avec autorisation : par la passerelle (une autorisation pour tous les comptes, le navigateur s'ouvre une fois).
-    /// Sans autorisation, ou ancien format SSE : déclaré tel quel dans tous les comptes.
     private func add(_ entry: MCPLibraryEntry) async {
-        let ok: Bool
-        if entry.open || entry.type != "http" || !entry.viaGateway {
-            let config: JSONValue = ["type": .string(entry.type), "url": .string(entry.url), "headers": .object([:])]
-            ok = await store.mcpUser("add", name: entry.id, config: config, accounts: accounts.map(\.id))
-            if ok && !entry.open { await store.mcpConnectEverywhere(name: entry.id) }
-        } else {
-            ok = await store.gateway("add", name: entry.id, ["url": .string(entry.url)])
-        }
-        if ok { added.insert(entry.id) }
+        if await entry.add(in: store) { added.insert(entry.id) }
     }
 }

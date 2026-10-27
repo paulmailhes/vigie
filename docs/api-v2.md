@@ -461,7 +461,7 @@ cache) et ne le crée jamais : absent, la liste est vide.
         { "id": "brief", "label": "Ce que tu as", "type": "longtext",  // text | longtext | url | urls (une adresse par ligne)
           "required": true, "help": "Colle le questionnaire, l'e-mail du client…", "placeholder": null }  // help, placeholder : ? null
       ],
-      "mcp": [ { "name": "figma-pro", "status": "connected" } ],    // MCP nécessaires et leur état pour ce compte
+      "mcp": [ { "name": "figma", "service": "figma", "status": "connected", "servers": ["figma-pro"], "connect": "figma-pro" } ],  // MCP nécessaires, pour ce compte
       "creates": ["Le dossier du projet et sa documentation", "Le fichier Figma du projet"],  // ce que l'agent crée ([] si absent)
       "error": null                                   // ? phrase si AGENT.md est illisible : agent listé mais pas lançable
     }
@@ -475,7 +475,8 @@ cache) et ne le crée jamais : absent, la liste est vide.
   disponible, sinon `null`.
 - `creates` : les phrases de la clé `creates` d'`AGENT.md` (12 au plus, 200 caractères chacune), `[]` si elle manque
   ou si l'agent est illisible.
-- `mcp[].status` : `connected` | `needs-auth` | `failed` | `pending-approval` | `disabled` | `unknown`. MCP de la passerelle : `connected` s'il est autorisé, sinon `needs-auth`. Les autres : dernier relevé de `claude mcp list` pour ce compte, et à défaut celui du connecteur claude.ai de ce nom (`Gmail` comme `claude.ai Gmail`) ; `unknown` sans relevé, ou si le MCP n'existe pas.
+- `mcp[]` : un MCP demandé par l'agent (`name`, tel qu'écrit dans `AGENT.md`). `service` : son service (`figma` pour `figma` comme pour `figma-pro`), `null` pour un nom sans service connu. Avec un service, n'importe quel MCP de ce service compte, quel que soit son nom : ceux du Mac (dossier perso), de la passerelle et les connecteurs claude.ai (sous leur nom court, `Figma`) ; `servers` les liste, le mieux connecté d'abord, et `status` est le sien (`missing` : aucun). Sans service : ce MCP-là (`servers: [name]`). `connect` : le nom à passer à `POST /api/v2/mcp/connect` pour le connecter (absent pour la passerelle, qui s'autorise par la page MCP, et quand il n'y a rien).
+- `mcp[].status` : `connected` | `needs-auth` | `failed` | `pending-approval` | `disabled` | `unknown` | `missing`. MCP de la passerelle : `connected` s'il est autorisé, sinon `needs-auth`. Les autres : dernier relevé de `claude mcp list` pour ce compte, et à défaut celui du connecteur claude.ai de ce nom (`Gmail` comme `claude.ai Gmail`) ; `unknown` sans relevé.
 - Agent illisible (`error` non nul) : `name` est celui de l'en-tête s'il se lit, sinon `id` ; `fields`, `mcp` et `creates` sont vides ; `folder` vaut ~/Code. Le `folder` de l'en-tête (un dossier parent) passe par la règle du lancement (voir `folder` plus bas), sauf qu'il peut être le dossier perso lui-même (`~`) : hors du dossier perso ou dans un dossier réservé, il donne `error`, la raison seule puis où la corriger (`« folder » : <raison> Change-le dans AGENT.md.`, par exemple « « folder » : ~/.ssh est réservé (tes clés). Change-le dans AGENT.md. » ou « « folder » : il doit être dans ton dossier perso. Change-le dans AGENT.md. »), et l'agent ne se lance pas (`Cet agent ne peut pas être lancé : « folder » : …`). Un sous-dossier au nom invalide, sans `AGENT.md`, ou un fichier à la place d'un dossier n'est pas listé. `AGENT.md` de plus de 256 Ko : listé avec une erreur. 200 agents au plus.
 
 ### GET /api/v2/agents/folder?path=<chemin absolu ou ~/…>

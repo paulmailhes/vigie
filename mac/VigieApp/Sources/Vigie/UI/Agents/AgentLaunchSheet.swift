@@ -534,10 +534,14 @@ struct AgentLaunchSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 if !toFix.isEmpty {
-                    let list = toFix.map { "\($0.name) (\(MCPStatusStyle.label($0.mcpStatus)))" }
+                    let list = toFix.map { "\($0.title) (\($0.isMissing ? "à ajouter" : MCPStatusStyle.label($0.mcpStatus)))" }
                         .formatted(.list(type: .and).locale(Fmt.locale))
-                    Label("À régler d'abord sur la page MCP : \(list).", systemImage: "exclamationmark.triangle")
+                    let here = toFix.allSatisfy(AgentMCPFixes.fixedHere)
+                    Label(here ? "À régler d'abord : \(list)." : "À régler d'abord sur la page MCP : \(list).",
+                          systemImage: "exclamationmark.triangle")
                         .foregroundStyle(Theme.warn)
+                    HStack(spacing: 10) { AgentMCPFixes(agent: agent, pageLink: false) }
+                        .buttonStyle(.link)
                 }
                 if let surfaceIssue {
                     Label(surfaceIssue, systemImage: "exclamationmark.triangle")

@@ -2,7 +2,7 @@
 name: Démarrer un projet Ourama
 description: Brand ou site, jusqu'au premier rendez-vous - documentation, sources, références et fichier Figma du projet monté sur le modèle Ourama
 icon: sparkles
-mcp: [figma-pro]
+mcp: [figma]
 folder: ~/Code
 creates:
   - Le dossier du projet et sa documentation (brief, questionnaire rangé, sources, références, premier rendez-vous)
@@ -106,8 +106,9 @@ c'est certain (titre identique), sinon « à retrouver ».
 ## 5. Le fichier Figma du projet
 
 Le MCP Figma ne sait pas dupliquer un fichier : tu **construis** le fichier avec les scripts de
-`{{dossier_agent}}/figma/`. Avant : charge en une fois les outils du MCP **figma-pro** (`create_new_file`,
-`create_session`, `use_figma`, `upload_assets`, `get_screenshot`) et la compétence **/figma-use** (ou la ressource
+`{{dossier_agent}}/figma/`. Avant : charge en une fois les outils du **MCP Figma**, quel que soit son nom (`figma`,
+`figma-pro`, `claude.ai Figma`… : celui qui répond ; s'il y en a plusieurs, celui dont `whoami` montre l'équipe
+OURAMA) : `create_new_file`, `create_session`, `use_figma`, `upload_assets`, `get_screenshot`, et la compétence **/figma-use** (ou la ressource
 `skill://figma/figma-use/SKILL.md`), obligatoire avant tout `use_figma` (`skillNames: "resource:figma-use"`).
 
 Recopie chaque script **tel quel** dans `code` ; tu ne remplaces que `__PARAMS__` ou `__DONNEES__` (objet JSON valide,
@@ -120,8 +121,9 @@ ses sections), UX (les maquettes grises des pages), Brandbook, Toolbox, Composan
 
 1. **Fichier** : s'il y a déjà un lien Figma dans `CLAUDE.md`, garde ce fichier. Sinon `create_new_file` :
    `fileName` « <Client> — Projet », `editorType` « design », `planKey` : celui de l'équipe OURAMA, donné par
-   `whoami` (pas d'équipe OURAMA parmi plusieurs : demande laquelle avec l'outil de questions). Le fichier part dans
-   les brouillons de l'équipe. Puis `create_session`.
+   `whoami` (pas d'équipe OURAMA parmi plusieurs : demande laquelle avec l'outil de questions), `projectId`
+   « 422855434 » (le dossier Ourama-projet de l'équipe). Si Figma refuse ce dossier (pas d'accès), recrée-le sans
+   `projectId` (il part dans les brouillons) et dis-le dans le compte rendu. Puis `create_session`.
 2. `01-fondations.js` (il rend l'identifiant de chaque page).
 3. Logo Ourama : `upload_assets` (`count: 1`, `currentPageId` = page Composants), envoi de
    `{{dossier_agent}}/figma/logo-ourama.svg` (type image/svg+xml).
@@ -169,7 +171,8 @@ Mets le lien du fichier dans `CLAUDE.md`, `README.md` et `docs/premier-rdv.md`.
 ## 7. Le compte rendu
 
 Court (une quinzaine de lignes au plus), sans liste de questions :
-- le lien du fichier Figma (« dans tes brouillons : glisse-le dans Ourama-projet ») et le dossier du projet ;
+- le lien du fichier Figma (rangé dans Ourama-projet, ou « dans tes brouillons : glisse-le dans Ourama-projet » si
+  Figma a refusé le dossier) et le dossier du projet ;
 - ce que tu as compris du projet, en trois lignes ;
 - ce que tu as tiré des sources (fichiers, logos, couleurs) et les sites capturés ;
 - **à faire de ton côté** : seulement des actions (fichiers à récupérer, captures ratées, envoi du lien au client…).

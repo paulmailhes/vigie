@@ -198,6 +198,23 @@ struct DecodingTests {
         #expect(account?.displayName == "Travail 1")
     }
 
+    /// Un MCP demandé par son service : « Figma » quel que soit le nom du MCP trouvé ; aucun : à ajouter d'ici.
+    @Test func decodesAgentMCPByService() throws {
+        let mcp = try JSONDecoder().decode([AgentMCP].self, from: Data("""
+        [ { "name": "figma", "service": "figma", "status": "connected", "servers": ["figma-pro", "Figma"], "connect": "figma-pro" },
+          { "name": "figma", "service": "figma", "status": "missing", "servers": [], "connect": null },
+          { "name": "Gmail", "service": "gmail", "status": "needs-auth", "servers": ["Gmail"], "connect": "Gmail" },
+          { "name": "webflow-pro", "service": "webflow", "status": "needs-auth", "servers": ["webflow-pro"], "connect": null },
+          { "name": "outil-maison", "status": "connected", "servers": "oups" } ]
+        """.utf8))
+        #expect(mcp.map(\.title) == ["Figma", "Figma", "Gmail", "Webflow", "outil-maison"])
+        #expect(mcp[0].servers == ["figma-pro", "Figma"] && !mcp[0].isMissing)
+        #expect(mcp[1].isMissing && mcp[1].libraryEntry?.id == "figma" && AgentMCPFixes.fixedHere(mcp[1]))
+        #expect(AgentMCPFixes.fixedHere(mcp[2]), "un connecteur à connecter : d'ici")
+        #expect(!AgentMCPFixes.fixedHere(mcp[3]), "la passerelle : par la page MCP")
+        #expect(mcp[4].servers.isEmpty && mcp[4].service == nil)
+    }
+
     /// Dossier proposé : <dossier parent>/<nom du client sans accents ni ponctuation>, 60 caractères au plus.
     @Test func agentFolderNames() throws {
         #expect(AgentSlug.make("Cabinet Martin") == "cabinet-martin")

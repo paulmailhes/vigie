@@ -1031,7 +1031,8 @@ const AgentsList = {
   account: opt({ id: 'string', label: 'string' }), surfaces: { available: arr(SURFACE), chosen: opt(SURFACE) },
   agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
     fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
-    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES) }), creates: arr('string'), error: opt('string') }),
+    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES, 'missing'), service: opt('string'), servers: arr('string'), connect: opt('string') }),
+    creates: arr('string'), error: opt('string') }),
 };
 const AgentFolder = {
   path: 'string', exists: 'bool', error: opt('string'),
@@ -1046,7 +1047,7 @@ test('agents : liste avec l\'état des MCP pour le compte des nouvelles conversa
 name: Démarrer un projet client
 description: Brief et premier rendez-vous
 icon: wand.and.stars
-mcp: [figma-perso, inexistant, webflow-essai, notion-essai, Gmail]
+mcp: [figma-perso, inexistant, webflow-essai, notion-essai, Gmail, figma, stripe]
 creates:
   - Le dossier du projet et sa documentation
   - Le fichier Figma du projet
@@ -1079,9 +1080,16 @@ Prépare le projet de {{client}}.
   assert.deepEqual(a.creates, ['Le dossier du projet et sa documentation', 'Le fichier Figma du projet']);
   assert.deepEqual(r.body.agents[0].creates, []);
   assert.deepEqual(a.fields.map((f) => [f.id, f.type, f.required]), [['client', 'text', true], ['questionnaire', 'longtext', false]]);
-  assert.deepEqual(a.mcp[0], { name: 'figma-perso', status: 'connected' }, 'relevé de l\'essai « état réel des MCP »');
-  assert.deepEqual(a.mcp.slice(1), [{ name: 'inexistant', status: 'unknown' }, { name: 'webflow-essai', status: 'connected' }, { name: 'notion-essai', status: 'needs-auth' },
-    { name: 'Gmail', status: 'needs-auth' }], 'passerelle : prête si autorisée ; connecteur claude.ai sous son nom court');
+  const need = (name, service, status, servers, connect) => ({ name, service, status, servers, connect });
+  assert.deepEqual(a.mcp, [
+    need('figma-perso', 'figma', 'connected', ['figma-perso'], 'figma-perso'), // relevé de l'essai « état réel des MCP »
+    need('inexistant', null, 'unknown', ['inexistant'], 'inexistant'),           // un nom sans service : ce MCP-là
+    need('webflow-essai', 'webflow', 'connected', ['webflow-essai'], null),      // passerelle : prête si autorisée,
+    need('notion-essai', 'notion', 'needs-auth', ['notion-essai'], null),        // connectée par la page MCP
+    need('Gmail', 'gmail', 'needs-auth', ['Gmail'], 'Gmail'),                    // connecteur claude.ai, sous son nom court
+    need('figma', 'figma', 'connected', ['figma-perso'], 'figma-perso'),         // « figma » : n'importe quel Figma
+    need('stripe', 'stripe', 'missing', [], null),                               // aucun : à ajouter
+  ]);
   fs.rmSync(GW);
   assert.equal((await raw('GET', '/api/v2/agents', { token: null })).status, 401);
 

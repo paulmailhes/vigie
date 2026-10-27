@@ -58,7 +58,7 @@ struct AgentInfo: Decodable, Equatable, Sendable, Identifiable {
     /// Les MCP nécessaires à régler avant de lancer (à connecter, en échec, à approuver, coupés). Pas encore vérifié
     /// n'en fait pas partie : il marche peut-être.
     var mcpToFix: [AgentMCP] {
-        mcp.filter { [.needsAuth, .failed, .pendingApproval, .disabled].contains($0.mcpStatus) }
+        mcp.filter { $0.isMissing || [.needsAuth, .failed, .pendingApproval, .disabled].contains($0.mcpStatus) }
     }
 
     /// Dossier parent des projets de cet agent (~/Code si l'AGENT.md n'en dit rien).
@@ -123,15 +123,26 @@ struct AgentField: Decodable, Equatable, Sendable, Identifiable {
 }
 
 /// Un MCP nécessaire à l'agent et son état (le même que sur la page MCP). Un simple nom est accepté aussi.
+/// Un MCP demandé par un agent. Demandé par son service (« figma ») : n'importe quel MCP de ce service fait l'affaire,
+/// quel que soit son nom ; `servers` dit lesquels, le mieux connecté d'abord. `status` « missing » : aucun.
 struct AgentMCP: Decodable, Equatable, Sendable, Identifiable {
     var name: String
     var status: String?
+    var service: String?
+    var servers: [String] = []
+    /// Le nom à connecter depuis la page Agents (absent : rien à connecter ici, ou par la page MCP).
+    var connect: String?
 
     var id: String { name }
     var mcpStatus: MCPStatus { MCPStatus(raw: status) }
+    var isMissing: Bool { status == "missing" }
+    /// Le MCP officiel de ce service dans la bibliothèque, pour l'ajouter d'un clic.
+    var libraryEntry: MCPLibraryEntry? { service.flatMap { s in MCPLibraryEntry.all.first { $0.id == s } } }
+    /// « Figma » plutôt que « figma-pro » : le service compte, pas le nom.
+    var title: String { libraryEntry?.title ?? name }
 
     private enum CodingKeys: String, CodingKey {
-        case name, status
+        case name, status, service, servers, connect
     }
 
     init(from decoder: any Decoder) throws {
@@ -143,6 +154,9 @@ struct AgentMCP: Decodable, Equatable, Sendable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
         status = try? container.decodeIfPresent(String.self, forKey: .status)
+        service = try? container.decodeIfPresent(String.self, forKey: .service)
+        servers = ((try? container.decodeIfPresent([String].self, forKey: .servers)) ?? nil) ?? []
+        connect = try? container.decodeIfPresent(String.self, forKey: .connect)
     }
 }
 
