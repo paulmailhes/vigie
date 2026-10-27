@@ -133,7 +133,11 @@ struct MCPAccountIssues: View {
                         Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
                     }
                     Button("Vérifier de nouveau", systemImage: "arrow.triangle.2.circlepath") {
-                        Task { await store.mcpCheck(accountId: account.id, path: path) }
+                        // un MCP du Mac : vérifié seul (quelques secondes) ; d'un projet : le relevé de ce dossier
+                        Task {
+                            if path == nil { await store.verifyMCP([name], accountId: account.id) }
+                            else { await store.mcpCheck(accountId: account.id, path: path) }
+                        }
                     }
                 }
             }

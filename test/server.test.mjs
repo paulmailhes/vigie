@@ -163,6 +163,7 @@ function seed() {
 import fs from 'node:fs'; import path from 'node:path';
 const [top, sub, name, json] = process.argv.slice(2);
 if (top !== 'mcp') process.exit(2);
+if (sub === 'get') { console.log(name + ':\\n  Scope: User config\\n  Status: ✔ Connected\\n  Type: http'); process.exit(0); }
 if (sub === 'list') {
   console.log('Checking MCP server health…\\n');
   console.log('claude.ai Gmail: https://gmail.mcp.claude.com/mcp - ! Needs authentication');
@@ -545,6 +546,25 @@ test('état réel des MCP : relevé à la demande (faux claude mcp list), par co
   assert.equal(r.status, 400);
   assert.equal(r.body.error, 'Compte inconnu');
   assert.equal((await post('/api/v2/mcp/check', { path: 'relatif' })).status, 400);
+});
+
+test('un seul MCP vérifié (claude mcp get) : son état dans la réponse, et l\'attente des changements réveillée aussitôt', async () => {
+  const v0 = (await get('/api/v2/changes')).body.version; // sans « since » : tout de suite
+  assert.ok(Number.isInteger(v0));
+  const t0 = Date.now();
+  const waiting = get(`/api/v2/changes?since=${v0}`);
+  const r = await post('/api/v2/mcp/verify', { names: ['figma-perso'], accountId: 'travail1' });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(r.body.results.map((x) => [x.name, x.accountId, x.status]), [['figma-perso', 'travail1', 'connected']]);
+  assert.match(r.body.results[0].checkedAt, /^\d{4}-/);
+  const w = await waiting;
+  assert.ok(w.body.version > v0, 'un état a changé');
+  assert.ok(Date.now() - t0 < 5000, `réveillé en ${Date.now() - t0} ms`);
+  assert.equal((await get(`/api/v2/changes?since=${v0}`)).body.version, w.body.version, 'en retard : réponse immédiate');
+  for (const body of [{ names: [] }, { names: 'figma-perso' }, { names: ['figma-perso'], accountId: 'inconnu' }, { names: ['--help'] }]) {
+    assert.equal((await post('/api/v2/mcp/verify', body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await raw('GET', '/api/v2/changes', { token: null })).status, 401);
 });
 
 // ---------- écritures ----------
@@ -1032,7 +1052,7 @@ const AgentsList = {
   agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
     fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
     mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES, 'missing'), service: opt('string'),
-      servers: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES), connect: 'bool' }), chosen: opt('string'), connect: opt('string') }),
+      servers: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES), checkedAt: opt(ISO), connect: 'bool' }), chosen: opt('string'), connect: opt('string') }),
     creates: arr('string'), error: opt('string') }),
 };
 const AgentFolder = {
@@ -1086,7 +1106,10 @@ Prépare le projet de {{client}}.
   const need = (name, service, status, servers, chosen, connect) =>
     ({ name, service, status, servers: servers.map(([n, st, c]) => ({ name: n, status: st, connect: c })), chosen, connect });
   const figmas = [['figma-perso', 'connected', true], ['figma-equipe', 'needs-auth', false]];
-  assert.deepEqual(a.mcp, [
+  assert.match(a.mcp[0].servers[0].checkedAt, /^\d{4}-/, 'la date du relevé qui l\'a vu');
+  assert.equal(a.mcp[0].servers[1].checkedAt, null, 'la passerelle sait sans relevé');
+  const noDates = (list) => list.map((m) => ({ ...m, servers: m.servers.map(({ checkedAt, ...x }) => x) }));
+  assert.deepEqual(noDates(a.mcp), [
     need('figma-perso', 'figma', 'connected', figmas, 'figma-perso', 'figma-perso'), // relevé « état réel des MCP »
     need('inexistant', null, 'unknown', [['inexistant', 'unknown', true]], 'inexistant', 'inexistant'), // sans service : ce MCP-là
     need('webflow-essai', 'webflow', 'connected', [['webflow-essai', 'connected', false]], 'webflow-essai', null), // passerelle :
@@ -1111,7 +1134,7 @@ Prépare le projet de {{client}}.
   assert.match(choisi, /- gmail : « Gmail » \(ses outils commencent par `mcp__claude_ai_Gmail__`\)/, 'un connecteur : ses outils sous son nom claude.ai');
   assert.ok(!choisi.includes('stripe :'), 'aucun MCP : rien à nommer');
   assert.ok(choisi.indexOf('## MCP à utiliser') < choisi.indexOf('## Consignes'));
-  const again = (await get('/api/v2/agents')).body.agents.find((x) => x.id === 'demarrer-projet').mcp;
+  const again = noDates((await get('/api/v2/agents')).body.agents.find((x) => x.id === 'demarrer-projet').mcp);
   assert.deepEqual(again.filter((m) => m.service === 'figma').map((m) => [m.chosen, m.status, m.connect]),
     [['figma-equipe', 'needs-auth', null], ['figma-equipe', 'needs-auth', null]], 'le choix est retenu, pour les deux demandes de Figma');
   fs.rmSync(choix, { recursive: true, force: true });

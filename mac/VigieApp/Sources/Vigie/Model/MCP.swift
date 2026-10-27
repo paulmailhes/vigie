@@ -94,6 +94,11 @@ struct Connector: Decodable, Equatable, Sendable, Identifiable {
     var id: String { "\(name)|\(accountId ?? "")" }
 }
 
+/// GET /api/v2/changes : le numéro du dernier changement d'état des MCP dans le moteur.
+struct ChangeVersion: Decodable, Sendable {
+    var version: Int
+}
+
 enum MCPStatus: String, Sendable {
     case connected
     case needsAuth = "needs-auth"

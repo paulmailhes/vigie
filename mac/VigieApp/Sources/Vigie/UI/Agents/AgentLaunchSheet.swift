@@ -56,6 +56,7 @@ struct AgentLaunchSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     projectView
+                    if !picked.mcpNeeds.isEmpty { AgentMCPPanel(agent: picked, picks: $mcpPicks, disabled: launching) }
                     if let info, !info.resumable.isEmpty { conversationView(info.resumable) }
                     ForEach(otherFields) { field in
                         fieldView(field)
@@ -87,7 +88,8 @@ struct AgentLaunchSheet: View {
         height += 44 + CGFloat(attachments.items.count) * 26
         if let info, !info.resumable.isEmpty { height += 130 }
         if !agent.willCreate.isEmpty { height += 34 + CGFloat(agent.willCreate.count) * 22 }
-        height += CGFloat(choosable.count) * 30
+        let needs = picked.mcpNeeds.count
+        if needs > 0 { height += 50 + CGFloat(needs) * 52 }
         return min(780, height)
     }
 
@@ -459,10 +461,10 @@ struct AgentLaunchSheet: View {
             && legacyFilesIssue == nil && box.copying == 0
     }
 
-    /// L'agent avec les MCP choisis ici : leur état et ce qui reste à régler suivent le choix.
+    /// L'agent tel que le moteur le voit maintenant (l'état de ses MCP suit à la seconde), avec les MCP choisis ici.
     private var picked: AgentInfo {
-        var copy = agent
-        copy.mcp = agent.mcp.map { mcp in mcpPicks[mcp.key].map(mcp.picking) ?? mcp }
+        var copy = store.agentsState?.agents.first { $0.id == agent.id } ?? agent
+        copy.mcp = copy.mcp.map { mcp in mcpPicks[mcp.key].map(mcp.picking) ?? mcp }
         return copy
     }
 
@@ -472,29 +474,8 @@ struct AgentLaunchSheet: View {
         return picked.mcp.filter { $0.servers.count > 1 && seen.insert($0.key).inserted }
     }
 
-    /// Deux Figma (ou plus) : lequel l'agent utilisera. Vigie retient le choix pour la fois suivante.
-    @ViewBuilder
-    private var mcpChoice: some View {
-        let list = choosable
-        if !list.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(list) { mcp in
-                    Picker(mcp.title, selection: Binding { mcp.chosen ?? mcp.servers.first?.name ?? "" } set: { mcpPicks[mcp.key] = $0 }) {
-                        ForEach(mcp.servers) { server in
-                            Text("\(server.name) — \(MCPStatusStyle.label(server.mcpStatus))").tag(server.name)
-                        }
-                    }
-                    .fixedSize()
-                    .disabled(launching)
-                    .help("L'agent n'utilisera que ce \(mcp.title) ; Vigie s'en souviendra la prochaine fois")
-                }
-            }
-        }
-    }
-
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
-            mcpChoice
             notes
             if let launchIssue {
                 Label(launchIssue, systemImage: "exclamationmark.triangle.fill")
@@ -554,14 +535,11 @@ struct AgentLaunchSheet: View {
         .help("Vigie prépare le dossier et y copie les fichiers joints, puis ouvre \(chosenSurface?.label ?? "la conversation") avec le message à envoyer")
     }
 
-    /// Le compte sur lequel partira la conversation, les MCP à régler avant (l'agent s'arrêterait en route), ce qui
-    /// reste à remplir.
+    /// Le compte sur lequel partira la conversation, ce qui reste à remplir (les MCP ont leur bloc, « Outils »).
     @ViewBuilder
     private var notes: some View {
         let account = store.agentsState?.account?.displayName
-        let toFix = picked.mcpToFix
-        let unchecked = AgentMCPFixes.needsCheck(picked)
-        if account != nil || !toFix.isEmpty || unchecked || !missing.isEmpty || surfaceIssue != nil {
+        if account != nil || !missing.isEmpty || surfaceIssue != nil {
             VStack(alignment: .leading, spacing: 4) {
                 // l'app Claude a son propre compte : celui de Vigie ne vaut que pour VS Code
                 if chosenSurface == .claudeApp {
@@ -570,24 +548,6 @@ struct AgentLaunchSheet: View {
                 } else if let account {
                     Label("Partira sur le compte \(account) (celui des nouvelles conversations).", systemImage: Icon.account)
                         .foregroundStyle(.secondary)
-                }
-                if !toFix.isEmpty {
-                    let list = toFix.map { "\($0.title) (\($0.isMissing ? "à ajouter" : MCPStatusStyle.label($0.mcpStatus)))" }
-                        .formatted(.list(type: .and).locale(Fmt.locale))
-                    let here = toFix.allSatisfy(AgentMCPFixes.fixedHere)
-                    Label(here ? "À régler d'abord : \(list)." : "À régler d'abord sur la page MCP : \(list).",
-                          systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Theme.warn)
-                }
-                if unchecked {
-                    let names = picked.mcp.filter { $0.mcpStatus == .unknown && !$0.isMissing }.map(\.title)
-                        .formatted(.list(type: .and).locale(Fmt.locale))
-                    Label("Pas encore vérifié : \(names).", systemImage: "circle.dashed")
-                        .foregroundStyle(.secondary)
-                }
-                if !toFix.isEmpty || unchecked {
-                    HStack(spacing: 10) { AgentMCPFixes(agent: picked, pageLink: false) }
-                        .buttonStyle(.link)
                 }
                 if let surfaceIssue {
                     Label(surfaceIssue, systemImage: "exclamationmark.triangle")

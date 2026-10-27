@@ -71,9 +71,27 @@ const updater = createUpdater({ root: ROOT, dataDir: DATA });
 // Apps de bureau (Claude, ChatGPT/Codex) : titres de l'app Claude, outils installés (lib/desktop.mjs). VIGIE_APPS_DIR :
 // un faux /Applications pour les essais.
 const desktop = createDesktop({ home: accounts.paths.home, apps: process.env.VIGIE_APPS_DIR || '/Applications' });
+// Changements d'état des MCP (relevé, vérification, autorisation par la passerelle) : GET /api/v2/changes?since=N
+// attend le suivant, 20 s au plus ; l'app relit alors ce qu'elle montre, à la seconde.
+let changeVersion = 0;
+const changeWaiters = new Set();
+function stateChanged() {
+  changeVersion++;
+  for (const w of changeWaiters) w();
+  changeWaiters.clear();
+}
+function changesSince(url) {
+  const since = Number(url.searchParams.get('since'));
+  if (!Number.isInteger(since) || since < 0 || since !== changeVersion) return [200, { version: changeVersion }];
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(t); changeWaiters.delete(done); resolve([200, { version: changeVersion }]); };
+    const t = setTimeout(done, 20_000);
+    changeWaiters.add(done);
+  });
+}
 // Passerelle MCP : une autorisation par service pour tous les comptes (lib/gateway.mjs). Port lu au moment voulu
 // (les tests lancent le moteur sur un port libre).
-const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`) });
+const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`), onChange: stateChanged });
 const HOME = accounts.paths.home;
 // Coffre des connexions : copie chiffrée de la connexion de chaque compte, remise si une app la perd (lib/vault.mjs).
 // Le vrai trousseau seulement sur le vrai dossier perso (jamais pendant les tests), sinon un faux security
@@ -119,6 +137,7 @@ const mcp = createMcp({
   checkPaths: () => mcpCheckPaths(),
   canCheck: (a) => accounts.connected(a.id),
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
+  onChange: stateChanged,
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
 // Agents : recettes livrées avec Vigie (agents/<id>/AGENT.md, remplacées à chaque mise à jour), lancées dans une
@@ -1453,6 +1472,11 @@ async function postMcpDisable(body) {
 async function postMcpCheck(body) {
   return mcpReply(await mcp.requestCheck({ accountId: body.accountId, path: body.path }));
 }
+// POST /api/v2/mcp/verify { names, accountId? } → { ok, results: [{ name, accountId, status, checkedAt?, pending? }] } :
+// chaque MCP vérifié seul (≈ 2 s), la réponse attend les résultats.
+async function postMcpVerify(body) {
+  return mcpReply(await mcp.verify({ names: body.names, accountId: body.accountId }));
+}
 // POST /api/v2/mcp/connect { name, accountId?, path?, scope? } → { ok, message, mode: browser | terminal }.
 // L'app montre un connecteur sous son nom (« Gmail ») : la CLI l'appelle « claude.ai Gmail ».
 function connectName(body) {
@@ -1511,12 +1535,22 @@ function postAccounts(body) {
 // le nom à passer à POST /api/v2/mcp/connect (pas pour la passerelle, qui s'autorise par la page MCP).
 const NEED_RANK = ['connected', 'pending-approval', 'needs-auth', 'failed', 'unknown', 'disabled'];
 const needKey = (n) => n.service ?? n.name; // la clé d'un choix retenu (data/state.json, agentsMcp)
+// { status, checkedAt } ; la passerelle sait tout de suite (autorisée ou pas), sans relevé.
 function needStatus(name, accountId) {
   try {
-    if (gateway.has(name)) return gateway.ready(name) ? 'connected' : 'needs-auth';
-    const s = mcp.statusFor(name, { accountId, cwd: HOME });
-    return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
-  } catch { return 'unknown'; }
+    if (gateway.has(name)) return { status: gateway.ready(name) ? 'connected' : 'needs-auth', checkedAt: null };
+    const s = mcp.healthOf(name, { accountId, cwd: HOME });
+    return s.status !== 'unknown' ? s : mcp.healthOf(name, { accountId, cwd: HOME, scope: 'connector' });
+  } catch { return { status: 'unknown', checkedAt: null }; }
+}
+// Un MCP jamais vérifié pour ce compte (ajouté à l'instant, relevés pas encore faits) : vérifié seul en fond, une
+// fois par minute au plus ; l'app le voit arriver par GET /api/v2/changes.
+const autoVerified = new Map();
+function verifySoon(name, accountId) {
+  const k = `${accountId}\u0000${name}`;
+  if (Date.now() - (autoVerified.get(k) || 0) < 60_000) return;
+  autoVerified.set(k, Date.now());
+  mcp.verify({ names: [name], accountId }).catch(() => {});
 }
 // `tools` (pas dans la réponse) : le début du nom de ses outils, que le brief donne à l'agent.
 function agentNeeds(list, accountId) {
@@ -1528,26 +1562,27 @@ function agentNeeds(list, accountId) {
   return list.map((req) => {
     const svc = mcpService(req);
     const found = new Map();
-    const add = (n, status, cli = n) => { if (!found.has(n)) found.set(n, { status, tools: `mcp__${toolKey(cli)}__` }); };
+    const add = (n, h, cli = n) => { if (!found.has(n)) found.set(n, { ...h, tools: `mcp__${toolKey(cli)}__` }); };
     if (svc === SERVICE_OTHER) add(req, needStatus(req, accountId));
     else {
       for (const [n, g] of Object.entries(gw)) if (mcpService(n, { url: g.url }) === svc) add(n, needStatus(n, accountId));
       for (const s of declared) if (s.service === svc) add(s.name, needStatus(s.name, accountId));
       // les connecteurs claude.ai, sous leur nom court (« Figma ») ; les MCP d'un projet ne comptent pas (pas dans le
       // dossier du nouveau projet)
-      for (const [n, st] of seen) {
+      for (const [n] of seen) {
         const short = n.replace(/^claude\.ai\s+/, '');
-        if (short !== n && mcpService(n) === svc) add(short, st, n);
+        if (short !== n && mcpService(n) === svc) add(short, mcp.healthOf(n, { accountId, cwd: HOME }), n);
       }
     }
     const servers = [...found].sort(([, a], [, b]) => NEED_RANK.indexOf(a.status) - NEED_RANK.indexOf(b.status))
-      .map(([n, f]) => ({ name: n, status: f.status, connect: !gateway.has(n), tools: f.tools }));
+      .map(([n, f]) => ({ name: n, status: f.status, checkedAt: f.checkedAt ?? null, connect: !gateway.has(n), tools: f.tools }));
+    for (const x of servers) if (x.status === 'unknown' && x.connect && accountId) verifySoon(x.name, accountId);
     const need = { name: req, service: svc === SERVICE_OTHER ? null : svc };
     const chosen = servers.find((x) => x.name === remembered[needKey(need)]) ?? servers[0] ?? null;
     return { ...need, status: chosen ? chosen.status : 'missing', servers, chosen: chosen?.name ?? null, connect: chosen?.connect ? chosen.name : null };
   });
 }
-const needView = (n) => ({ ...n, servers: n.servers.map(({ name, status, connect }) => ({ name, status, connect })) });
+const needView = (n) => ({ ...n, servers: n.servers.map(({ tools, ...x }) => x) });
 function agentsView() {
   const model = accounts.load();
   const accountId = chosenAccount(model, null);
@@ -1708,6 +1743,8 @@ const ROUTES = [
   ['POST', /^\/api\/v2\/mcp\/project$/, (_, b) => postMcpProject(b)],
   ['POST', /^\/api\/v2\/mcp\/disable$/, (_, b) => postMcpDisable(b)],
   ['POST', /^\/api\/v2\/mcp\/check$/, (_, b) => postMcpCheck(b)],
+  ['POST', /^\/api\/v2\/mcp\/verify$/, (_, b) => postMcpVerify(b)],
+  ['GET', /^\/api\/v2\/changes$/, (_, __, url) => changesSince(url)],
   ['POST', /^\/api\/v2\/mcp\/connect$/, (_, b) => postMcpConnect(b)],
   ['POST', /^\/api\/v2\/accounts$/, (_, b) => postAccounts(b)],
   ['GET', /^\/api\/v2\/agents$/, () => agentsView()],

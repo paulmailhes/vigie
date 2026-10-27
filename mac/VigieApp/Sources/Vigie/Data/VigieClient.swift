@@ -108,8 +108,9 @@ struct VigieClient: Sendable {
 
     // MARK: Lecture
 
+    /// `patient` : la réponse peut tarder (GET /api/v2/changes attend un changement, 20 s au plus).
     @concurrent
-    func get<T: Decodable & Sendable>(_ path: String, as type: T.Type = T.self) async throws -> T {
+    func get<T: Decodable & Sendable>(_ path: String, as type: T.Type = T.self, patient: Bool = false) async throws -> T {
         let data: Data
         switch source {
         case .fixtures(let folder):
@@ -121,7 +122,7 @@ struct VigieClient: Sendable {
             guard let url = URL(string: base.absoluteString + path) else { throw ClientError.unreachable }
             var request = URLRequest(url: url)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            data = try await Self.send(request)
+            data = try await Self.send(request, session: patient ? Self.patientSession : Self.session)
         }
         do {
             return try JSONDecoder().decode(T.self, from: data)

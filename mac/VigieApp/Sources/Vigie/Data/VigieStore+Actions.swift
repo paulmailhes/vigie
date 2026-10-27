@@ -387,21 +387,27 @@ extension VigieStore {
         await refreshMCP()
     }
 
-    /// « Vérifier » de la page Agents : un relevé des MCP du compte des nouvelles conversations, dans le dossier perso
-    /// (MCP du Mac et connecteurs), puis la page relue toutes les 3 s jusqu'à ce que plus aucun ne soit « pas encore
-    /// vérifié » (90 s au plus : `claude mcp list` interroge chaque MCP l'un après l'autre).
-    func checkAgentsMCP() async {
-        guard !agentsChecking else { return }
-        var body: [String: JSONValue] = ["path": .string(NSHomeDirectory())]
-        if let id = agentsState?.account?.id { body["accountId"] = .string(id) }
-        agentsChecking = true
-        defer { agentsChecking = false }
-        guard await write("/api/v2/mcp/check", .object(body)) != nil, !isDemo else { return }
-        for _ in 0..<30 {
-            try? await Task.sleep(for: .seconds(3))
-            await refreshAgents()
-            if !(agentsState?.agents.contains(where: AgentMCPFixes.needsCheck) ?? false) { return }
+    /// « Vérifier » : chaque MCP vérifié seul par le moteur (`claude mcp get`, quelques secondes), sur ce compte ou
+    /// sur chaque compte qui le déclare ; les pages se mettent à jour dès la réponse. Un connecteur claude.ai part dans
+    /// un relevé complet : il arrive par le suivi des changements.
+    func verifyMCP(_ names: [String], accountId: String?) async {
+        let todo = Array(Set(names)).filter { !verifying.contains($0) }
+        guard !todo.isEmpty else { return }
+        verifying.formUnion(todo)
+        defer { verifying.subtract(todo) }
+        if isDemo { try? await Task.sleep(for: .seconds(1)); return }
+        var body: [String: JSONValue] = ["names": .array(todo.sorted().map(JSONValue.string))]
+        if let accountId { body["accountId"] = .string(accountId) }
+        if case .failure(let error) = await send("/api/v2/mcp/verify", .object(body), patient: true) {
+            show(error: error.message)
         }
+        await refreshAgents()
+        if mcp != nil { await refreshMCP() }
+    }
+
+    /// Les MCP qu'un agent utilisera (ceux choisis), vérifiés sur le compte des nouvelles conversations.
+    func verifyAgentMCP(_ agent: AgentInfo) async {
+        await verifyMCP(agent.mcp.compactMap(\.chosen), accountId: agentsState?.account?.id)
     }
 
     /// Lance la connexion d'un MCP dans le bon compte et le bon dossier (le navigateur s'ouvre).

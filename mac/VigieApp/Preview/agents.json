@@ -36,8 +36,25 @@
         }
       ],
       "mcp": [
-        { "name": "figma-pro", "status": "connected" },
-        { "name": "webflow-pro", "status": "needs-auth" }
+        {
+          "name": "figma",
+          "service": "figma",
+          "status": "connected",
+          "chosen": "figma-pro",
+          "connect": "figma-pro",
+          "servers": [
+            { "name": "figma-pro", "status": "connected", "checkedAt": "2026-10-27T15:40:00Z", "connect": true },
+            { "name": "figma-perso", "status": "needs-auth", "checkedAt": "2026-10-27T15:40:00Z", "connect": true }
+          ]
+        },
+        {
+          "name": "webflow",
+          "service": "webflow",
+          "status": "needs-auth",
+          "chosen": "webflow-pro",
+          "connect": null,
+          "servers": [ { "name": "webflow-pro", "status": "needs-auth", "checkedAt": null, "connect": false } ]
+        }
       ],
       "creates": [
         "Le dossier du projet et sa documentation (brief, questionnaire, références, premier rendez-vous)",

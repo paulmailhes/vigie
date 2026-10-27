@@ -250,8 +250,14 @@ struct UserMCPRow: View {
                 }
             } else if notChecked {
                 MCPIssueLine(systemImage: "person.crop.circle.badge.exclamationmark", color: Theme.warn, text: "À connecter (pas encore vérifié sur tes comptes)") {
-                    AsyncButton("Vérifier") { await store.mcpCheck() }
-                        .controlSize(.small)
+                    if store.verifying.contains(server.name) {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        AsyncButton("Vérifier") { await store.verifyMCP([server.name], accountId: nil) }
+                            .controlSize(.small)
+                            .help("Vérifie ce MCP seul, sur chacun de tes comptes (quelques secondes)")
+                    }
                 }
             }
         }

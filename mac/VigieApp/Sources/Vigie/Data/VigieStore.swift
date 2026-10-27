@@ -148,8 +148,8 @@ final class VigieStore {
     var blockedRequest: ReviewItem?
     /// Vérification des MCP lancée à l'instant (indicateur dans la barre d'outils).
     var mcpChecking = false
-    /// « Vérifier » de la page Agents en cours (jusqu'à ce que l'état des MCP arrive).
-    var agentsChecking = false
+    /// MCP en cours de vérification seule (« Vérifier » d'un agent ou de la page MCP), par nom.
+    var verifying: Set<String> = []
     /// Demande d'amener les onglets de la conversation en haut (« Voir » d'une action bloquée).
     var focusTabs = false
     var toast: Toast?
@@ -299,12 +299,38 @@ final class VigieStore {
         }
     }
 
+    /// Suit la page MCP : relue dès qu'un état change dans le moteur, et toutes les 5 s au plus tard.
     func followMCP() async {
+        var seen: Int?
         while !Task.isCancelled {
             guard windowVisible || isDemo else { return }
             await refreshMCP()
             if isDemo { return }
-            try? await Task.sleep(for: .seconds(5))
+            seen = await nextChange(after: seen, within: .seconds(5))
+        }
+    }
+
+    /// Attend qu'un état de MCP change dans le moteur (relevé, vérification, autorisation : GET /api/v2/changes), ou
+    /// `within` au plus ; rend le numéro du dernier changement vu. Moteur plus ancien ou injoignable : attend `within`.
+    func nextChange(after seen: Int?, within: Duration) async -> Int? {
+        let client = client
+        let since: Int
+        if let seen {
+            since = seen
+        } else {
+            guard let now = try? await client.get("/api/v2/changes", as: ChangeVersion.self) else {
+                try? await Task.sleep(for: within)
+                return nil
+            }
+            since = now.version
+        }
+        return await withTaskGroup(of: Int?.self) { group in
+            group.addTask { try? await client.get("/api/v2/changes?since=\(since)", as: ChangeVersion.self, patient: true).version }
+            group.addTask { try? await Task.sleep(for: within); return nil }
+            var result = since
+            if let first = await group.next(), let version = first { result = version }
+            group.cancelAll()
+            return result
         }
     }
 
@@ -343,13 +369,15 @@ final class VigieStore {
         }
     }
 
-    /// Suit la page Agents (toutes les 30 s : un AGENT.md ajouté, un MCP connecté entre-temps).
+    /// Suit la page Agents : relue dès qu'un état de MCP change dans le moteur (un MCP vérifié, connecté, autorisé),
+    /// et toutes les 30 s au plus tard.
     func followAgents() async {
+        var seen: Int?
         while !Task.isCancelled {
             guard windowVisible || isDemo else { return }
             await refreshAgents()
             if isDemo { return }
-            try? await Task.sleep(for: .seconds(30), tolerance: .seconds(5))
+            seen = await nextChange(after: seen, within: .seconds(30))
         }
     }
 

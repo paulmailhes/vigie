@@ -854,6 +854,17 @@ if (args[0] === 'mcp' && args[1] === 'list') {
   log({ ev: 'end', t: Date.now() });
   process.exit(0);
 }
+if (args[0] === 'mcp' && args[1] === 'get') {
+  // un seul MCP : sa ligne du relevé du compte (dossier courant, sinon dossier perso), au format de \`claude mcp get\`
+  log({ ev: 'get', name: args[2] });
+  const key = process.cwd().replace(/[^A-Za-z0-9]/g, '-');
+  let text = '';
+  for (const f of [id + '@' + key + '.txt', id + '.txt']) { try { text = fs.readFileSync(path.join(${JSON.stringify(LISTS)}, f), 'utf8'); break; } catch {} }
+  const line = text.split('\\n').find((l) => l.startsWith(args[2] + ': '));
+  if (!line) { console.log('No MCP server named "' + args[2] + '". Configured servers: …'); process.exit(1); }
+  process.stdout.write(args[2] + ':\\n  Scope: User config (available in all your projects)\\n  Status: ' + line.split(' - ').pop() + '\\n  Type: http\\n');
+  process.exit(0);
+}
 if (args[0] === 'mcp' && args[1] === 'login') {
   if (args[2] === '--help') {
     log({ ev: 'help' });
@@ -914,12 +925,51 @@ describe('état réel des MCP (claude mcp list, faux binaire)', () => {
   const logs = [];
   const made = [];
   let tick = NOW;
+  // chaque module a ses propres relevés gardés (data/mcp-health.json), sauf quand l'essai le partage
   const mk = (opts = {}) => {
-    const m = createMcp({ home: HOME, claudeBin: FAKE2, accounts: ACCOUNTS, usage: USAGE, now: () => (tick += 1000), log: (x) => logs.push(x), ...opts });
+    const m = createMcp({ home: HOME, claudeBin: FAKE2, accounts: ACCOUNTS, usage: USAGE, now: () => (tick += 1000), log: (x) => logs.push(x),
+      healthFile: path.join(TMP, `sante-${made.length}.json`), ...opts });
     made.push(m);
     return m;
   };
   after(() => { for (const m of made) m.stopAutoCheck(); });
+
+  test('un seul MCP vérifié (`claude mcp get`, sur chaque compte qui le déclare) ; états gardés pour le démarrage suivant', async () => {
+    seedHome(); seedLists();
+    const file = path.join(TMP, 'sante-partagee.json');
+    fs.rmSync(file, { force: true });
+    let changes = 0;
+    const m1 = mk({ healthFile: file, onChange: () => { changes++; } });
+    const status = (m, acc) => m.healthOf('figma-perso', { accountId: acc, cwd: HOME });
+    assert.deepEqual([status(m1, 'travail1').status, status(m1, 'perso').status], ['unknown', 'unknown']);
+    let r = await m1.verify({ names: ['figma-perso'] });
+    assert.deepEqual(r.results.map((x) => [x.accountId, x.status]).sort(), [['perso', 'needs-auth'], ['travail1', 'connected']]);
+    assert.deepEqual(calls().filter((c) => c.ev === 'get').map((c) => [c.id, c.name, c.cwd]).sort(),
+      [['main', 'figma-perso', HOME], ['perso', 'figma-perso', HOME]], 'dans le bon compte, depuis le dossier perso');
+    assert.ok(calls().every((c) => c.ev !== 'start'), 'aucun relevé complet');
+    assert.ok(changes >= 2, 'l\'app est prévenue');
+    assert.equal(status(m1, 'perso').status, 'needs-auth');
+    assert.ok(status(m1, 'perso').checkedAt, 'avec la date de la vérification');
+    // sur un seul compte ; un connecteur (pas de `claude mcp get`) : relevé complet en fond
+    r = await m1.verify({ names: ['figma-perso', 'claude.ai Gmail'], accountId: 'perso' });
+    assert.deepEqual(r.results.map((x) => [x.name, x.status, !!x.pending]), [['figma-perso', 'needs-auth', false], ['claude.ai Gmail', 'unknown', true]]);
+    await waitFor(() => calls().some((c) => c.ev === 'end' && c.id === 'perso'));
+    await waitFor(() => m1.healthOf('Gmail', { accountId: 'perso', cwd: HOME, scope: 'connector' }).status === 'connected');
+    for (const bad of [{ names: [] }, { names: ['-x'] }, { names: 'figma-perso' }, { names: ['figma-perso'], accountId: 'inconnu' }]) {
+      const no = await m1.verify(bad);
+      assert.equal(no.ok, false);
+      assert.match(no.error, /Nom invalide|liste de noms|Compte inconnu/);
+    }
+    // démarrage suivant : les états sont là avant tout relevé
+    await waitFor(() => fs.existsSync(file));
+    await sleep(1100);
+    const m2 = mk({ healthFile: file });
+    assert.equal(status(m2, 'travail1').status, 'connected');
+    assert.equal(status(m2, 'perso').status, 'needs-auth');
+    assert.equal(m2.healthOf('Gmail', { accountId: 'perso', cwd: HOME, scope: 'connector' }).status, 'connected');
+    assert.equal((fs.statSync(file).mode & 0o777), 0o600);
+    assert.ok(!fs.readFileSync(file, 'utf8').includes('mcp.figma.com'), 'noms et états seulement, aucune adresse');
+  });
 
   test('un relevé par compte (CLAUDE_CONFIG_DIR du compte) et par dossier utile ; health et needsAuth réels', async () => {
     seedHome();

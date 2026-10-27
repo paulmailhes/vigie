@@ -107,15 +107,7 @@ struct AgentRecipeRow: View {
                         .foregroundStyle(Theme.alert)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !agent.mcp.isEmpty {
-                    FlowLayout(spacing: 6) {
-                        ForEach(agent.mcp) { AgentMCPBadge(mcp: $0) }
-                        AgentMCPFixes(agent: agent)
-                            .buttonStyle(.link)
-                            .font(.caption)
-                            .padding(.top, 3)
-                    }
-                }
+                if !agent.mcp.isEmpty { AgentMCPStrip(agent: agent) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if agent.canLaunch {
@@ -148,91 +140,5 @@ struct AgentIcon: View {
             return Icon.recipe
         }
         return symbol
-    }
-}
-
-/// Un MCP nécessaire : son service (« Figma », quel que soit le nom du MCP) et son état en toutes lettres ; la couleur
-/// seulement pour ce qui est à régler.
-struct AgentMCPBadge: View {
-    let mcp: AgentMCP
-
-    var body: some View {
-        let status = mcp.mcpStatus
-        let label = mcp.isMissing ? "à ajouter" : MCPStatusStyle.label(status)
-        let color = mcp.isMissing ? Theme.warn : MCPStatusStyle.color(status)
-        HStack(spacing: 4) {
-            Image(systemName: mcp.isMissing ? "plus.circle" : MCPStatusStyle.symbol(status))
-                .imageScale(.small)
-                .foregroundStyle(color)
-            Text(mcp.title)
-                .fontWeight(.medium)
-            if let detail = mcp.chosenDetail {
-                Text("· \(detail)")
-                    .foregroundStyle(.secondary)
-            }
-            Text(label)
-                .foregroundStyle(color)
-        }
-        .font(.caption)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(.quaternary, in: .capsule)
-        .fixedSize()
-        .help(mcp.servers.count > 1 ? "L'agent utilisera \(mcp.chosen ?? mcp.title) ; un autre se choisit au lancement" : "")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(mcp.title)\(mcp.chosenDetail.map { " (\($0))" } ?? "") : \(label)")
-    }
-}
-
-/// Ce qui manque à un agent, réglable d'ici : « Ajouter Figma » (le MCP officiel, sur tous les comptes, puis la page
-/// d'autorisation), « Connecter Figma » (sur le compte des nouvelles conversations) ; le reste par la page MCP.
-struct AgentMCPFixes: View {
-    @Environment(VigieStore.self) private var store
-    let agent: AgentInfo
-    /// Le lien vers la page MCP (pas dans le formulaire de lancement : la page changerait derrière lui).
-    var pageLink = true
-
-    var body: some View {
-        let toFix = agent.mcpToFix
-        ForEach(toFix) { mcp in
-            if mcp.isMissing, let entry = mcp.libraryEntry {
-                AsyncButton("Ajouter \(mcp.title)") {
-                    if await entry.add(in: store) { await store.refreshAgents() }
-                }
-                .help("Ajoute le MCP officiel \(mcp.title) à tes comptes ; ton navigateur s'ouvre pour le connecter")
-            } else if let name = mcp.connect, [.needsAuth, .failed].contains(mcp.mcpStatus) {
-                AsyncButton("Connecter \(mcp.title)") {
-                    await store.mcpConnect(name: name, accountId: store.agentsState?.account?.id, path: nil)
-                    await store.refreshAgents()
-                }
-                .help("Ouvre ton navigateur pour connecter \(mcp.title) (\(name))")
-            }
-        }
-        if pageLink, toFix.contains(where: { !Self.fixedHere($0) }) {
-            Button("Régler dans MCP") { store.route = .mcp }
-                .help("Ouvre la page MCP pour connecter ce qui manque")
-        }
-        if Self.needsCheck(agent) {
-            if store.agentsChecking {
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Vérification…")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                AsyncButton("Vérifier") { await store.checkAgentsMCP() }
-                    .help("Demande tout de suite l'état de ses MCP (une minute au plus)")
-            }
-        }
-    }
-
-    /// Un MCP pas encore vérifié (moteur qui vient de redémarrer, MCP tout juste ajouté) : « Vérifier » le relève.
-    nonisolated static func needsCheck(_ agent: AgentInfo) -> Bool {
-        agent.mcp.contains { $0.mcpStatus == .unknown && !$0.isMissing }
-    }
-
-    nonisolated static func fixedHere(_ mcp: AgentMCP) -> Bool {
-        (mcp.isMissing && mcp.libraryEntry != nil) || (mcp.connect != nil && [.needsAuth, .failed].contains(mcp.mcpStatus))
     }
 }
