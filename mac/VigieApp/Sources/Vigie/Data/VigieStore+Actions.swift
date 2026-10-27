@@ -387,6 +387,23 @@ extension VigieStore {
         await refreshMCP()
     }
 
+    /// « Vérifier » de la page Agents : un relevé des MCP du compte des nouvelles conversations, dans le dossier perso
+    /// (MCP du Mac et connecteurs), puis la page relue toutes les 3 s jusqu'à ce que plus aucun ne soit « pas encore
+    /// vérifié » (90 s au plus : `claude mcp list` interroge chaque MCP l'un après l'autre).
+    func checkAgentsMCP() async {
+        guard !agentsChecking else { return }
+        var body: [String: JSONValue] = ["path": .string(NSHomeDirectory())]
+        if let id = agentsState?.account?.id { body["accountId"] = .string(id) }
+        agentsChecking = true
+        defer { agentsChecking = false }
+        guard await write("/api/v2/mcp/check", .object(body)) != nil, !isDemo else { return }
+        for _ in 0..<30 {
+            try? await Task.sleep(for: .seconds(3))
+            await refreshAgents()
+            if !(agentsState?.agents.contains(where: AgentMCPFixes.needsCheck) ?? false) { return }
+        }
+    }
+
     /// Lance la connexion d'un MCP dans le bon compte et le bon dossier (le navigateur s'ouvre).
     /// Moteur plus ancien : repli sur « /mcp » dans VS Code.
     func mcpConnect(name: String, accountId: String?, path: String?, force: Bool = false) async {

@@ -222,6 +222,14 @@ struct DecodingTests {
         #expect(AgentMCPFixes.fixedHere(mcp[2]), "un connecteur à connecter : d'ici")
         #expect(!AgentMCPFixes.fixedHere(mcp[3]), "la passerelle : par la page MCP")
         #expect(mcp[4].servers.isEmpty && mcp[4].service == nil && mcp[4].key == "outil-maison")
+
+        // « Vérifier » : seulement pour un MCP pas encore vérifié (pas pour un qui manque)
+        let agents = try JSONDecoder().decode(AgentLibrary.self, from: Data("""
+        { "agents": [ { "id": "a", "mcp": [ { "name": "figma", "service": "figma", "status": "unknown" } ] },
+                      { "id": "b", "mcp": [ { "name": "figma", "service": "figma", "status": "missing" } ] },
+                      { "id": "c", "mcp": [ { "name": "figma", "service": "figma", "status": "connected" } ] } ] }
+        """.utf8)).agents
+        #expect(agents.map(AgentMCPFixes.needsCheck) == [true, false, false])
     }
 
     /// Dossier proposé : <dossier parent>/<nom du client sans accents ni ponctuation>, 60 caractères au plus.

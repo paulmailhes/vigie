@@ -212,9 +212,27 @@ struct AgentMCPFixes: View {
             Button("Régler dans MCP") { store.route = .mcp }
                 .help("Ouvre la page MCP pour connecter ce qui manque")
         }
+        if Self.needsCheck(agent) {
+            if store.agentsChecking {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Vérification…")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                AsyncButton("Vérifier") { await store.checkAgentsMCP() }
+                    .help("Demande tout de suite l'état de ses MCP (une minute au plus)")
+            }
+        }
     }
 
-    static func fixedHere(_ mcp: AgentMCP) -> Bool {
+    /// Un MCP pas encore vérifié (moteur qui vient de redémarrer, MCP tout juste ajouté) : « Vérifier » le relève.
+    nonisolated static func needsCheck(_ agent: AgentInfo) -> Bool {
+        agent.mcp.contains { $0.mcpStatus == .unknown && !$0.isMissing }
+    }
+
+    nonisolated static func fixedHere(_ mcp: AgentMCP) -> Bool {
         (mcp.isMissing && mcp.libraryEntry != nil) || (mcp.connect != nil && [.needsAuth, .failed].contains(mcp.mcpStatus))
     }
 }

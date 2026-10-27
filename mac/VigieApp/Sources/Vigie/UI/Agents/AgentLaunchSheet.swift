@@ -560,7 +560,8 @@ struct AgentLaunchSheet: View {
     private var notes: some View {
         let account = store.agentsState?.account?.displayName
         let toFix = picked.mcpToFix
-        if account != nil || !toFix.isEmpty || !missing.isEmpty || surfaceIssue != nil {
+        let unchecked = AgentMCPFixes.needsCheck(picked)
+        if account != nil || !toFix.isEmpty || unchecked || !missing.isEmpty || surfaceIssue != nil {
             VStack(alignment: .leading, spacing: 4) {
                 // l'app Claude a son propre compte : celui de Vigie ne vaut que pour VS Code
                 if chosenSurface == .claudeApp {
@@ -577,6 +578,14 @@ struct AgentLaunchSheet: View {
                     Label(here ? "À régler d'abord : \(list)." : "À régler d'abord sur la page MCP : \(list).",
                           systemImage: "exclamationmark.triangle")
                         .foregroundStyle(Theme.warn)
+                }
+                if unchecked {
+                    let names = picked.mcp.filter { $0.mcpStatus == .unknown && !$0.isMissing }.map(\.title)
+                        .formatted(.list(type: .and).locale(Fmt.locale))
+                    Label("Pas encore vérifié : \(names).", systemImage: "circle.dashed")
+                        .foregroundStyle(.secondary)
+                }
+                if !toFix.isEmpty || unchecked {
                     HStack(spacing: 10) { AgentMCPFixes(agent: picked, pageLink: false) }
                         .buttonStyle(.link)
                 }

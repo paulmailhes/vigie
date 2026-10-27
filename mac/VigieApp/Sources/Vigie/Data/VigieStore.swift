@@ -148,6 +148,8 @@ final class VigieStore {
     var blockedRequest: ReviewItem?
     /// Vérification des MCP lancée à l'instant (indicateur dans la barre d'outils).
     var mcpChecking = false
+    /// « Vérifier » de la page Agents en cours (jusqu'à ce que l'état des MCP arrive).
+    var agentsChecking = false
     /// Demande d'amener les onglets de la conversation en haut (« Voir » d'une action bloquée).
     var focusTabs = false
     var toast: Toast?
