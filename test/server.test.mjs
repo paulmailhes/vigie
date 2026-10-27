@@ -954,8 +954,13 @@ test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris,
   const s60 = (await get('/api/v2/usage/series?window=60')).body;
   const pa = s60.conversations.find((c) => c.id === SID_A);
   assert.equal(pa.running, true);
-  assert.equal(total(pa.points, 'tokens'), 5 * 150 + 600, 'tokens bruts de la dernière heure');
-  assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct) <= 0.06, 'même conversion que weekPct');
+  // La série commence à la minute pleine, une heure avant la requête : l'appel posé à -59 min (à l'heure du jeu
+  // d'essai) en sort dès que la requête tombe dans une minute suivante. Mêmes proportions d'entrée et de sortie
+  // partout : la part de la semaine suit les tokens.
+  const from = Date.parse(s60.from);
+  const lastHour = [-59, -56, -55, -50, -45].filter((m) => NOW + m * 60_000 >= from).length * 150 + 600;
+  assert.equal(total(pa.points, 'tokens'), lastHour, 'tokens bruts de la dernière heure');
+  assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct * lastHour / (5 * 150 + 600)) <= 0.06, 'même conversion que weekPct');
   assert.equal(total(s60.conversations.find((c) => c.id === SID_B).points, 'tokens'), 0, 'B a travaillé il y a 2 h');
   const s600 = (await get('/api/v2/usage/series?window=600')).body;
   assert.ok(total(s600.conversations.find((c) => c.id === SID_B).points, 'tokens') > 0);
