@@ -108,6 +108,29 @@ test('jeton d\'accès de Vigie : ses lectures courantes sont retenues, même par
   assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/lib` }), null);
 });
 
+test('dossier d\'un agent ({{dossier_agent}}, sous ~/.vigie/data) : ses scripts se lancent librement, le jeton reste retenu', () => {
+  const lib = `${home}/.vigie/data/agent-libraries/agents-studio/a1b2c3d/demarrer-projet`;
+  const local = `${home}/.vigie/data/agents/demarrer-projet`;
+  for (const dir of [lib, local, '~/.vigie/data/agents/x', '$HOME/.vigie/data/agent-libraries/agents/a1b2c3d/Créer une page']) {
+    for (const c of [`cd ${dir} && node figma/01-fondations.js`, `cd "${dir}" && node figma/01-fondations.js`, `ls ${dir}/figma/*.js`,
+      `node ${dir}/figma/01-fondations.js`, `cat ${dir}/modeles/page.md`, `cd '${dir}'; ls -la`, `for f in ${dir}/figma/*.js; do node "$f"; done`]) {
+      if (dir.includes(' ') && !/["']/.test(c)) continue; // un chemin avec des espaces s'écrit entre guillemets
+      if (c.includes('$') && !dir.startsWith('$HOME') && c.startsWith('for')) continue;
+      assert.equal(bash(c), null, c);
+    }
+  }
+  // en ressortir vers data/ (« .. », $, `, \, commande trop longue pour être vérifiée) : toujours retenu
+  for (const c of [
+    `cd ${lib}/.. && cat ../../api-token`, `cd ${lib}/../../.. && cat api*`, `cd ${local}/.. && cat ../api*`, `cd "${local}/a b/../.." && cat api*`,
+    `cd ${local} && cd ../.. && cat api*`, `cd ${local}/$(printf '\\56\\56') && cat ../api*`, `D=..; cd ${local}/$D && cat ../api*`,
+    `cd ${local}/\`echo ..\` && cat ../api*`, `cd ${local}\\/.. && cat ../api*`, `ls ${local}/*/../../api-tok*`, `cat ${lib}/{x,../../../api-token}`,
+    `cd ${local} && ${'x'.repeat(5000)} && cat ../api*`, `cd ~/.vigie/data/agentsX && cat api*`, `cd ~/.vigie/data/agents && cat ../api*`,
+    'cd ~/.vigie/data && cd agents/x && cat ../../api*', `ls ${home}/.vigie/data/*/demarrer-projet`, 'cat ~/.vigie/data/agents*/../api-token',
+  ]) {
+    assert.equal(bash(c), 'jeton-vigie', c);
+  }
+});
+
 test('pas de faux positifs au quotidien : --api-token, X-Api-Token, api-token.ts, known_hosts, droits des clés', () => {
   for (const c of ['wrangler deploy --api-token "$CF"', 'curl -H "X-Api-Token: $T" https://exemple.test', 'cat src/routes/api-token.ts',
     'curl https://exemple.test/v1/api-token/refresh', 'mkdir -p src/api-token && cd src/api-token', 'ls packages/api-token/',
@@ -146,6 +169,11 @@ test('commande démesurée : jugée vite (pas de recherche quadratique)', () => 
   bash('security ' + '-p "x" '.repeat(40) + 'list');
   bash('security ' + '-p '.repeat(30_000));
   bash('security ' + '-p - '.repeat(30_000));
+  // le dossier d'un agent cité des milliers de fois, ou un seul chemin démesuré : chaque citation n'est relue que sur 4 096 caractères
+  bash('ls ~/.vigie/data/agents/x/*.js '.repeat(6000));
+  bash('cd ~/.vigie/data/agents/x && '.repeat(6000));
+  bash(`ls ~/.vigie/data/agents/${'a/'.repeat(90_000)}*`);
+  bash(`${'cat ~/.vigie/data/agent-libraries/'.repeat(5000)}..`);
   assert.ok(performance.now() - t0 < 1500, `${Math.round(performance.now() - t0)} ms`);
 });
 
