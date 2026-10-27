@@ -1143,6 +1143,9 @@ Prépare le projet de {{client}}.
   assert.ok(!choisi.includes('stripe :'), 'aucun MCP : rien à nommer');
   assert.match(choisi, /- webflow : « webflow-essai », espace « Agence » \(il ne voit que celui-là\) \(ses outils commencent par `mcp__webflow-essai__`\)/);
   assert.ok(choisi.indexOf('## MCP à utiliser') < choisi.indexOf('## Consignes'));
+  // la conversation de l'agent travaille sans demander : auto-accept dans son dossier pour 12 h
+  const until = Date.parse(rj(path.join(DATA, 'state.json')).agentLaunches[choix]);
+  assert.ok(until > Date.now() + 11 * 3600_000 && until < Date.now() + 13 * 3600_000);
   // le lancement est noté, son rapport « en cours » ; le rapport écrit par l'agent réveille l'app ; cocher, retirer
   let lances = (await get('/api/v2/agents/runs')).body.runs;
   const lance = lances.find((x) => x.folder === choix && x.agent === 'demarrer-projet');

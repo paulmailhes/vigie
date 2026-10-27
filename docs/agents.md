@@ -69,6 +69,11 @@ Vigie l'envoie toute seule (`mac/…/Data/AgentAutoSend.swift`) :
 
 Sans l'accès, rien ne change : le message attend dans le champ.
 
+**La conversation de l'agent ne demande rien** : au lancement, Vigie met son dossier en auto-accept pour 12 h
+(`state.agentLaunches`, lu par le hook avec le dossier de la conversation) ; les garde-fous restent actifs, et le
+réglage propre de la conversation passe avant. Le dossier `.vigie` du projet (rapport, fichiers de travail) n'est
+pas protégé comme l'installation de Vigie (`~/.vigie`) : seul le brief (`.vigie/agent-<id>.md`) reste à l'utilisateur.
+
 ## Le rapport pour Vigie
 
 Le brief demande à chaque agent de tenir à jour `<dossier>/.vigie/rapport-<id>.json` (forme dans `api-v2.md`,

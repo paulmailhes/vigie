@@ -468,12 +468,12 @@ async function onPermissionRequest(input) {
   let late = false; // décision prise après un changement de réglage, fenêtre déjà affichée
   for (;;) {
     const state = readState();
-    if (!effective(state, sid).autoAccept) {
+    if (!effective(state, sid, { cwd: input.cwd }).autoAccept) {
       log(input, 'demande-pour-toi');
       if (!wait) return;
       // Si l'utilisateur active l'auto-accept pendant que la fenêtre est affichée, on valide quand même.
       onKill = null;
-      const r = await waitFor(() => Infinity, (s) => (effective(s, sid).autoAccept ? 'on' : true));
+      const r = await waitFor(() => Infinity, (s) => (effective(s, sid, { cwd: input.cwd }).autoAccept ? 'on' : true));
       if (r !== 'on') return;
       late = true;
       continue;
@@ -504,7 +504,7 @@ async function onPermissionRequest(input) {
       const d = takeDecision(pendingId, { since: start, sessionId: sid, allowBare: bare });
       if (d) return d === 'allow' ? 'app-allow' : 'app-deny';
       if ((done = resolved())) return 'repondu';
-      if (!effective(s, sid).autoAccept) return 'off';
+      if (!effective(s, sid, { cwd: input.cwd }).autoAccept) return 'off';
       const g = matchGuard(s, tool, input.tool_input);
       if (!g) return 'allow';
       rule = g;
@@ -535,7 +535,7 @@ const preOutput = (permissionDecision, permissionDecisionReason) =>
 async function onPreToolUseGuard(input) {
   const state = readState();
   const sid = input.session_id;
-  if (!effective(state, sid).autoAccept) return; // L'utilisateur valide lui-même dans VS Code
+  if (!effective(state, sid, { cwd: input.cwd }).autoAccept) return; // L'utilisateur valide lui-même dans VS Code
   const tool = input.tool_name;
   const rule = matchGuard(state, tool, input.tool_input);
   if (!rule || readOnlyShell(tool, input.tool_input)) return;
@@ -602,7 +602,7 @@ async function onCodex(input) {
   try { fs.writeFileSync(path.join(DATA, 'codex-hook-seen'), new Date().toISOString()); } catch { /* facultatif */ }
   const state = readState();
   const sid = input.session_id;
-  if (!effective(state, sid).autoAccept) {
+  if (!effective(state, sid, { cwd: input.cwd }).autoAccept) {
     if (ev === 'PermissionRequest') log(input, 'demande-pour-toi');
     return;
   }

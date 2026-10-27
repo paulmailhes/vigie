@@ -16,6 +16,35 @@ const rule = (tool, input) => matchGuard(state, tool, input)?.id ?? null;
 const bash = (command) => rule('Bash', { command });
 const home = os.homedir();
 
+test('agent lancé par Vigie : sa conversation est en auto-accept dans son dossier, 12 h ; le réglage de la conversation passe avant', async () => {
+  const { effective, launchedHere } = await import('../lib/state.mjs');
+  const now = Date.now();
+  const st = { autoAccept: false, sessions: { coupee: { autoAccept: false } },
+    agentLaunches: { '/Users/alex/Code/16-law': new Date(now + 3600_000).toISOString(), '/Users/alex/Code/vieux': new Date(now - 1000).toISOString() } };
+  assert.equal(effective(st, 's1', { cwd: '/Users/alex/Code/16-law' }).autoAccept, true);
+  assert.equal(effective(st, 's1', { cwd: '/Users/alex/Code/16-law/docs' }).autoAccept, true, 'un sous-dossier aussi');
+  assert.equal(effective(st, 's1', { cwd: '/Users/alex/Code/16-law-bis' }).autoAccept, false, 'pas un dossier voisin');
+  assert.equal(effective(st, 's1', { cwd: '/Users/alex/Code/vieux' }).autoAccept, false, 'plus de 12 h : fini');
+  assert.equal(effective(st, 'coupee', { cwd: '/Users/alex/Code/16-law' }).autoAccept, false, 'coupé pour cette conversation');
+  assert.equal(effective(st, 's1').autoAccept, false, 'sans dossier : le réglage général');
+  assert.equal(launchedHere({ agentLaunches: 'oups' }, '/x'), false);
+});
+
+test('dossier .vigie d\'un projet (brief et rapport d\'un agent, fichiers de travail) : libre ; l\'installation de Vigie : retenue', () => {
+  const projet = `${home}/Code/16-law`;
+  for (const c of [`cat > ${projet}/.vigie/rapport-webflow-controle-publication.json <<'EOF'\n{}\nEOF`, "cat > .vigie/controle/crawl.py <<'EOF'\nx\nEOF",
+    `mkdir -p ${projet}/.vigie/controle && curl -s https://exemple.fr/sitemap.xml > ${projet}/.vigie/controle/sitemap.xml`,
+    'echo x > .vigie/controle/pages.txt', `cp a.json "${projet}/.vigie/rapport-x.json"`, 'rm -f .vigie/controle/ld-1.json']) {
+    assert.equal(bash(c), null, c);
+  }
+  for (const f of [`${projet}/.vigie/rapport-x.json`, `${projet}/.vigie/controle/crawl.py`]) assert.equal(rule('Write', { file_path: f, content: '{}' }), null, f);
+  for (const c of ['echo x > ~/.vigie/data/state.json', 'cp a .vigie/lib/x.mjs', 'echo > .vigie/data/decisions.json', 'rm -rf .vigie', 'rm -rf ~/.vigie',
+    'echo x > "$HOME"/.vigie/data/state.json', 'echo x > $HOME/.vigie/hook.mjs', `echo x > ${home}/.vigie/data/state.json`, 'cd ~ && cp x.mjs .vigie/lib/a.mjs']) {
+    assert.equal(bash(c), 'config-claude-shell', c);
+  }
+  assert.equal(rule('Write', { file_path: `${home}/.vigie/data/state.json`, content: '{}' }), 'config-claude');
+});
+
 test('tout le dossier de Vigie installé et ce qui le lance : retenus', () => {
   for (const f of ['~/.vigie/lib/decisions.mjs', `${home}/.vigie/server.mjs`, `${home}/.vigie/bin/claude-account-wrapper`,
     `${home}/Library/LaunchAgents/io.github.paulmailhes.vigie.engine.plist`, `${home}/.codex/hooks.json`, `${home}/.ssh/authorized_keys`,

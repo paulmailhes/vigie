@@ -15,7 +15,7 @@ import { createVault, createKeychain } from './lib/vault.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, SERVICE_OTHER, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
-import { ROOT, DATA, AGENTS, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
+import { ROOT, DATA, AGENTS, AGENT_AUTO_MS, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
@@ -784,7 +784,7 @@ function cardFailures(sid, now) {
 
 // ConversationSummary du contrat, à partir de la vue de lib/conversations.mjs.
 function decorate(sum, ctx, needs, accepted) {
-  const eff = effective(ctx.state, sum.id);
+  const eff = effective(ctx.state, sum.id, { cwd: sum.cwd });
   const ov = Object.hasOwn(ctx.state.sessions, sum.id) ? ctx.state.sessions[sum.id] : null;
   const accountId = chosenAccount(ctx.model, sum.id); // sans choix noté : le compte des nouvelles conversations, comme le lanceur
   const waits = ctx.waits.get(sum.id) || [];
@@ -1696,13 +1696,15 @@ async function postAgentLaunch(body) {
   if (!r.ok) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
   try {
     const s = readState();
-    const mcpPicks = { ...(isObj(s.agentsMcp) ? s.agentsMcp : {}), ...picked };
-    if (s.agentsSurface !== surface || JSON.stringify(mcpPicks) !== JSON.stringify(s.agentsMcp ?? {})) {
-      s.agentsSurface = surface;
-      s.agentsMcp = mcpPicks;
-      writeState(s);
-    }
-  } catch (e) { console.error('[vigie] surface et MCP des agents :', clean(e)); }
+    s.agentsSurface = surface;
+    s.agentsMcp = { ...(isObj(s.agentsMcp) ? s.agentsMcp : {}), ...picked };
+    // la conversation de l'agent travaille sans demander (auto-accept dans ce dossier, 12 h ; garde-fous actifs)
+    const now = Date.now();
+    s.agentLaunches = Object.fromEntries(Object.entries(isObj(s.agentLaunches) ? s.agentLaunches : {})
+      .filter(([, until]) => typeof until === 'string' && Date.parse(until) > now));
+    s.agentLaunches[r.folder] = new Date(now + AGENT_AUTO_MS).toISOString();
+    writeState(s);
+  } catch (e) { console.error('[vigie] surface, MCP et auto-accept des agents :', clean(e)); }
   try {
     runs.record({ agent: known?.id ?? body.id, name: known?.name ?? body.id, icon: known?.icon ?? null, folder: r.folder, surface, session });
     watchRuns();
