@@ -426,6 +426,11 @@ extension VigieStore {
         if await write("/api/v2/agents/runs", ["action": "hide", "id": .string(run.id)]) == nil { agentRuns = before }
     }
 
+    private func result(_ answer: Result<WriteResult, ClientError>) -> WriteResult? {
+        if case .success(let value) = answer { return value }
+        return nil
+    }
+
     /// Les MCP qu'un agent utilisera (ceux choisis), vérifiés sur le compte des nouvelles conversations.
     func verifyAgentMCP(_ agent: AgentInfo) async {
         await verifyMCP(agent.mcp.compactMap(\.chosen), accountId: agentsState?.account?.id)
@@ -492,13 +497,15 @@ extension VigieStore {
                     if await watching.value == .sent {
                         show(info: "Message envoyé : l'agent travaille. Son rapport s'affiche dans « Derniers lancements ».")
                     } else {
-                        if let copy { SystemActions.copy(copy) }
-                        show(info: message)
+                        SystemActions.copy(copy ?? result(answer)?.prompt ?? "")
+                        show(info: "Le message n'a pas pu partir tout seul : il est copié, colle-le dans Claude (⌘V) puis Entrée.")
                     }
                 }
             } else {
                 if let copy { SystemActions.copy(copy) }
-                if alert { show(error: message) } else { show(info: message) }
+                if alert { show(error: message) }
+                else if !AgentAutoSend.allowed { show(info: "\(message) Pour qu'il parte tout seul la prochaine fois : autorise Vigie dans Accessibilité (bouton dans le formulaire).") }
+                else { show(info: message) }
             }
         }
         // AGENT.md modifié entre-temps (la carte le montre), ou l'endroit choisi, retenu par le moteur

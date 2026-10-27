@@ -31,7 +31,9 @@ final class AgentAutoSend {
     private var prompt: String?
     private var answeredAt: Date?
     private var trusted = false
-    private var pasted = false
+    /// Collages tentés (conversation déjà ouverte) : trois au plus, VS Code pouvant mettre un instant à passer devant.
+    private var pasteTries = 0
+    private var said = Set<String>()
 
     /// `folder` : le dossier du projet ; `marker` : un morceau du message qui n'est que là (`.vigie/agent-<id>.md`).
     init(surface: AgentSurface, folder: String, marker: String) {
@@ -47,8 +49,29 @@ final class AgentAutoSend {
         answeredAt = .now
     }
 
+    /// Journal des étapes (jamais le message) : ~/.vigie/data/autosend.log, pour comprendre un envoi qui n'est pas parti.
+    private func note(_ step: String, once: Bool = false) {
+        if once { guard said.insert(step).inserted else { return } }
+        let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".vigie/data/autosend.log")
+        let line = "\(ISO8601DateFormatter().string(from: .now)) \(folderName) : \(step)\n"
+        if let handle = try? FileHandle(forWritingTo: file) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            FileManager.default.createFile(atPath: file.path, contents: Data(line.utf8), attributes: [.posixPermissions: 0o600])
+        }
+    }
+
     /// Guette le champ de Claude jusqu'à `timeout` (le moteur attend la fenêtre de VS Code jusqu'à 25 s).
     func run(timeout: Duration = .seconds(70)) async -> Outcome {
+        note("début (\(isVSCode ? "VS Code" : "app Claude"))")
+        let outcome = await watch(timeout: timeout)
+        note(outcome == .sent ? "message envoyé" : "rien envoyé (champ introuvable ou occupé)")
+        return outcome
+    }
+
+    private func watch(timeout: Duration) async -> Outcome {
         let end = ContinuousClock.now + timeout
         var lastScan = ContinuousClock.now - .seconds(10)
         while ContinuousClock.now < end, !Task.isCancelled {
@@ -65,18 +88,31 @@ final class AgentAutoSend {
                     lastScan = .now
                     for window in windows(root) {
                         if isVSCode && !matchesProject(window) { continue }
+                        note("fenêtre du projet trouvée", once: true)
                         if isVSCode && !trusted, let button = find(in: window, limit: 4000, skipWeb: true, where: isTrustButton) {
                             trusted = AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
+                            note(trusted ? "confiance au dossier : oui" : "confiance au dossier : clic refusé")
                             continue
                         }
                         let inputs = findAll(in: window, limit: 40000, where: isClaudeInput)
+                        note("\(inputs.count) champ(s) de Claude", once: true)
                         if let input = inputs.first(where: { value($0).contains(marker) }) {
+                            note("message prérempli trouvé", once: true)
                             if await send(input, app: app, window: window) { return .sent }
-                        } else if isVSCode, !pasted, let prompt, let at = answeredAt, Date.now.timeIntervalSince(at) > 3 {
+                        } else if isVSCode, pasteTries < 3, let prompt, let at = answeredAt, Date.now.timeIntervalSince(at) > 3 {
                             // conversation déjà ouverte : le message n'a pas été repris ; on le colle dans son champ vide
-                            if let target = focusedInput(root, among: inputs) ?? (inputs.count == 1 ? inputs[0] : nil), isEmptyInput(value(target)) {
-                                pasted = true
-                                if await paste(prompt, into: target, app: app, window: window), await send(target, app: app, window: window) { return .sent }
+                            guard let target = focusedInput(root, among: inputs) ?? (inputs.count == 1 ? inputs[0] : nil) else {
+                                note("aucun champ de Claude au focus", once: true)
+                                continue
+                            }
+                            guard isEmptyInput(value(target)) else {
+                                note("le champ contient déjà un brouillon : rien collé", once: true)
+                                continue
+                            }
+                            pasteTries += 1
+                            if await paste(prompt, into: target, app: app, window: window) {
+                                note("message collé")
+                                if await send(target, app: app, window: window) { return .sent }
                             }
                         }
                     }
@@ -180,20 +216,35 @@ final class AgentAutoSend {
 
     // MARK: Clavier
 
+    /// Fait passer l'app devant (par l'accessibilité : un macOS récent ignore une simple demande d'une autre app), lève
+    /// la fenêtre, donne le focus au champ, et attend que tout ça ait pris (1,5 s au plus).
     private func bringForward(_ input: AXUIElement, app: NSRunningApplication, window: AXUIElement?) async {
-        if let window { AXUIElementPerformAction(window, kAXRaiseAction as CFString) }
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetAttributeValue(root, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        if let window {
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        }
         app.activate()
-        AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        try? await Task.sleep(for: .milliseconds(250))
+        for _ in 0..<15 {
+            AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            try? await Task.sleep(for: .milliseconds(100))
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier, hasFocus(input, app: app) { return }
+        }
     }
 
+    /// Une touche, envoyée comme si elle venait du clavier : l'app est devant et le champ a le focus (vérifié avant).
     private func key(_ code: CGKeyCode, flags: CGEventFlags = [], to pid: pid_t) {
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { continue }
             event.flags = flags
-            event.postToPid(pid)
+            event.post(tap: .cghidEventTap)
         }
+    }
+
+    private func ready(_ input: AXUIElement, app: NSRunningApplication) -> Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier && hasFocus(input, app: app)
     }
 
     /// Le focus clavier de l'app est bien sur ce champ (sinon une touche irait ailleurs : un fichier ouvert…).
@@ -206,7 +257,8 @@ final class AgentAutoSend {
     private func send(_ input: AXUIElement, app: NSRunningApplication, window: AXUIElement?) async -> Bool {
         for _ in 0..<2 {
             await bringForward(input, app: app, window: window)
-            guard value(input).contains(marker), hasFocus(input, app: app), app.isActive else { continue }
+            guard value(input).contains(marker) else { return false }
+            guard ready(input, app: app) else { note("champ pas au premier plan : Entrée pas envoyée", once: true); continue }
             key(36, to: app.processIdentifier) // Entrée
             try? await Task.sleep(for: .milliseconds(900))
             if !value(input).contains(marker) { return true }
@@ -221,7 +273,8 @@ final class AgentAutoSend {
         board.clearContents()
         board.setString(text, forType: .string)
         await bringForward(input, app: app, window: window)
-        guard hasFocus(input, app: app), app.isActive else {
+        guard ready(input, app: app) else {
+            note("champ pas au premier plan : rien collé", once: true)
             board.clearContents()
             if let saved { board.setString(saved, forType: .string) }
             return false
