@@ -245,6 +245,7 @@ before(async () => {
     VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
     VIGIE_APPS_DIR: APPS, VIGIE_IDE_WAIT_MS: '1500', // fenêtre VS Code attendue 1,5 s au plus (25 s pour de vrai)
     VIGIE_GIT_BIN: FAKE_GIT, // faux git : dépôts locaux derrière des adresses GitHub
+    VIGIE_RESOLVE: JSON.stringify({ 'github.com': ['140.82.112.3'] }), // hôtes https résolus sans DNS
   };
   child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', (d) => { logs += d; });
@@ -954,8 +955,13 @@ test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris,
   const s60 = (await get('/api/v2/usage/series?window=60')).body;
   const pa = s60.conversations.find((c) => c.id === SID_A);
   assert.equal(pa.running, true);
-  assert.equal(total(pa.points, 'tokens'), 5 * 150 + 600, 'tokens bruts de la dernière heure');
-  assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct) <= 0.06, 'même conversion que weekPct');
+  // La série commence à la minute pleine, une heure avant la requête : l'appel posé à -59 min (à l'heure du jeu
+  // d'essai) en sort dès que la requête tombe dans une minute suivante. Mêmes proportions d'entrée et de sortie
+  // partout : la part de la semaine suit les tokens.
+  const from = Date.parse(s60.from);
+  const lastHour = [-59, -56, -55, -50, -45].filter((m) => NOW + m * 60_000 >= from).length * 150 + 600;
+  assert.equal(total(pa.points, 'tokens'), lastHour, 'tokens bruts de la dernière heure');
+  assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct * lastHour / (5 * 150 + 600)) <= 0.06, 'même conversion que weekPct');
   assert.equal(total(s60.conversations.find((c) => c.id === SID_B).points, 'tokens'), 0, 'B a travaillé il y a 2 h');
   const s600 = (await get('/api/v2/usage/series?window=600')).body;
   assert.ok(total(s600.conversations.find((c) => c.id === SID_B).points, 'tokens') > 0);
@@ -1330,9 +1336,10 @@ test('agents : bibliothèques (dépôt git partagé) : ajout, agents avec leur s
     conforms(r.body, { ok: 'bool', library: Library, message: 'string' });
     assert.equal(r.body.message, 'Bibliothèque ajoutée : 2 agents.');
     assert.deepEqual([r.body.library.id, r.body.library.name, r.body.library.url, r.body.library.commit, r.body.library.status, r.body.library.error, r.body.library.agents],
-      ['agents', 'agents', url, v1.slice(0, 7), 'ok', null, 2]);
+      ['agents', 'studio/agents', url, v1.slice(0, 7), 'ok', null, 2]);
     assert.equal(fs.statSync(path.join(DATA, 'agent-libraries.json')).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.join(DATA, 'agent-libraries', 'agents')).mode & 0o777, 0o700);
+    assert.ok(fs.readFileSync(GIT_LOG, 'utf8').includes('http.curloptResolve=github.com:443:140.82.112.3'), 'hôte résolu, adresse figée pour git');
     r = await lib({ action: 'add', url: `${url}.git` });
     assert.deepEqual([r.status, r.body.error], [400, LIB_MSG.duplicate]);
     // la liste : chaque agent avec sa source ; lue sans relancer git
@@ -1342,17 +1349,25 @@ test('agents : bibliothèques (dépôt git partagé) : ajout, agents avec leur s
     conforms(r.body, { ...AgentsList, libraries: arr(Library) });
     assert.deepEqual(r.body.agents.map((a) => [a.id, a.source]), [
       ['local', { kind: 'local' }],
-      ['creer-une-page', { kind: 'library', id: 'agents', name: 'agents' }],
-      ['agents-local', { kind: 'library', id: 'agents', name: 'agents' }],
+      ['creer-une-page', { kind: 'library', id: 'agents', name: 'studio/agents' }],
+      ['agents-local', { kind: 'library', id: 'agents', name: 'studio/agents' }],
     ], 'un agent local n\'est jamais remplacé : celui de la bibliothèque prend <bibliothèque>-<dossier>');
-    assert.deepEqual(r.body.libraries.map((l) => [l.id, l.status, l.agents, l.commit]), [['agents', 'ok', 2, v1.slice(0, 7)]]);
-    // lancement d'un agent de la bibliothèque : {{dossier_agent}} est son dossier dans la copie
+    assert.deepEqual(r.body.libraries.map((l) => [l.id, l.name, l.status, l.agents, l.commit]), [['agents', 'studio/agents', 'ok', 2, v1.slice(0, 7)]]);
+    // lancement d'un agent de la bibliothèque : {{dossier_agent}} est son dossier dans la version figée
     const folder = path.join(CODE, 'page-studio');
     fs.rmSync(MAC_LOG, { force: true });
-    r = await post('/api/v2/agents/launch', { id: 'creer-une-page', values: { page: 'Accueil' }, folder, surface: 'claude-app' });
+    // la source vue à l'ouverture du formulaire : celle de l'agent, sinon 409 et rien n'est fait
+    for (const source of [{ kind: 'local' }, { kind: 'library', id: 'autre' }]) {
+      r = await post('/api/v2/agents/launch', { id: 'creer-une-page', values: { page: 'Accueil' }, folder, surface: 'claude-app', source });
+      assert.deepEqual([r.status, r.body], [409, { ok: false, error: 'Cet agent a changé depuis l\'ouverture du formulaire : ferme-le et rouvre-le.' }], JSON.stringify(source));
+    }
+    r = await post('/api/v2/agents/launch', { id: 'local', values: {}, folder, surface: 'claude-app', source: { kind: 'library', id: 'agents' } });
+    assert.equal(r.status, 409);
+    assert.equal(fs.existsSync(folder), false, 'rien de créé');
+    r = await post('/api/v2/agents/launch', { id: 'creer-une-page', values: { page: 'Accueil' }, folder, surface: 'claude-app', source: { kind: 'library', id: 'agents' } });
     assert.equal(r.status, 200, r.text);
     conforms(r.body, AgentLaunch);
-    const agentDir = fs.realpathSync(path.join(DATA, 'agent-libraries', 'agents', 'creer-une-page'));
+    const agentDir = fs.realpathSync(path.join(DATA, 'agent-libraries', 'agents', v1.slice(0, 7), 'creer-une-page'));
     assert.ok(fs.readFileSync(r.body.briefFile, 'utf8').includes(`Modèles : ${agentDir}/modeles. Page : Accueil.`));
     assert.equal(r.body.prompt, `Lance l'agent « Créer une page » : lis le fichier ${r.body.briefFile} et suis ses consignes, dans le dossier ${folder}.`);
     // l'auteur publie une nouvelle version : mise à jour demandée
