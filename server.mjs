@@ -21,7 +21,7 @@ import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { createAgents, folderConversations } from './lib/agents.mjs';
-import { createLibraries } from './lib/libraries.mjs';
+import { createLibraries, staticResolve } from './lib/libraries.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
@@ -122,13 +122,20 @@ const mcp = createMcp({
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
-// Bibliothèques d'agents : dépôts git partagés (un dossier par agent), copiés dans data/agent-libraries/<id>/ et tenus
-// à jour toutes les heures (lib/libraries.mjs). git : /usr/bin/git, jamais lancé s'il n'est pas installé (il ouvrirait
-// la fenêtre d'installation d'Apple) ; VIGIE_GIT_BIN : un faux git pour les essais.
-const libraries = createLibraries({ dataDir: DATA, gitBin: process.env.VIGIE_GIT_BIN || '/usr/bin/git' });
+// Bibliothèques d'agents : dépôts git partagés (un dossier par agent), dont chaque version est figée dans
+// data/agent-libraries/<id>/<commit7>/, tenus à jour toutes les heures (lib/libraries.mjs). git : /usr/bin/git, jamais
+// lancé s'il n'est pas installé (il ouvrirait la fenêtre d'installation d'Apple). Pour les essais : VIGIE_GIT_BIN (un
+// faux git), VIGIE_RESOLVE (adresses des hôtes https, en JSON, au lieu du DNS).
+let resolveHosts;
+try { resolveHosts = process.env.VIGIE_RESOLVE ? staticResolve(JSON.parse(process.env.VIGIE_RESOLVE)) : undefined; } catch { resolveHosts = staticResolve({}); }
+const libraries = createLibraries({ dataDir: DATA, gitBin: process.env.VIGIE_GIT_BIN || '/usr/bin/git', resolve: resolveHosts, takenIds: () => agents.localIds() });
 // Agents : recettes rangées dans data/agents/<id>/AGENT.md ou dans une bibliothèque, lancées dans une conversation de
 // VS Code ou de l'app Claude (lib/agents.mjs).
 const agents = createAgents({ dir: path.join(DATA, 'agents'), home: HOME, libraries: () => libraries.copies() });
+// Moteur arrêté (launchd, mise à jour) : les git des bibliothèques sont dans leur propre groupe de processus, que
+// launchd n'arrête pas avec le moteur ; ils sont arrêtés ici, puis le signal reprend son effet ordinaire.
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { libraries.stop(); process.kill(process.pid, sig); });
+process.on('exit', () => libraries.stop());
 // Ouvreur : VS Code (le lien part quand la fenêtre du dossier est prête) ou l'app Claude (lib/opener.mjs).
 // VIGIE_IDE_WAIT_MS : attente maximale de la fenêtre (25 s ; plus courte dans les essais).
 const IDE_WAIT_MS = Number(process.env.VIGIE_IDE_WAIT_MS);
@@ -1562,10 +1569,11 @@ function agentFolder(url) {
   return [200, { path: f.path, exists: f.exists, error: f.error, conversations: f.error ? [] : conversationsIn(f.path), sources: f.sources }];
 }
 
-// POST /api/v2/agents/launch { id, values, folder, files?, surface?, session? } : tout est vérifié (surface installée,
-// conversation à reprendre dans ce dossier) avant de rien créer ; puis dossier créé, fichiers joints copiés, consigne
-// écrite, message préparé, et le moteur ouvre VS Code ou l'app Claude (lib/opener.mjs). Jusqu'à ~30 s : l'attente de
-// la fenêtre de VS Code passe par des minuteries, le moteur répond aux autres requêtes pendant ce temps.
+// POST /api/v2/agents/launch { id, values, folder, files?, surface?, session?, source? } : tout est vérifié (agent
+// toujours celui du formulaire, surface installée, conversation à reprendre dans ce dossier) avant de rien créer ;
+// puis dossier créé, fichiers joints copiés, consigne écrite, message préparé, et le moteur ouvre VS Code ou l'app
+// Claude (lib/opener.mjs). Jusqu'à ~30 s : l'attente de la fenêtre de VS Code passe par des minuteries, le moteur
+// répond aux autres requêtes pendant ce temps.
 const SURFACE_MISSING = {
   vscode: 'VS Code et son extension Claude Code ne sont pas sur ton Mac : choisis l\'app Claude, ou installe-les.',
   'claude-app': 'L\'app Claude n\'est pas sur ton Mac : choisis VS Code, ou installe-la.',
@@ -1580,7 +1588,7 @@ async function postAgentLaunch(body) {
   const session = body.session ?? null;
   if (session !== null && (typeof session !== 'string' || !UUID.test(session))) return bad(SESSION_GONE);
   const r = agents.launch({
-    id: body.id, values: body.values, folder: body.folder, files: body.files, session,
+    id: body.id, values: body.values, folder: body.folder, files: body.files, session, source: body.source,
     // après toutes les vérifications du dossier et des fichiers, avant la première écriture
     before: (target) => {
       if (!available.length) return { error: NO_SURFACE };
