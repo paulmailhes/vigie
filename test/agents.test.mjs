@@ -290,11 +290,16 @@ test('valeurs dans la consigne : {{id}} remplacé, « (non fourni) » si vide, i
 
 // ---------- bibliothèque ----------
 
+test('agents livrés avec Vigie (agents/ du dépôt) : chacun se lit sans erreur', () => {
+  const shipped = createAgents({ dir: new URL('../agents', import.meta.url).pathname, home: TMP }).list();
+  assert.ok(shipped.length > 0, 'au moins un agent livré');
+  for (const a of shipped) assert.equal(a.error, null, `${a.id} : ${a.error}`);
+});
+
 test('bibliothèque : un agent par dossier valide avec AGENT.md, trié par nom ; le reste ignoré', () => {
   const W = world();
   assert.deepEqual(W.agents.list(), [], 'dossier absent : liste vide');
-  assert.ok(fs.statSync(W.dir).isDirectory(), 'dossier des agents créé');
-  assert.equal(mode(W.dir), 0o700);
+  assert.equal(fs.existsSync(W.dir), false, 'rien créé : les agents viennent de la version');
   W.add('demarrer-projet', EXEMPLE);
   W.add('zebre', '---\nname: Zèbre\n---\nConsigne.');
   W.add('ecrire', '---\nname: écrire une page\nfolder: ~/Projets/\n---\nConsigne.');

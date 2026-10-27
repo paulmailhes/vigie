@@ -4,9 +4,7 @@
 l'on colle ce qu'on a et où l'on glisse des fichiers (copiés dans `sources/`), reprise d'une conversation déjà ouverte
 dans le dossier, ouverture dans VS Code ou dans l'app Claude par le moteur de Vigie, qui attend la fenêtre du projet
 (`lib/agents.mjs`, `lib/opener.mjs`, `GET /api/v2/agents`, `GET /api/v2/agents/folder`, `POST /api/v2/agents/launch`,
-voir [api-v2.md](api-v2.md)). Les agents se partagent par des **bibliothèques** : un dépôt git, un dossier par agent,
-que chaque Vigie récupère et tient à jour tout seul (`lib/libraries.mjs`, `POST /api/v2/agents/libraries`, voir
-« Partager des agents : les bibliothèques »). La réflexion du départ et les décisions à prendre restent plus bas.
+voir [api-v2.md](api-v2.md)). La réflexion du départ et les décisions à prendre restent plus bas.
 
 ## L'idée
 
@@ -48,14 +46,13 @@ sont connus de l'agent.
 
 ## Où ranger un agent
 
-Un agent = un dossier, `~/.vigie/data/agents/<id>/AGENT.md` (le dossier `agents` est créé par Vigie au premier
-affichage de la page). `<id>` est le nom du dossier : minuscules, chiffres et tirets, 64 caractères au plus
-(`demarrer-projet`). Un dossier au nom invalide ou sans `AGENT.md` n'est pas listé ; un `AGENT.md` de plus de 256 Ko
-est listé avec une erreur, sans pouvoir être lancé.
+Les agents sont **livrés avec Vigie** : un agent = un dossier du dépôt, `agents/<id>/AGENT.md`, avec ses fichiers
+(scripts, images). Chaque version les emporte (`scripts/release.sh`) et la mise à jour remplace tout
+`~/.vigie/agents` chez chacun ; personne n'en ajoute de son côté. Pour en écrire un : [agents/CLAUDE.md](../agents/CLAUDE.md).
 
-Un agent d'équipe peut vivre dans un dépôt git que tu tiens à jour toi-même : un lien symbolique suffit
-(`ln -s ~/Code/agents-equipe/demarrer-projet ~/.vigie/data/agents/demarrer-projet`). Pour que toute l'équipe le reçoive
-et le garde à jour sans rien faire, mieux vaut une bibliothèque (plus bas).
+`<id>` est le nom du dossier : minuscules, chiffres et tirets, 64 caractères au plus (`demarrer-projet`). Un dossier
+au nom invalide ou sans `AGENT.md` n'est pas listé ; un `AGENT.md` de plus de 256 Ko est listé avec une erreur, sans
+pouvoir être lancé. `node --test test/agents.test.mjs` vérifie que chaque agent livré se lit sans erreur.
 
 ## Format d'AGENT.md
 
@@ -133,13 +130,8 @@ derrière `- `, `1. ` ou `> `, un début de valeur qui ouvrirait un titre ou un 
 `{{id}}` d'un long texte ou d'une liste d'adresses (`longtext`, `urls`) n'y recopie jamais la valeur : il devient un
 renvoi, « Questionnaire avant le premier rendez-vous » (plus haut, dans « Ce que tu m'as donné »). Un questionnaire
 collé ne peut donc pas écrire ses propres consignes. Champ vide : « (non fourni) ».
-`{{dossier_agent}}` donne le dossier de l'agent (chemin réel, lien symbolique suivi ; pour un agent de bibliothèque,
-son dossier dans la version figée de la bibliothèque, `~/.vigie/data/agent-libraries/<bibliothèque>/<version>/<dossier>`,
-qui ne change plus jamais) : un agent peut y porter ses propres fichiers (scripts, images, modèles) et la consigne les
-cite par `{{dossier_agent}}/…`. Une commande qui s'y place ou y cherche des fichiers (`cd {{dossier_agent}} && node
-figma/01-fondations.js`, `ls {{dossier_agent}}/figma/*.js`) n'est pas prise pour une lecture du jeton de Vigie, tant
-qu'elle ne peut pas en ressortir (ni `..`, ni `$`, ni `` ` ``, ni `\` dans la suite de la commande, 4 096 caractères au
-plus) ; sinon le garde-fou « Lecture du jeton d'accès de Vigie » te la laisse.
+`{{dossier_agent}}` donne le dossier de l'agent (chemin réel, lien symbolique suivi) : un agent peut y porter ses
+propres fichiers (scripts, images, modèles) et la consigne les cite par `{{dossier_agent}}/…`.
 
 ## Comment il se lance
 
@@ -265,141 +257,6 @@ La réponse dit ce qui s'est ouvert (`opened`), et l'app affiche le message :
 En reprise, les phrases nomment la conversation à ouvrir (« ouvre la conversation « … » dans le panneau de Claude
 Code, puis colle-le ») : collé dans une autre, le message perdrait son historique.
 
-## Partager des agents : les bibliothèques
-
-Une **bibliothèque** est un dépôt git (GitHub, GitLab ou autre) qui contient **un dossier par agent**, chacun avec son
-`AGENT.md` et ses fichiers. L'auteur crée et améliore ses agents, fait `git push`, et chaque Vigie qui a ajouté la
-bibliothèque reçoit la nouvelle version dans l'heure, sans nouvelle version de Vigie. Les agents locaux
-(`~/.vigie/data/agents/<id>/`, liens symboliques compris) restent tels quels, à côté.
-
-### Publier (l'auteur)
-
-1. Un dépôt git, privé ou public, avec un dossier par agent, au premier niveau :
-
-   ```
-   README.md
-   demarrer-projet/AGENT.md
-   demarrer-projet/figma/01-fondations.js
-   creer-une-page/AGENT.md
-   ```
-
-   Chaque dossier qui contient un `AGENT.md` est un agent (même format qu'un agent local, voir « Format d'AGENT.md ») ;
-   le reste est ignoré : les fichiers à la racine (`README.md`), les dossiers cachés (`.github`), les dossiers sans
-   `AGENT.md`. Un `AGENT.md` mal écrit est listé avec son erreur, comme un agent local. Les fichiers de l'agent
-   (scripts, images, modèles) se citent par `{{dossier_agent}}/…`.
-2. `git add`, `git commit`, `git push` : c'est tout. Chaque Vigie relève la bibliothèque toutes les heures (ou tout de
-   suite avec « Mettre à jour »).
-3. Donne l'adresse du dépôt à ton équipe (`https://github.com/studio/agents`, ou `git@github.com:studio/agents.git`),
-   et l'accès au dépôt s'il est privé.
-
-À éviter dans le dépôt : les liens symboliques (Vigie ne les extrait pas, voir plus bas), les sous-modules (jamais
-récupérés), les fichiers suivis par git-lfs (Vigie ne lance pas git-lfs : ils restent leur petit fichier pointeur),
-les gros fichiers (10 000 fichiers et 200 Mo au plus, comptés avant de rien copier : le dépôt est copié en entier),
-et tout secret : chaque collègue en reçoit une copie, et les connexions passent par la passerelle MCP de Vigie.
-
-### Ajouter une bibliothèque (l'équipe)
-
-Page **Agents** de l'app, section **Bibliothèques**, « Ajouter une bibliothèque… » : colle l'adresse du dépôt. Vigie
-le récupère (jusqu'à 90 s), puis ses agents apparaissent dans la liste, avec la mention de leur bibliothèque, nommée
-« propriétaire/dépôt » (`studio/agents`) : deux dépôts `agents` de deux auteurs ne se confondent pas. Tes identifiants
-git servent tels quels : `gh auth login` (GitHub CLI), le trousseau du Mac, ta clé SSH. Vigie ne demande jamais de mot
-de passe : si git a besoin d'un identifiant qu'il n'a pas, l'ajout échoue et dit quoi faire.
-
-- **Adresses acceptées** : `https://<hôte>/<chemin>` (hôte public : ni `localhost`, ni une adresse IP privée, ni un
-  nom local comme `nas.local`), `git@<hôte>:<chemin>.git` et `ssh://git@<hôte>[:port]/<chemin>`. Refusées : `file://`,
-  un chemin du Mac, `ext::`, `http://`, une option (« - » en tête), des espaces ou des caractères spéciaux (même
-  encodés : `%0a`, `%0d`, `%00`…), plus de 2 048 caractères (« Adresse refusée : colle l'adresse du dépôt
-  (https://github.com/… ou git@github.com:…). »). Un identifiant dans l'adresse (`https://alex:jeton@github.com/…`) est
-  refusé aussi : « N'écris pas d'identifiant dans l'adresse : git utilise ceux de ton Mac. »
-- **Adresse d'une page** copiée depuis le navigateur (`…/tree/main`, `…/blob/…`, `…/-/tree/…` de GitLab, `…/src/…`) :
-  « Colle l'adresse du dépôt lui-même (https://github.com/studio/agents), pas celle d'une page. », avec l'adresse du
-  dépôt à coller.
-- **Hôte https sur ton réseau local** : le nom ne suffit pas (`127.0.0.1.nip.io`, `localtest.me` mènent à ton Mac) ;
-  Vigie résout l'hôte avant de lancer git, refuse une adresse privée ou locale (« Adresse refusée : localtest.me mène à
-  ton réseau local. Colle l'adresse d'un dépôt en ligne (https://github.com/… ou git@github.com:…). »), et donne à git
-  les adresses vérifiées pour qu'il ne les résolve pas de nouveau.
-- **Déjà là** (la même adresse, avec ou sans `.git`, en https ou en ssh) : « Cette bibliothèque est déjà là. »
-- **Dépôt vide** (rien de poussé encore) : « Dépôt vide : pousse au moins un agent (un dossier avec son AGENT.md). »
-- **Serveur SSH jamais vu** : « Ton Mac ne connaît pas encore ce serveur : connecte-toi une fois avec ssh -T
-  git@github.com et accepte son empreinte, puis réessaie. » (avec l'hôte et le port de l'adresse).
-- **Échec** : « Dépôt introuvable, ou git n'a pas accès : vérifie l'adresse, et que tu peux le cloner (gh auth login,
-  ou ta clé SSH). », suivi de ce que git a répondu (sans jeton ni mot de passe, et jamais une ligne écrite par le
-  serveur : `remote: …` pourrait se faire passer pour Vigie). Sans réseau : « Pas de connexion au serveur du dépôt :
-  vérifie ta connexion à internet, puis réessaie. »
-- **Trop gros** : « Dépôt trop gros pour une bibliothèque : 10 000 fichiers et 200 Mo au plus. Garde dans ce dépôt les
-  agents et leurs fichiers seulement. » Compté avant de rien copier.
-- **git absent** (outils de développement d'Apple pas installés) : « git n'est pas installé sur ton Mac : installe les
-  outils de développement (xcode-select --install), puis réessaie. » Vigie le voit sans lancer `/usr/bin/git`, qui
-  ouvrirait la fenêtre d'installation d'Apple.
-- 20 bibliothèques au plus.
-
-**Identifiant d'un agent** : le nom de son dossier, en minuscules sans accents (`Créer une page` → `creer-une-page`).
-S'il est déjà pris, par un agent local ou par une autre bibliothèque : `<bibliothèque>-<dossier>`
-(`agents-demarrer-projet`). Un agent local n'est jamais remplacé. L'id attribué est **retenu** (premier arrivé,
-premier servi) : il ne change pas quand une autre bibliothèque publie un dossier du même nom, ni quand une bibliothèque
-est retirée. Seul un agent local créé ensuite sous le même nom le prend (il passe devant) : l'agent de la bibliothèque
-reçoit alors un autre id. Si le formulaire de lancement était déjà ouvert sur lui, le lancement est refusé : « Cet
-agent a changé depuis l'ouverture du formulaire : ferme-le et rouvre-le. » (rien n'est créé).
-
-### Mises à jour
-
-Toutes les heures, quand le Mac est calme (pas dans les minutes qui suivent son démarrage, son réveil ou le lancement
-d'une conversation), le moteur de Vigie relève les bibliothèques relevées il y a plus d'une heure, **une à la fois**,
-en **priorité basse**. Chaque version est **figée** : rien n'est jamais réécrit dans une version en service.
-
-1. `git ls-remote` lit la version publiée (une petite requête). Rien de neuf : c'est tout.
-2. Sinon, comme à l'ajout : le dépôt est cloné **sans rien extraire** dans une copie temporaire, ses fichiers sont
-   **comptés** (10 000 et 200 Mo au plus), puis seuls ses fichiers ordinaires sont extraits dans un dossier neuf,
-   `<bibliothèque>/<version>/` (les 7 premiers caractères du commit). La liste passe à cette version d'un seul coup,
-   et la copie temporaire est retirée : aucun dépôt git ne reste sur le disque.
-3. La version d'avant **reste 24 h** (500 Mo au plus pour toutes les versions d'avant d'une bibliothèque, les plus
-   récentes d'abord) : une conversation lancée avant la mise à jour lit toujours les fichiers de sa consigne, jamais
-   un `AGENT.md` à moitié écrit ni les scripts d'une autre version. Puis elle est retirée au relevé suivant.
-
-Un agent retiré du dépôt disparaît de la liste ; une branche par défaut renommée par l'auteur (`main` → `trunk`) est
-suivie d'elle-même. Si la mise à jour échoue (réseau, accès perdu, dépôt devenu trop gros ou vide), **la version en
-service reste utilisée** et l'erreur s'affiche sur la bibliothèque ; Vigie réessaie l'heure suivante. Une mise à jour
-coupée en route (délai, moteur arrêté) ne laisse rien qui bloque la suivante. « Mettre à jour » le fait tout de suite ;
-« Retirer » enlève la bibliothèque, toutes ses versions et ses agents. La liste des agents ne lance jamais git : elle
-lit les fichiers de la version en service.
-
-### Ce que Vigie garde, et la sécurité
-
-- La liste : `~/.vigie/data/agent-libraries.json` (`0600`) : `[{ id, url, addedAt, updatedAt, checkedAt, commit,
-  bytes, error, agents, retired }]` (`checkedAt` : le dernier relevé, réussi ou non ; `updatedAt` : la dernière mise à
-  jour réussie ; `bytes` : la taille de la version en service ; `agents` : `{ "<dossier>": "<id>" }`, les ids retenus ;
-  `retired` : les versions d'avant encore gardées, `[{ commit, at, bytes }]`). Les versions :
-  `~/.vigie/data/agent-libraries/<id>/<commit7>/` (`0700`), des fichiers seulement, sans dépôt git. L'id d'une
-  bibliothèque vient du nom du dépôt (`agents`, puis `agents-2`…) et ne change pas.
-- git (`/usr/bin/git`) est lancé **sans shell**, avec des arguments, 90 s au plus pour toute l'opération (puis arrêté
-  avec ce qu'il a lancé : « Le dépôt n'a pas répondu en 90 s… » pendant le téléchargement, « La copie de la
-  bibliothèque a pris plus de 90 s sur ton Mac… » après), et **ne pose jamais de question** : `GIT_TERMINAL_PROMPT=0`,
-  `GIT_ASKPASS` et `SSH_ASKPASS` vides, `GIT_SSH_COMMAND="ssh -o BatchMode=yes"` (un `core.sshCommand` de ton
-  `~/.gitconfig` est donc remplacé : range ta clé dans `~/.ssh/config`), et sans aucune autre variable `GIT_*` du
-  moteur. Quand le moteur s'arrête (launchd, mise à jour de Vigie), les git en cours sont arrêtés avec lui.
-- **Rien du dépôt n'est exécuté** : `core.hooksPath=/dev/null` (aucun hook, même ceux d'un modèle de dépôt), ni lien
-  symbolique ni sous-module extraits (seuls les fichiers ordinaires le sont : aucun lien ne peut mener ailleurs sur le
-  Mac), git-lfs coupé (`filter.lfs.process=`, `filter.lfs.smudge=`, `filter.lfs.required=false`), seuls `https` et
-  `ssh` permis (`protocol.allow=never`, `protocol.file.allow=never`), objets vérifiés (`transfer.fsckObjects`), pas de
-  ménage de fond (`gc.auto=0`, `maintenance.auto=false`). Ces réglages passent en ligne de commande, avant ceux du Mac.
-- git n'écrit que dans `~/.vigie/data/agent-libraries/` : clonage dans `.<id>.<hasard>.tmp` (retiré à la fin, ou à
-  l'opération suivante si le moteur a été arrêté net), extraction dans `<id>/.<commit7>.<hasard>.tmp`, puis mise en
-  place sous `<id>/<commit7>/`. Chaque commande nomme son dépôt (`--git-dir`) et `GIT_CEILING_DIRECTORIES` empêche git
-  de chercher un dépôt plus haut. Comme aucun dépôt ne reste, aucun réglage posé entre deux relevés (un filtre, un
-  `include`) ne peut être lu par git.
-- Un hôte https est résolu avant git ; une adresse privée ou locale est refusée, et les adresses vérifiées sont figées
-  pour git (`-c http.curloptResolve=<hôte>:<port>:<adresses>`). Un hôte ssh n'est pas résolu : l'empreinte du serveur,
-  que ton Mac doit déjà connaître, protège.
-- Une conversation lit les fichiers de l'agent dans sa version (`{{dossier_agent}}`), mais ne les modifie pas : elle
-  est sous `~/.vigie`, protégé par le garde-fou « réglages de Vigie ». Un agent de bibliothèque est une consigne écrite
-  par quelqu'un d'autre : n'ajoute que les bibliothèques de gens à qui tu fais confiance. Ses actions sensibles restent
-  retenues comme pour toute conversation.
-- Limites connues : un moteur tué net (`kill -9`) laisse un git en cours finir seul (sa copie temporaire est retirée à
-  l'opération suivante, rien ne bloque) ; un dépôt qui redirige vers un autre hôte (une redirection http) n'est pas
-  vérifié pour ce second hôte ; le téléchargement lui-même n'est borné que par le délai de 90 s (la taille est comptée
-  juste après, avant de rien extraire) ; une nouvelle version est téléchargée en entier (une seule version, `--depth
-  1`).
-
 ## Ce qui reste
 
 - **Choix du compte au lancement** : la conversation part sur le compte des nouvelles conversations (réglable dans
@@ -420,12 +277,12 @@ lit les fichiers de la version en service.
 ## Encore à décider
 
 La première version a tranché les points 1 (le modèle Figma est reconstruit par les scripts de l'agent : aucune
-manipulation à la main, et le modèle s'améliore en modifiant les scripts) et 4 (visible dans VS Code), les
-bibliothèques le point 3 ; le reste est ouvert.
+manipulation à la main, et le modèle s'améliore en modifiant les scripts) et 4 (visible dans VS Code) ; le reste est
+ouvert.
 
 1. ~~Le modèle Figma~~ : reconstruit par l'agent.
 2. Webflow : site modèle dupliqué à la main, ou l'agent part d'un site vide déjà créé ?
-3. ~~Les agents de l'équipe~~ : une bibliothèque (un dépôt git), tenue à jour par son auteur avec `git push`.
+3. ~~Les agents de l'équipe~~ : livrés avec Vigie, une nouvelle version pour un agent nouveau ou corrigé.
 4. Lancement : visible dans VS Code (on suit et on corrige en direct), ou en fond ?
 5. « Programmer à l'avance » : préparé à l'avance (la bibliothèque), ou aussi planifié à une heure donnée ?
 
@@ -436,7 +293,5 @@ bibliothèques le point 3 ; le reste est ouvert.
 2. **Deuxième version** (moteur, 2026-10-26) : un seul champ et des fichiers joints, `creates`, reprise d'une
    conversation, VS Code ou app Claude, ouverture par le moteur qui attend la fenêtre du projet.
 3. **Ensuite** : lancement en fond et compte rendu dans Vigie, captures des sites de référence par un navigateur.
-4. **Bibliothèques** (moteur, 2026-10-27) : dépôts git partagés, un dossier par agent, ajoutés par leur adresse et
-   tenus à jour toutes les heures. Après relecture : versions figées, taille comptée avant d'extraire, aucun dépôt git
-   gardé, ids retenus et source vérifiée au lancement, hôte https résolu, phrases qui disent quoi faire.
-5. **Puis** : lancements planifiés si on en a besoin.
+4. **Puis** : lancements planifiés si on en a besoin. (Les agents partent avec les versions de Vigie : pas de
+   bibliothèque à ajouter soi-même.)

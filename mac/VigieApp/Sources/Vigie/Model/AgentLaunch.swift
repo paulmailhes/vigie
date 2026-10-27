@@ -353,13 +353,11 @@ enum AgentLaunch {
         return list.first?.id
     }
 
-    /// POST /api/v2/agents/launch : `files`, `surface` et `session` seulement s'il y a quelque chose à dire. `source` :
-    /// toujours, celle de l'agent affiché dans le formulaire (absente du moteur : local) ; le moteur refuse (409,
-    /// « Cet agent a changé depuis l'ouverture du formulaire… ») si l'agent de cet id vient d'ailleurs depuis.
-    static func body(agent: String, source: AgentSource?, values: [String: String], folder: String, files: [String],
+    /// POST /api/v2/agents/launch : `files`, `surface` et `session` seulement s'il y a quelque chose à dire.
+    static func body(agent: String, values: [String: String], folder: String, files: [String],
                      surface: AgentSurface?, session: String?) -> JSONValue {
-        var body: [String: JSONValue] = ["id": .string(agent), "source": (source ?? AgentSource()).launchValue,
-                                         "values": .object(values.mapValues(JSONValue.string)), "folder": .string(folder)]
+        var body: [String: JSONValue] = ["id": .string(agent), "values": .object(values.mapValues(JSONValue.string)),
+                                         "folder": .string(folder)]
         if !files.isEmpty { body["files"] = .array(files.map(JSONValue.string)) }
         if let surface { body["surface"] = .string(surface.rawValue) }
         if let session { body["session"] = .string(session) }

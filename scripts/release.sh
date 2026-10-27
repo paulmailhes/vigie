@@ -13,7 +13,7 @@ VERSION="${1:?version, par exemple 0.3.0}"
 PROFILE="${VIGIE_NOTARY_PROFILE:-vigie-notarisation}"
 cd "$ROOT"
 APP="$ROOT/mac/Vigie.app"
-ENGINE_FILES=(VERSION hook.mjs server.mjs lib bin scripts public README.md LICENSE)
+ENGINE_FILES=(VERSION hook.mjs server.mjs lib bin scripts public agents README.md LICENSE)
 
 echo "1/6 Tests du moteur"
 node --test test/ >/dev/null || { echo "Des tests échouent : rien n'est publié." >&2; exit 1; }

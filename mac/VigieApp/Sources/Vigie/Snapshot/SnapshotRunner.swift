@@ -116,10 +116,6 @@ final class SnapshotRunner {
                 ])
                 await captureAlone(sheet, "17-feuille-agent-\(theme)", appearance: NSAppearance(named: appearanceName))
             }
-            if store.agentsState?.libraries != nil {
-                await captureAlone(AgentLibraryAddSheet(address: AgentLibraryAddress.example),
-                                   "18-feuille-bibliotheque-\(theme)", appearance: NSAppearance(named: appearanceName))
-            }
         }
 
         finish(code: 0, message: "\(written.count) captures dans \(folder.path)")

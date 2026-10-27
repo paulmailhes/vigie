@@ -1,30 +1,12 @@
 import Foundation
 
-/// GET /api/v2/agents : les recettes rangées dans le dossier des agents (<dossier>/<id>/AGENT.md) et celles des
-/// bibliothèques (un dépôt git, un dossier par agent), le compte sur lequel partira la conversation (celui des
-/// nouvelles conversations) et où elle peut s'ouvrir.
-struct AgentsPage: Decodable, Equatable, Sendable {
-    var dir: String?
+/// GET /api/v2/agents : les recettes livrées avec Vigie (agents/<id>/AGENT.md), le compte sur lequel partira la
+/// conversation (celui des nouvelles conversations) et où elle peut s'ouvrir.
+struct AgentLibrary: Decodable, Equatable, Sendable {
     @Tolerant var account: AgentAccount?
     @Lossy var agents: [AgentInfo]
     /// Absent : moteur plus ancien, qui prépare le dossier sans rien ouvrir ni joindre de fichiers.
     @Tolerant var surfaces: AgentSurfaces?
-    /// Absent (nil) : moteur plus ancien, sans bibliothèques ; la section ne s'affiche pas.
-    @OptionalLossy var libraries: [AgentLibraryInfo]?
-
-    /// Le nombre d'agents d'une bibliothèque : celui du moteur, sinon ceux de la liste qui en viennent.
-    func agentCount(of library: AgentLibraryInfo) -> Int {
-        library.agents ?? agents.count { $0.source?.libraryID == library.id }
-    }
-
-    /// La liste sans ces bibliothèques ni leurs agents (retirées à l'instant, le moteur n'a pas encore répondu).
-    func hiding(libraries ids: Set<String>) -> AgentsPage {
-        guard !ids.isEmpty else { return self }
-        var state = self
-        state.libraries = libraries?.filter { !ids.contains($0.id) }
-        state.agents = agents.filter { agent in agent.source?.libraryID.map { !ids.contains($0) } ?? true }
-        return state
-    }
 }
 
 struct AgentAccount: Decodable, Equatable, Sendable {
@@ -49,11 +31,6 @@ struct AgentInfo: Decodable, Equatable, Sendable, Identifiable {
     /// Ce que l'agent crée (clé `creates` de l'AGENT.md), en phrases courtes.
     @Lossy var creates: [String]
     var error: String?
-    /// D'où il vient : absent ou illisible, du dossier des agents (local).
-    @Tolerant var source: AgentSource?
-
-    /// Le nom de sa bibliothèque ; nil : agent local.
-    var libraryName: String? { source?.libraryName }
 
     var displayName: String {
         if let name, !name.isEmpty { return name }

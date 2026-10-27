@@ -95,23 +95,6 @@ struct Lossy<Element: Decodable & Equatable & Sendable>: Decodable, Equatable, S
     }
 }
 
-/// Liste dont l'absence compte (moteur plus ancien, qui ne la connaît pas) : absente, null ou autre chose qu'une
-/// liste = nil ; sinon ses éléments lisibles.
-@propertyWrapper
-struct OptionalLossy<Element: Decodable & Equatable & Sendable>: Decodable, Equatable, Sendable {
-    var wrappedValue: [Element]?
-
-    init(wrappedValue: [Element]?) { self.wrappedValue = wrappedValue }
-
-    init(from decoder: any Decoder) throws {
-        guard (try? decoder.unkeyedContainer()) != nil else {
-            wrappedValue = nil
-            return
-        }
-        wrappedValue = try Lossy<Element>(from: decoder).wrappedValue
-    }
-}
-
 /// Objet facultatif : illisible = nil, sans faire échouer le reste.
 @propertyWrapper
 struct Tolerant<Value: Decodable & Equatable & Sendable>: Decodable, Equatable, Sendable {
@@ -139,10 +122,6 @@ extension KeyedDecodingContainer {
 
     func decode<Value>(_ type: Tolerant<Value>.Type, forKey key: Key) throws -> Tolerant<Value> {
         (try? decodeIfPresent(type, forKey: key)) ?? Tolerant(wrappedValue: nil)
-    }
-
-    func decode<Element>(_ type: OptionalLossy<Element>.Type, forKey key: Key) throws -> OptionalLossy<Element> {
-        (try? decodeIfPresent(type, forKey: key)) ?? OptionalLossy(wrappedValue: nil)
     }
 }
 

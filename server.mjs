@@ -15,13 +15,12 @@ import { createVault, createKeychain } from './lib/vault.mjs';
 import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpService, launchCwd, openInTerminal, shq } from './lib/mcp.mjs';
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
-import { ROOT, DATA, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
+import { ROOT, DATA, AGENTS, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
 import { awaitingApprovals, approve } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { createAgents, folderConversations } from './lib/agents.mjs';
-import { createLibraries, staticResolve } from './lib/libraries.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
@@ -122,20 +121,9 @@ const mcp = createMcp({
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
-// Bibliothèques d'agents : dépôts git partagés (un dossier par agent), dont chaque version est figée dans
-// data/agent-libraries/<id>/<commit7>/, tenus à jour toutes les heures (lib/libraries.mjs). git : /usr/bin/git, jamais
-// lancé s'il n'est pas installé (il ouvrirait la fenêtre d'installation d'Apple). Pour les essais : VIGIE_GIT_BIN (un
-// faux git), VIGIE_RESOLVE (adresses des hôtes https, en JSON, au lieu du DNS).
-let resolveHosts;
-try { resolveHosts = process.env.VIGIE_RESOLVE ? staticResolve(JSON.parse(process.env.VIGIE_RESOLVE)) : undefined; } catch { resolveHosts = staticResolve({}); }
-const libraries = createLibraries({ dataDir: DATA, gitBin: process.env.VIGIE_GIT_BIN || '/usr/bin/git', resolve: resolveHosts, takenIds: () => agents.localIds() });
-// Agents : recettes rangées dans data/agents/<id>/AGENT.md ou dans une bibliothèque, lancées dans une conversation de
-// VS Code ou de l'app Claude (lib/agents.mjs).
-const agents = createAgents({ dir: path.join(DATA, 'agents'), home: HOME, libraries: () => libraries.copies() });
-// Moteur arrêté (launchd, mise à jour) : les git des bibliothèques sont dans leur propre groupe de processus, que
-// launchd n'arrête pas avec le moteur ; ils sont arrêtés ici, puis le signal reprend son effet ordinaire.
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { libraries.stop(); process.kill(process.pid, sig); });
-process.on('exit', () => libraries.stop());
+// Agents : recettes livrées avec Vigie (agents/<id>/AGENT.md, remplacées à chaque mise à jour), lancées dans une
+// conversation de VS Code ou de l'app Claude (lib/agents.mjs). Personne n'en ajoute : elles arrivent avec les versions.
+const agents = createAgents({ dir: AGENTS, home: HOME });
 // Ouvreur : VS Code (le lien part quand la fenêtre du dossier est prête) ou l'app Claude (lib/opener.mjs).
 // VIGIE_IDE_WAIT_MS : attente maximale de la fenêtre (25 s ; plus courte dans les essais).
 const IDE_WAIT_MS = Number(process.env.VIGIE_IDE_WAIT_MS);
@@ -1529,27 +1517,11 @@ function agentsView() {
   };
   const available = desktop.agentSurfaces();
   return [200, {
-    dir: agents.dir,
     account: acc ? { id: acc.id, label: acc.label || acc.id } : null,
     // où un agent peut s'ouvrir, et celui proposé (le dernier utilisé s'il est encore là)
     surfaces: { available, chosen: chooseSurface(available, readState().agentsSurface) },
-    // d'où vient chaque agent : son dossier local, ou une bibliothèque (fichiers lus, jamais git)
-    agents: agents.list().map((a) => ({ ...a, source: a.source ?? { kind: 'local' }, mcp: a.mcp.map((name) => ({ name, status: status(name) })) })),
-    libraries: libraries.view(),
+    agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map((name) => ({ name, status: status(name) })) })),
   }];
-}
-
-// POST /api/v2/agents/libraries : { action: "add", url } (clonage, jusqu'à 90 s), { action: "update", id? } (une, ou
-// toutes l'une après l'autre), { action: "remove", id } (docs/api-v2.md). Les phrases viennent de lib/libraries.mjs.
-async function postAgentLibraries(body) {
-  const { action } = body;
-  let r;
-  if (action === 'add') r = await libraries.add(body.url);
-  else if (action === 'update') r = await libraries.update(body.id ?? null);
-  else if (action === 'remove') r = await libraries.remove(body.id);
-  else return bad('Action : add, update ou remove.');
-  const { status = 400, ...rest } = r;
-  return r.ok ? [200, rest] : [status, rest];
 }
 
 // Conversations Claude Code lancées dans ce dossier, connues de l'indexeur (lib/agents.mjs, folderConversations).
@@ -1569,11 +1541,10 @@ function agentFolder(url) {
   return [200, { path: f.path, exists: f.exists, error: f.error, conversations: f.error ? [] : conversationsIn(f.path), sources: f.sources }];
 }
 
-// POST /api/v2/agents/launch { id, values, folder, files?, surface?, session?, source? } : tout est vérifié (agent
-// toujours celui du formulaire, surface installée, conversation à reprendre dans ce dossier) avant de rien créer ;
-// puis dossier créé, fichiers joints copiés, consigne écrite, message préparé, et le moteur ouvre VS Code ou l'app
-// Claude (lib/opener.mjs). Jusqu'à ~30 s : l'attente de la fenêtre de VS Code passe par des minuteries, le moteur
-// répond aux autres requêtes pendant ce temps.
+// POST /api/v2/agents/launch { id, values, folder, files?, surface?, session? } : tout est vérifié (surface installée,
+// conversation à reprendre dans ce dossier) avant de rien créer ; puis dossier créé, fichiers joints copiés, consigne
+// écrite, message préparé, et le moteur ouvre VS Code ou l'app Claude (lib/opener.mjs). Jusqu'à ~30 s : l'attente de
+// la fenêtre de VS Code passe par des minuteries, le moteur répond aux autres requêtes pendant ce temps.
 const SURFACE_MISSING = {
   vscode: 'VS Code et son extension Claude Code ne sont pas sur ton Mac : choisis l\'app Claude, ou installe-les.',
   'claude-app': 'L\'app Claude n\'est pas sur ton Mac : choisis VS Code, ou installe-la.',
@@ -1588,7 +1559,7 @@ async function postAgentLaunch(body) {
   const session = body.session ?? null;
   if (session !== null && (typeof session !== 'string' || !UUID.test(session))) return bad(SESSION_GONE);
   const r = agents.launch({
-    id: body.id, values: body.values, folder: body.folder, files: body.files, session, source: body.source,
+    id: body.id, values: body.values, folder: body.folder, files: body.files, session,
     // après toutes les vérifications du dossier et des fichiers, avant la première écriture
     before: (target) => {
       if (!available.length) return { error: NO_SURFACE };
@@ -1686,7 +1657,6 @@ const ROUTES = [
   ['GET', /^\/api\/v2\/agents$/, () => agentsView()],
   ['GET', /^\/api\/v2\/agents\/folder$/, (_, __, url) => agentFolder(url)],
   ['POST', /^\/api\/v2\/agents\/launch$/, (_, b) => postAgentLaunch(b)],
-  ['POST', /^\/api\/v2\/agents\/libraries$/, (_, b) => postAgentLibraries(b)],
   ['POST', new RegExp(`^/api/v2/pending/${S}$`), ([id], b) => postPending(id, b)],
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],
   ['POST', /^\/api\/v2\/review\/([^/]{1,400})\/dismiss$/, ([id]) => postDismiss(id)],
@@ -1825,13 +1795,6 @@ function updateTick() {
   try { busy = pendingWaits(state).size > 0; } catch { /* prudence : on attend */ }
   updater.tick({ auto: state.autoUpdate, busy }).catch((e) => console.error('[vigie] mise à jour :', clean(e)));
 }
-// Bibliothèques d'agents : celles relevées il y a plus d'une heure (ou jamais), une à la fois, en priorité basse, quand
-// le Mac est calme ; regardé toutes les 10 min (lecture d'un petit fichier), git lancé au plus une fois par heure et
-// par bibliothèque. Silencieux : l'erreur reste dans la liste. Pas pendant les essais (VIGIE_NO_UPDATE).
-async function librariesTick() {
-  if (process.env.VIGIE_NO_UPDATE || !calm()) return;
-  try { await libraries.tick(); } catch (e) { console.error('[vigie] bibliothèques d\'agents :', clean(e)); }
-}
 // Choix du compte de chaque conversation dans VS Code : toujours actif, sans réglage à montrer, dès que VS Code est
 // sur le Mac et que l'utilisateur s'en sert (outils de l'accueil). Le lanceur d'un autre outil n'est jamais remplacé.
 function ensureWrapper() {
@@ -1853,8 +1816,6 @@ server.listen(PORT, HOST, () => {
   setInterval(tick, 4000);
   setTimeout(updateTick, 60_000);
   setInterval(updateTick, 30 * 60_000);
-  setTimeout(librariesTick, 150_000); // au démarrage, une fois le Mac calme (2 min après le moteur)
-  setInterval(librariesTick, 10 * 60_000);
   if (!process.env.VIGIE_NO_MCP_SYNC) {
     // espaces de la passerelle encore acceptés par leur service ?
     setTimeout(() => { for (const n of gateway.names()) gateway.verify(n).catch(() => {}); }, 10_000);

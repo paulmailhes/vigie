@@ -87,11 +87,8 @@ final class VigieStore {
     private(set) var details: [String: ConversationDetailModel] = [:]
     private(set) var mcp: MCPState?
     private(set) var accountsState: AccountsState?
-    /// Les agents (recettes à lancer), leurs bibliothèques et le compte sur lequel ils partiraient.
-    private(set) var agentsState: AgentsPage?
-    /// Bibliothèques retirées à l'instant, le moteur n'a pas encore répondu : cachées, même par une lecture partie
-    /// pendant l'attente (une écriture patiente laisse passer les lectures).
-    @ObservationIgnored var removingLibraries: Set<String> = []
+    /// Les agents (recettes à lancer) et le compte sur lequel ils partiraient.
+    private(set) var agentsState: AgentLibrary?
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
     /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
@@ -354,26 +351,21 @@ final class VigieStore {
         }
     }
 
-    /// Relit la page Agents ; rend ce que le moteur a répondu (nil sans réponse), même quand une écriture terminée
-    /// entre-temps empêche de l'afficher : l'ajout d'une bibliothèque y regarde si elle est arrivée.
-    @discardableResult
-    func refreshAgents() async -> AgentsPage? {
-        if isDemo, agentsState != nil { return agentsState }
+    func refreshAgents() async {
+        if isDemo, agentsState != nil { return }
         let started = ContinuousClock.now
         do {
-            let state = try await client.get("/api/v2/agents", as: AgentsPage.self)
-            guard isFresh(started) else { return state }
-            update(\.agentsState, state.hiding(libraries: removingLibraries))
+            let state = try await client.get("/api/v2/agents", as: AgentLibrary.self)
+            guard isFresh(started) else { return }
+            update(\.agentsState, state)
             update(\.agentsProblem, nil)
             readSucceeded()
-            return state
         } catch ClientError.refused(let text) {
             // moteur sans la page Agents (trop ancien) : la page le dit ; un bandeau reviendrait toutes les 30 s
             if !Task.isCancelled { update(\.agentsProblem, text) }
         } catch {
             readFailed(error)
         }
-        return nil
     }
 
     /// Ce que le moteur sait du dossier d'un projet : existe-t-il, ses conversations, ce qu'il y a dans sources/. Lu
@@ -493,7 +485,7 @@ final class VigieStore {
         if Task.isCancelled { return }
         let clientError = error as? ClientError ?? .unreadable
         switch clientError {
-        case .unreachable, .timedOut:
+        case .unreachable:
             update(\.connection, .down)
         case .refused(let text):
             update(\.connection, .failing(text))
@@ -521,10 +513,8 @@ final class VigieStore {
     }
 
     /// POST vers le moteur, avec son erreur : pour choisir quoi faire selon la raison d'un refus. `patient` : la
-    /// réponse peut tarder (lancer un agent, jusqu'à 30 s ; ajouter une bibliothèque, jusqu'à 90 s) ; les relevés
-    /// continuent pendant l'attente au lieu d'être écartés (ce qui est changé d'avance à l'écran s'en protège seul,
-    /// comme `removingLibraries`). Une écriture patiente sans réponse à temps ne dit pas que le moteur est injoignable :
-    /// il y travaille peut-être encore, et les relevés de fond diront s'il répond.
+    /// réponse peut tarder (lancer un agent, jusqu'à 30 s) ; rien n'est changé d'avance à l'écran, les relevés
+    /// continuent donc pendant l'attente au lieu d'être écartés.
     func send(_ path: String, _ body: JSONValue, patient: Bool = false) async -> Result<WriteResult, ClientError> {
         if !patient { writesInFlight += 1 }
         defer {
@@ -535,7 +525,7 @@ final class VigieStore {
             return .success(try await client.post(path, body, patient: patient))
         } catch {
             let clientError = error as? ClientError ?? .unreadable
-            if clientError == .unreachable || (clientError == .timedOut && !patient) { update(\.connection, .down) }
+            if clientError == .unreachable { update(\.connection, .down) }
             return .failure(clientError)
         }
     }
@@ -631,11 +621,5 @@ final class VigieStore {
         guard var value = mcp else { return }
         change(&value)
         mcp = value
-    }
-
-    func patchAgents(_ change: (inout AgentsPage) -> Void) {
-        guard var value = agentsState else { return }
-        change(&value)
-        update(\.agentsState, value)
     }
 }
