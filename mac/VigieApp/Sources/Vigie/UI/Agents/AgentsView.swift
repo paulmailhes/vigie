@@ -174,12 +174,15 @@ struct AgentRecipeRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let library = agent.libraryName {
-                        Label("Bibliothèque \(library)", systemImage: Icon.library)
+                        // « Bibliothèque studio/agents » : un nom long passe à la ligne après « / », sans être tronqué
+                        Label("Bibliothèque \(AgentLibraryName.wrapping(library))", systemImage: Icon.library)
                             .labelStyle(CompactLabelStyle())
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 1)
-                            .help("Vient d'une bibliothèque : Vigie le tient à jour avec son dépôt")
+                            .accessibilityLabel("Bibliothèque \(library)")
+                            .help("Vient de la bibliothèque \(library) : Vigie le tient à jour avec son dépôt")
                     }
                 }
                 if let problem = agent.problem {

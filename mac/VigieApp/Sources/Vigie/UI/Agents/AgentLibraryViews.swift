@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Une bibliothèque : nom, adresse courte, « Mise à jour il y a 2 h · 3 agents », ce qui ne va pas en orange, puis
-/// « Mettre à jour » et « Retirer » (confirmé par la page).
+/// Une bibliothèque : nom (« propriétaire/dépôt »), adresse courte, « Mise à jour il y a 2 h · 3 agents », ce qui ne va
+/// pas en orange, puis « Mettre à jour » et « Retirer » (confirmé par la page).
 struct AgentLibraryRow: View {
     @Environment(VigieStore.self) private var store
     let library: AgentLibraryInfo
@@ -12,8 +12,11 @@ struct AgentLibraryRow: View {
         HStack(alignment: .top, spacing: 12) {
             AgentIcon(symbol: Icon.library)
             VStack(alignment: .leading, spacing: 2) {
-                Text(library.displayName)
+                // un nom long passe à la ligne après « / », sans être tronqué
+                Text(AgentLibraryName.wrapping(library.displayName))
                     .fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(library.displayName)
                 if let short = library.shortURL { address(short) }
                 // l'âge avance tout seul, même quand rien ne change côté moteur
                 TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -73,13 +76,14 @@ struct AgentLibraryRow: View {
 
 /// « Ajouter une bibliothèque… » : l'adresse du dépôt, vérifiée à la frappe (le moteur reste l'arbitre). « Ajouter »
 /// attend que le moteur ait récupéré le dépôt (jusqu'à 90 s) ; un refus s'affiche dans la feuille, qui reste ouverte.
+/// Pas de réponse dans le délai et la bibliothèque pas encore là : le moteur continue, la feuille dit d'attendre.
 struct AgentLibraryAddSheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var address: String
     @State private var adding = false
-    /// Le dernier refus du moteur : effacé dès que l'adresse change.
-    @State private var issue: String?
+    /// Le dernier refus du moteur, ou « toujours en cours » : effacé dès que l'adresse change.
+    @State private var notice: AgentLibraryAddOutcome?
     @FocusState private var focused: Bool
 
     /// `address` : déjà remplie (mode captures).
@@ -113,12 +117,7 @@ struct AgentLibraryAddSheet: View {
             Text("Un dépôt git avec un dossier par agent : Vigie le récupère et le tient à jour toutes les heures. Tes identifiants git (gh, clé SSH) servent tels quels.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if let issue {
-                Label(issue, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(Theme.alert)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            noticeView
             HStack(spacing: 12) {
                 if adding {
                     Text("Jusqu'à 1 min 30 pour un gros dépôt.")
@@ -126,7 +125,8 @@ struct AgentLibraryAddSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Annuler") { dismiss() }
+                // toujours en cours : fermer ne l'annule pas
+                Button(stillRunning ? "Fermer" : "Annuler") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .glassButton()
                     .disabled(adding)
@@ -157,15 +157,37 @@ struct AgentLibraryAddSheet: View {
         }
         .keyboardShortcut(.defaultAction)
         .glassButton(.primary)
-        .disabled(ready == nil || adding)
+        // toujours en cours : un second ajout de la même adresse serait refusé comme doublon
+        .disabled(ready == nil || adding || stillRunning)
     }
+
+    /// Le refus en rouge ; « toujours en cours » en discret : ce n'est pas une erreur.
+    @ViewBuilder
+    private var noticeView: some View {
+        switch notice {
+        case .refused(let text)?:
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(Theme.alert)
+                .fixedSize(horizontal: false, vertical: true)
+        case .stillRunning?:
+            Label(AgentLibraryAdd.stillRunning, systemImage: "clock")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .added?, nil:
+            EmptyView()
+        }
+    }
+
+    private var stillRunning: Bool { notice == .stillRunning }
 
     private var binding: Binding<String> {
         Binding {
             address
         } set: { value in
             address = value
-            issue = nil
+            notice = nil
         }
     }
 
@@ -178,15 +200,15 @@ struct AgentLibraryAddSheet: View {
     }
 
     private func add() async {
-        guard let url = ready, !adding else { return }
+        guard let url = ready, !adding, !stillRunning else { return }
         adding = true
-        issue = nil
-        let refused = await store.addAgentLibrary(url: url)
+        notice = nil
+        let outcome = await store.addAgentLibrary(url: url)
         adding = false
-        if let refused {
-            issue = refused
-        } else {
+        if outcome == .added {
             dismiss()
+        } else {
+            notice = outcome
         }
     }
 }

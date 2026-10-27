@@ -4,7 +4,8 @@ import SwiftUI
 /// Lancer un agent, dans l'ordre : le dossier du projet (le moteur dit s'il existe, ce qu'il y a dans sources/, et
 /// s'il y a déjà une conversation à continuer), ce que tu as sur le projet (texte et fichiers glissés), ce que l'agent
 /// va créer, puis où l'ouvrir. Le moteur prépare le dossier et ouvre VS Code ou l'app Claude ; il refuse (dossier
-/// refusé, fichier introuvable…) : la feuille reste ouverte, le message s'affiche en bas, au-dessus des boutons.
+/// refusé, fichier introuvable, agent changé depuis l'ouverture du formulaire…) : la feuille reste ouverte, le message
+/// s'affiche en bas, au-dessus des boutons, et la liste des agents est relue.
 struct AgentLaunchSheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -101,11 +102,13 @@ struct AgentLaunchSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let library = agent.libraryName {
-                    Label("De la bibliothèque \(library)", systemImage: Icon.library)
+                    Label("De la bibliothèque \(AgentLibraryName.wrapping(library))", systemImage: Icon.library)
                         .labelStyle(CompactLabelStyle())
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
+                        .accessibilityLabel("De la bibliothèque \(library)")
                 }
             }
         }

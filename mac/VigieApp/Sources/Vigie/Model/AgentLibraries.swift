@@ -3,8 +3,14 @@ import Foundation
 // MARK: D'où vient un agent
 
 /// GET /api/v2/agents, `source` de chaque agent : `{ kind: "local" }` (le dossier des agents) ou
-/// `{ kind: "library", id, name }` (une bibliothèque). Absent, illisible ou d'un autre genre : local.
+/// `{ kind: "library", id, name }` (une bibliothèque, `name` : « propriétaire/dépôt »). Absent, illisible ou d'un
+/// autre genre : affiché comme local. Renvoyé tel quel au lancement (`launchValue`) : le moteur refuse si l'agent de
+/// cet id vient d'ailleurs depuis l'ouverture du formulaire (bibliothèque retirée, conflit de noms).
 struct AgentSource: Decodable, Equatable, Sendable {
+    /// Le genre dit par le moteur : « local », « library », ou un genre qu'il ajouterait plus tard.
+    var kind = "local"
+    /// L'id tel que le moteur l'a donné (la bibliothèque, pour « library »).
+    var id: String?
     /// La bibliothèque d'où vient l'agent ; nil : agent local.
     var libraryID: String?
     var libraryName: String?
@@ -15,13 +21,29 @@ struct AgentSource: Decodable, Equatable, Sendable {
         case kind, id, name
     }
 
-    init(from decoder: any Decoder) throws {
-        guard let container = try? decoder.container(keyedBy: CodingKeys.self),
-              (try? container.decodeIfPresent(String.self, forKey: .kind)) == "library" else { return }
-        let id = Self.text(container, .id)
-        let name = Self.text(container, .name)
+    init(kind: String = "local", id: String? = nil, name: String? = nil) {
+        self.kind = kind
+        self.id = id
+        guard kind == "library" else { return }
         libraryID = id ?? name
         libraryName = name ?? id
+    }
+
+    init(from decoder: any Decoder) throws {
+        guard let container = try? decoder.container(keyedBy: CodingKeys.self),
+              let kind = Self.text(container, .kind) else {
+            self.init()
+            return
+        }
+        self.init(kind: kind, id: Self.text(container, .id), name: Self.text(container, .name))
+    }
+
+    /// `source` du lancement : ce que le formulaire a montré. `{ kind: "local" }`, sinon le genre et l'id du moteur
+    /// (`{ kind: "library", id: "<bibliothèque>" }`).
+    var launchValue: JSONValue {
+        var value: [String: JSONValue] = ["kind": .string(kind)]
+        if kind != "local", let id { value["id"] = .string(id) }
+        return .object(value)
     }
 
     private static func text(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
@@ -104,6 +126,8 @@ struct AgentLibraryInfo: Decodable, Equatable, Sendable, Identifiable {
         return value
     }
 
+    /// « studio/agents » (propriétaire/dépôt : deux dépôts du même nom restent distincts) ; moteur plus ancien : le
+    /// nom du dépôt seul, ou l'id.
     var displayName: String { name ?? id }
 
     /// « github.com/studio/agents ».
@@ -130,6 +154,68 @@ struct AgentLibraryInfo: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+// MARK: Le nom, à l'écran
+
+/// « propriétaire/dépôt » mis en page sans être coupé bêtement : s'il faut deux lignes, la coupure se fait après « / »,
+/// jamais après un trait d'union (« mon-studio » reste entier) ; seul un nom plus long que la ligne se coupe ailleurs.
+/// Les caractères ajoutés ne se voient pas (espace sans largeur, gluon de mots).
+enum AgentLibraryName {
+    static func wrapping(_ name: String) -> String {
+        var text = ""
+        for character in name {
+            text.append(character)
+            switch character {
+            case "/": text.append("\u{200B}") // coupure permise
+            case "-": text.append("\u{2060}") // pas de coupure
+            default: break
+            }
+        }
+        return text
+    }
+}
+
+// MARK: L'ajout
+
+/// Ce qu'a donné « Ajouter ».
+enum AgentLibraryAddOutcome: Equatable, Sendable {
+    /// Ajoutée : la feuille se ferme, le toast le dit.
+    case added
+    /// Rien n'est ajouté (refus du moteur, moteur injoignable) : la phrase s'affiche dans la feuille, qui reste ouverte.
+    case refused(String)
+    /// Pas de réponse dans le délai, et pas encore dans la liste : le moteur continue (gros dépôt, autre bibliothèque
+    /// en cours avant elle). La feuille le dit, sans parler de panne.
+    case stillRunning
+}
+
+/// Les étapes de l'ajout, sans l'écran ni le réseau (pour les essais).
+enum AgentLibraryAdd {
+    static let added = "Bibliothèque ajoutée."
+    static let stillRunning = "Toujours en cours : attends un instant, puis rouvre la page Agents."
+    /// Dans la feuille, le bandeau « Relancer » de la fenêtre est caché : la phrase dit où il est.
+    static let unreachable = "Le moteur de Vigie ne répond pas : ferme cette fenêtre, clique sur « Relancer » dans le bandeau, puis réessaie."
+
+    /// La réponse du moteur à l'ajout ; nil : délai dépassé, la liste relue dira si la bibliothèque est arrivée
+    /// (`afterTimeout`).
+    static func outcome(_ answer: Result<WriteResult, ClientError>) -> AgentLibraryAddOutcome? {
+        switch answer {
+        case .success: .added
+        case .failure(.timedOut): nil
+        case .failure(.unreachable): .refused(unreachable)
+        case .failure(let error): .refused(error.message)
+        }
+    }
+
+    /// Après un délai dépassé : ajoutée si la liste relue a une bibliothèque de cette adresse, quelle que soit sa forme,
+    /// qui n'y était pas avant l'envoi (`before` : les ids d'alors) ; sinon, toujours en cours.
+    static func afterTimeout(url: String, before: Set<String>, page: AgentsPage?) -> AgentLibraryAddOutcome {
+        let key = AgentLibraryAddress.key(url)
+        let arrived = page?.libraries?.contains { library in
+            !before.contains(library.id) && library.url.map(AgentLibraryAddress.key) == key
+        } ?? false
+        return arrived ? .added : .stillRunning
+    }
+}
+
 // MARK: L'adresse du dépôt
 
 /// L'adresse d'un dépôt, vérifiée dans la feuille avant l'envoi, avec les mêmes refus que le moteur pour ce qui se
@@ -139,8 +225,10 @@ enum AgentLibraryAddress {
     static let maxLength = 2048
     static let example = "https://github.com/studio/agents"
     static let refused = "Adresse refusée : colle l'adresse du dépôt (https://github.com/… ou git@github.com:…)."
-    static let credentials = "Adresse refusée : n'écris pas d'identifiant dans l'adresse, git utilise ceux de ton Mac."
-    static let plainHTTP = "Adresse refusée : elle doit commencer par https:// (ou git@ pour une clé SSH)."
+    static let credentials = "Adresse refusée : retire l'identifiant écrit avant « @ », git utilise ceux de ton Mac."
+    static let plainHTTP = "Adresse refusée : remplace http:// par https:// (ou colle l'adresse git@… pour une clé SSH)."
+    /// …/tree/main, …/blob/main/AGENT.md, …/-/tree/main (GitLab) : l'adresse d'une page du dépôt, copiée du navigateur.
+    static let page = "Adresse refusée : colle l'adresse du dépôt lui-même (https://github.com/<propriétaire>/<dépôt>), pas celle d'une page."
 
     enum Check: Equatable {
         /// Rien d'écrit.
@@ -186,6 +274,7 @@ enum AgentLibraryAddress {
             let authority = rest.prefix { $0 != "/" }
             if lower.hasPrefix("https://"), authority.contains("@") { return .refused(credentials) }
             let path = rest.dropFirst(authority.count).drop { $0 == "/" }
+            if isPage(path) { return .refused(page) }
             return authority.isEmpty || path.isEmpty ? .typing : .ready(text)
         }
         if lower.hasPrefix("git@") {
@@ -198,6 +287,17 @@ enum AgentLibraryAddress {
         // « github.com » sans la suite : le nom du dépôt viendra
         return looksLikeHostAndPath(text) ? .typing : .refused(refused)
     }
+
+    /// Le chemin d'une page du dépôt : « tree » ou « blob » après propriétaire/dépôt (« studio/agents/tree/main »), ou
+    /// un élément « - » (GitLab : « groupe/agents/-/tree/main »), que le moteur refuse.
+    private static func isPage(_ path: Substring) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.contains("-") || parts.dropFirst(2).contains { $0 == "tree" || $0 == "blob" }
+    }
+
+    /// La même adresse quelle que soit sa forme (https ou git@, « .git », « / » final, majuscules) : pour la
+    /// reconnaître dans la liste du moteur.
+    static func key(_ url: String) -> String { short(url).lowercased() }
 
     /// « https://github.com/studio/agents.git » → « github.com/studio/agents » ; « git@github.com:studio/agents.git »
     /// et « ssh://git@github.com/studio/agents » aussi.

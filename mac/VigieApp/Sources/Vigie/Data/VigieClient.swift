@@ -42,8 +42,11 @@ enum APIToken {
 }
 
 enum ClientError: Error, Sendable, Equatable {
-    /// Le moteur ne répond pas (connexion refusée, délai dépassé…).
+    /// Le moteur ne répond pas (connexion refusée, coupée…).
     case unreachable
+    /// Pas de réponse dans le délai : le moteur a reçu la demande et y travaille peut-être encore (un clonage plus long
+    /// que prévu). Pour une lecture courte, c'est un moteur qui ne répond pas ; pour une écriture patiente, non.
+    case timedOut
     /// Réponse refusée par le moteur, avec sa phrase d'erreur.
     case refused(String)
     /// Ce qu'on demande n'existe plus (conversation fermée depuis longtemps…), avec la phrase du moteur.
@@ -56,6 +59,7 @@ enum ClientError: Error, Sendable, Equatable {
     var message: String {
         switch self {
         case .unreachable: "Le moteur de Vigie ne répond pas"
+        case .timedOut: "Le moteur de Vigie n'a pas répondu à temps : réessaie dans un instant"
         case .refused(let text), .notFound(let text): text
         case .unreadable: "Réponse illisible du moteur de Vigie : réessaie"
         case .missingFixture(let name): "Fichier de démonstration absent : \(name)"
@@ -159,7 +163,7 @@ struct VigieClient: Sendable {
 
     // MARK: Écriture
 
-    /// `patient` : la réponse peut tarder (lancer un agent), délai long.
+    /// `patient` : la réponse peut tarder (lancer un agent, ajouter une bibliothèque), délai long.
     @concurrent
     func post(_ path: String, _ body: JSONValue, patient: Bool = false) async throws -> WriteResult {
         switch source {
@@ -195,21 +199,27 @@ struct VigieClient: Sendable {
             }
         }
         if (200..<300).contains(http.statusCode) { return data }
-        if http.statusCode == 401 { throw ClientError.refused("Vigie n'a plus accès à son moteur : quitte Vigie et rouvre-le") }
-        if acceptErrorBody, (400..<500).contains(http.statusCode) {
-            if let result = try? JSONDecoder().decode(WriteResult.self, from: data), let error = result.error {
-                throw ClientError.refused(error)
-            }
-        }
-        if http.statusCode == 404 {
+        throw refusal(status: http.statusCode, data: data, acceptErrorBody: acceptErrorBody)
+    }
+
+    /// Une réponse hors 2xx, en erreur. `acceptErrorBody` (écritures) : la phrase du moteur pour un refus 4xx (400
+    /// dossier refusé, 409 agent changé depuis l'ouverture du formulaire…), que la feuille montre telle quelle.
+    static func refusal(status: Int, data: Data, acceptErrorBody: Bool) -> ClientError {
+        let said = (try? JSONDecoder().decode(WriteResult.self, from: data))?.error
+        if status == 401 { return .refused("Vigie n'a plus accès à son moteur : quitte Vigie et rouvre-le") }
+        if acceptErrorBody, (400..<500).contains(status), let said { return .refused(said) }
+        if status == 404 {
             // « Adresse inconnue. » : la route n'existe pas (moteur trop ancien) ; sinon, c'est l'élément demandé
-            if let error = (try? JSONDecoder().decode(WriteResult.self, from: data))?.error, error != "Adresse inconnue." {
-                throw ClientError.notFound(error)
-            }
-            throw ClientError.refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)")
+            if let said, said != "Adresse inconnue." { return .notFound(said) }
+            return .refused("Le moteur de Vigie est trop ancien pour ça : mets Vigie à jour (Réglages › Mises à jour)")
         }
-        if http.statusCode == 403 { throw ClientError.refused("Le moteur de Vigie a refusé la modification") }
-        throw ClientError.refused("Le moteur de Vigie a eu un problème (\(http.statusCode)) : réessaie dans un instant")
+        if status == 403 { return .refused("Le moteur de Vigie a refusé la modification") }
+        return .refused("Le moteur de Vigie a eu un problème (\(status)) : réessaie dans un instant")
+    }
+
+    /// Une requête restée sans réponse : délai dépassé, ou moteur injoignable (connexion refusée, coupée…).
+    static func transportError(_ error: any Error) -> ClientError {
+        (error as? URLError)?.code == .timedOut ? .timedOut : .unreachable
     }
 
     private static func exchange(_ request: URLRequest, token: String?,
@@ -221,7 +231,7 @@ struct VigieClient: Sendable {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw ClientError.unreachable
+            throw transportError(error)
         }
         guard let http = response as? HTTPURLResponse else { throw ClientError.unreadable }
         return (data, http)
