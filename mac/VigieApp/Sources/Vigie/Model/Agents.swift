@@ -84,10 +84,10 @@ struct AgentInfo: Decodable, Equatable, Sendable, Identifiable {
 
 /// Un champ du formulaire de lancement.
 struct AgentField: Decodable, Equatable, Sendable, Identifiable {
-    /// text : une ligne ; longtext : un long texte ; url : une adresse ; urls : une adresse par ligne.
-    /// Un type inconnu se remplit comme une ligne de texte.
+    /// text : une ligne ; longtext : un long texte ; url : une adresse ; urls : une adresse par ligne ; choices : des
+    /// cases à cocher (`options`), envoyées une par ligne. Un type inconnu se remplit comme une ligne de texte.
     enum Kind: String, Sendable {
-        case text, longtext, url, urls
+        case text, longtext, url, urls, choices
 
         init(raw: String?) { self = raw.flatMap { Kind(rawValue: $0.lowercased()) } ?? .text }
 
@@ -100,9 +100,19 @@ struct AgentField: Decodable, Equatable, Sendable, Identifiable {
     var required: Bool
     var help: String?
     var placeholder: String?
+    /// Cases à cocher : les choix, un symbole SF par choix (ou aucun), ceux cochés à l'ouverture.
+    var options: [String] = []
+    var icons: [String]?
+    var defaults: [String] = []
+
+    /// Le symbole d'un choix (la case cochée si l'AGENT.md n'en donne pas).
+    func icon(for option: String) -> String {
+        guard let icons, let index = options.firstIndex(of: option), index < icons.count else { return "checkmark.square" }
+        return icons[index]
+    }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, type, required, help, placeholder
+        case id, label, type, required, help, placeholder, options, icons, defaults
     }
 
     init(from decoder: any Decoder) throws {
@@ -113,6 +123,11 @@ struct AgentField: Decodable, Equatable, Sendable, Identifiable {
         required = (try? container.decodeIfPresent(Bool.self, forKey: .required)) ?? false
         help = Self.text(container, .help)
         placeholder = Self.text(container, .placeholder)
+        options = ((try? container.decodeIfPresent([String].self, forKey: .options)) ?? nil) ?? []
+        icons = (try? container.decodeIfPresent([String].self, forKey: .icons)) ?? nil
+        defaults = (((try? container.decodeIfPresent([String].self, forKey: .defaults)) ?? nil) ?? []).filter(options.contains)
+        // des cases sans choix ne se remplissent pas : une ligne de texte
+        if kind == .choices, options.isEmpty { kind = .text }
     }
 
     /// Texte facultatif : absent, vide ou d'un autre type = nil.
@@ -185,12 +200,15 @@ struct AgentMCPServer: Decodable, Equatable, Sendable, Identifiable {
     var name: String
     var status: String?
     var connect = false
+    /// Passerelle de Vigie : ses espaces (Webflow : un par espace de travail autorisé) et l'actif, le seul qu'il voit.
+    var spaces: [AgentSpace] = []
+    var space: String?
 
     var id: String { name }
     var mcpStatus: MCPStatus { MCPStatus(raw: status) }
 
     private enum CodingKeys: String, CodingKey {
-        case name, status, connect
+        case name, status, connect, spaces, space
     }
 
     init(from decoder: any Decoder) throws {
@@ -198,7 +216,18 @@ struct AgentMCPServer: Decodable, Equatable, Sendable, Identifiable {
         name = try container.decode(String.self, forKey: .name)
         status = try? container.decodeIfPresent(String.self, forKey: .status)
         connect = ((try? container.decodeIfPresent(Bool.self, forKey: .connect)) ?? nil) ?? false
+        spaces = ((try? container.decodeIfPresent(Lossy<AgentSpace>.self, forKey: .spaces)) ?? nil)?.wrappedValue ?? []
+        space = try? container.decodeIfPresent(String.self, forKey: .space)
     }
+
+    /// Le nom de l'espace actif.
+    var spaceLabel: String? { spaces.first { $0.id == space }?.label }
+}
+
+/// Un espace d'un MCP de la passerelle (Webflow : un espace de travail).
+struct AgentSpace: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var label: String
 }
 
 /// Nom de dossier tiré d'un texte : « Cabinet Martin & Fils » → « cabinet-martin-fils ».

@@ -24,8 +24,14 @@ creates:                                 # ce qu'il crée, montré dans le formu
 fields:                                  # le formulaire : un seul grand champ suffit le plus souvent
   - id: infos
     label: Ce que tu as sur le projet
-    type: longtext                       # text, longtext, url, urls (une adresse par ligne)
+    type: longtext                       # text, longtext, url, urls (une adresse par ligne), choices
     help: Colle ce que tu as ; glisse ici les fichiers utiles
+  - id: controles                        # des cases à cocher illustrées
+    label: Ce qu'il faut contrôler
+    type: choices
+    options: [Tout le site, SEO, Liens]  # 2 à 12, sur une ligne ; entre guillemets s'il y a une virgule
+    icons: [checkmark.seal, magnifyingglass, link]   # un symbole SF par choix (facultatif)
+    default: [Tout le site]              # cochés à l'ouverture (facultatif)
 ---
 La consigne, en Markdown, écrite pour Claude.
 ```
@@ -36,6 +42,9 @@ La consigne, en Markdown, écrite pour Claude.
   (renvoi vers « Ce que tu m'as donné » dans le brief) ; `{{dossier_agent}}` = le dossier de l'agent, pour citer ses
   fichiers (`{{dossier_agent}}/figma/01-fondations.js`).
 - Les fichiers glissés dans le formulaire arrivent dans `sources/` du projet ; le brief les liste.
+- `mcp: [figma]` : n'importe quel MCP de ce service. L'utilisateur choisit dans le formulaire lequel (et, pour un MCP
+  de la passerelle comme Webflow, son espace de travail) ; le brief les nomme sous « MCP à utiliser » : dis à l'agent
+  de prendre celui-là.
 - `node --test test/agents.test.mjs` vérifie que chaque agent livré se lit sans erreur.
 
 ## Les règles des agents

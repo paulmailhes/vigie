@@ -106,8 +106,15 @@ entre guillemets ; sinon l'agent est listé avec une erreur (« « creates » : 
 guillemets… »).
 
 Chaque champ : `id` (minuscules, chiffres et `_`, commence par une lettre, unique), `label` (obligatoire), `type`
-(`text` par défaut, `longtext`, `url`, `urls` : une adresse par ligne), `required` (`true`/`false`), `help` (une aide
-sous le champ), `placeholder` (exemple grisé dans le champ). Les clés inconnues sont ignorées.
+(`text` par défaut, `longtext`, `url`, `urls` : une adresse par ligne, `choices` : des cases à cocher), `required`
+(`true`/`false`), `help` (une aide sous le champ), `placeholder` (exemple grisé dans le champ). Les clés inconnues
+sont ignorées.
+
+Cases à cocher (`type: choices`) : `options` (2 à 12 choix, sur une ligne : `options: [Tout le site, SEO, "Liens,
+ancres"]`, 80 caractères au plus chacun), et en option `icons` (un symbole SF par choix, dans le même ordre) et
+`default` (cochés à l'ouverture). L'app les montre en tuiles illustrées ; le brief liste les choix cochés, un par
+ligne, et `{{id}}` les écrit sur une ligne, séparés par des virgules. `required: true` : au moins un. Un choix
+envoyé qui n'est pas dans `options` est refusé au lancement.
 
 L'en-tête est un petit morceau de YAML, lu par Vigie sans dépendance :
 

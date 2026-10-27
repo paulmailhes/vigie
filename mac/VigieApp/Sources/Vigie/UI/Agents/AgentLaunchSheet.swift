@@ -42,6 +42,9 @@ struct AgentLaunchSheet: View {
     /// `folder` et `files` : déjà remplis (mode captures).
     init(agent: AgentInfo, folder: String? = nil, files: [AgentAttachment] = []) {
         self.agent = agent
+        // les cases à cocher : cochées comme le dit l'AGENT.md
+        _values = State(initialValue: Dictionary(uniqueKeysWithValues: agent.fields.filter { $0.kind == .choices }
+            .map { ($0.id, $0.defaults.joined(separator: "\n")) }))
         _folder = State(initialValue: folder ?? Fmt.shortPath(agent.suggestedFolder(values: [:])))
         _folderEdited = State(initialValue: folder != nil)
         _attachments = State(initialValue: AgentAttachments(files))
@@ -84,7 +87,10 @@ struct AgentLaunchSheet: View {
     private var idealHeight: CGFloat {
         let single = agent.fields.count == 1
         var height: CGFloat = agent.namingField == nil ? 330 : 412
-        for field in otherFields { height += field.kind.isMultiline ? (single ? 300 : 215) : 82 }
+        for field in otherFields {
+            if field.kind == .choices { height += 44 + CGFloat((field.options.count + 2) / 3) * 46; continue }
+            height += field.kind.isMultiline ? (single ? 300 : 215) : 82
+        }
         height += 44 + CGFloat(attachments.items.count) * 26
         if let info, !info.resumable.isEmpty { height += 130 }
         if !agent.willCreate.isEmpty { height += 34 + CGFloat(agent.willCreate.count) * 22 }
@@ -278,7 +284,9 @@ struct AgentLaunchSheet: View {
     private func fieldView(_ field: AgentField) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             FieldTitle(text: field.label, required: field.required)
-            if field.kind.isMultiline {
+            if field.kind == .choices {
+                AgentChoicesView(field: field, value: binding(field), disabled: launching)
+            } else if field.kind.isMultiline {
                 let drop = field.id == agent.dropField?.id
                 AgentTextArea(text: binding(field), placeholder: placeholder(field, drop: drop), label: field.label,
                               minHeight: agent.fields.count == 1 ? 220 : 140,
@@ -586,7 +594,7 @@ struct AgentLaunchSheet: View {
     /// Valeur envoyée : sans blancs autour ; une adresse par ligne, sans lignes vides.
     private static func clean(_ value: String?, kind: AgentField.Kind) -> String {
         let text = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard kind == .urls else { return text }
+        guard kind == .urls || kind == .choices else { return text }
         return text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }

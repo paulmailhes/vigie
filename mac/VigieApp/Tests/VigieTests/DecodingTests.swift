@@ -238,6 +238,27 @@ struct DecodingTests {
         #expect(agents.map(\.mcpReady) == [false, false, true])
         #expect(agents.map(\.canVerifyMCP) == [true, false, true])
         #expect(AgentMCPState.ready.color == Theme.live && AgentMCPState.toConnect.color == Theme.warn)
+
+        // la passerelle : ses espaces (Webflow) et l'actif
+        let webflow = try JSONDecoder().decode(AgentMCPServer.self, from: Data("""
+        { "name": "webflow-pro", "status": "connected", "connect": false, "space": "p2",
+          "spaces": [ { "id": "p1", "label": "Principal" }, { "id": "p2", "label": "Novelo" }, { "label": "sans id" } ] }
+        """.utf8))
+        #expect(webflow.spaces.map(\.label) == ["Principal", "Novelo"] && webflow.spaceLabel == "Novelo")
+    }
+
+    /// Des cases à cocher : leurs choix, un symbole par choix, ceux cochés d'avance (seulement parmi les choix) ; sans
+    /// choix, une ligne de texte.
+    @Test func decodesChoicesField() throws {
+        let fields = try JSONDecoder().decode([AgentField].self, from: Data("""
+        [ { "id": "quoi", "label": "Quoi vérifier", "type": "choices", "required": true,
+            "options": ["Tout le site", "SEO", "Liens"], "icons": ["checkmark.seal", "magnifyingglass", "link"], "defaults": ["SEO", "Autre"] },
+          { "id": "vide", "label": "Vide", "type": "choices", "options": [] },
+          { "id": "sans", "label": "Sans symboles", "type": "choices", "options": ["A", "B"] } ]
+        """.utf8))
+        #expect(fields[0].kind == .choices && fields[0].defaults == ["SEO"] && fields[0].icon(for: "Liens") == "link")
+        #expect(fields[1].kind == .text)
+        #expect(fields[2].icon(for: "A") == "checkmark.square" && !fields[2].kind.isMultiline)
     }
 
     /// Dossier proposé : <dossier parent>/<nom du client sans accents ni ponctuation>, 60 caractères au plus.

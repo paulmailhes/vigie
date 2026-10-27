@@ -290,6 +290,43 @@ test('valeurs dans la consigne : {{id}} remplacé, « (non fourni) » si vide, i
 
 // ---------- bibliothèque ----------
 
+test('cases à cocher (type choices) : options, symboles et choix par défaut ; valeurs vérifiées, rangées, dans le brief', () => {
+  const W = world();
+  W.add('controle', `---
+name: Contrôler un site
+fields:
+  - id: site
+    label: Site
+  - id: quoi
+    label: Quoi vérifier
+    type: choices
+    options: [Tout le site, SEO, "Liens, ancres"]
+    icons: [checkmark.seal, magnifyingglass, link]
+    default: [Tout le site]
+    required: true
+---
+Vérifie {{quoi}} sur {{site}}.`);
+  const a = W.agents.get('controle');
+  assert.equal(a.error, null);
+  assert.deepEqual(a.fields[1], { id: 'quoi', label: 'Quoi vérifier', type: 'choices', required: true, help: null, placeholder: null,
+    options: ['Tout le site', 'SEO', 'Liens, ancres'], icons: ['checkmark.seal', 'magnifyingglass', 'link'], defaults: ['Tout le site'] });
+  const folder = path.join(W.home, 'Code', 'controle');
+  let r = W.agents.launch({ id: 'controle', values: { site: 'atelier.fr', quoi: 'Liens, ancres\nSEO\nSEO' }, folder });
+  assert.equal(r.ok, true, r.error);
+  const brief = fs.readFileSync(r.briefFile, 'utf8');
+  assert.match(brief, /### Quoi vérifier\n\n- SEO\n- Liens, ancres\n/, 'dans l\'ordre des options, une fois chacune');
+  assert.match(brief, /Vérifie SEO, Liens, ancres sur atelier\.fr\./);
+  r = W.agents.launch({ id: 'controle', values: { quoi: 'SEO\nTout supprimer' }, folder });
+  assert.deepEqual([r.ok, r.status, r.error], [false, 400, 'Quoi vérifier : « Tout supprimer » n\'est pas un des choix.']);
+  r = W.agents.launch({ id: 'controle', values: { quoi: '  ' }, folder });
+  assert.deepEqual([r.ok, r.error], [false, 'Quoi vérifier : coche au moins un choix.']);
+  for (const [bad, why] of [['options: [Seul]', /2 à 12 choix/], ['options: [A, A]', /en double/], ['options: [A, B]\n    icons: [x.y]', /un symbole SF par option/],
+    ['options: [A, B]\n    default: [C]', /n'est pas une des options/], ['type: dessin', /type inconnu « dessin » \(text, longtext, url, urls ou choices\)/]]) {
+    W.add('casse', `---\nname: Cassé\nfields:\n  - id: q\n    label: Q\n    ${bad.startsWith('type') ? bad : `type: choices\n    ${bad}`}\n---\nx`);
+    assert.match(W.agents.get('casse').error, why, bad);
+  }
+});
+
 test('agents livrés avec Vigie (agents/ du dépôt) : chacun se lit sans erreur', () => {
   const shipped = createAgents({ dir: new URL('../agents', import.meta.url).pathname, home: TMP }).list();
   assert.ok(shipped.length > 0, 'au moins un agent livré');

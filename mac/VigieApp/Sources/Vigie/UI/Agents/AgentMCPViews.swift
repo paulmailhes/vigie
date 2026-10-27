@@ -115,6 +115,10 @@ struct AgentMCPChip: View {
                 Text(detail)
                     .foregroundStyle(.secondary)
             }
+            if let space = mcp.servers.first(where: { $0.name == mcp.chosen })?.spaceLabel {
+                Text(space)
+                    .foregroundStyle(.secondary)
+            }
             AgentMCPStateLabel(state: state)
         }
         .font(.caption)
@@ -247,6 +251,32 @@ struct AgentMCPPanel: View {
         }
     }
 
+    /// L'espace de travail d'un MCP de la passerelle (Webflow) : le choisir ici l'active pour tous les comptes, comme
+    /// sur la page MCP ; l'agent ne verra que lui (le brief le nomme).
+    @ViewBuilder
+    private func spaceChoice(_ server: AgentMCPServer) -> some View {
+        if server.spaces.count > 1 {
+            Picker("Espace", selection: Binding { server.space ?? server.spaces[0].id } set: { id in
+                Task {
+                    _ = await store.gateway("activate", name: server.name, ["profileId": .string(id)])
+                    await store.refreshAgents()
+                }
+            }) {
+                ForEach(server.spaces) { Text("Espace \($0.label)").tag($0.id) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(disabled)
+            .help("L'espace de travail que l'agent verra (il devient l'espace actif de \(server.name) pour tous tes comptes)")
+        } else if let label = server.spaceLabel {
+            Text("Espace \(label)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder
     private func summary(_ needs: [AgentMCP]) -> some View {
         let waiting = needs.filter { $0.isMissing || $0.mcpStatus != .connected }
@@ -289,6 +319,9 @@ struct AgentMCPPanel: View {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if let server = mcp.servers.first(where: { $0.name == mcp.chosen }), !server.spaces.isEmpty {
+                    spaceChoice(server)
                 }
             }
             Spacer(minLength: 8)

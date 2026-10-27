@@ -1574,8 +1574,10 @@ function agentNeeds(list, accountId) {
         if (short !== n && mcpService(n) === svc) add(short, mcp.healthOf(n, { accountId, cwd: HOME }), n);
       }
     }
+    // un MCP de la passerelle : ses espaces (Webflow : un par espace de travail autorisé) et celui qui est actif
+    const spacesOf = (n) => (gw[n] ? { spaces: (gw[n].profiles || []).map((p) => ({ id: p.id, label: p.label })), space: gw[n].active || null } : {});
     const servers = [...found].sort(([, a], [, b]) => NEED_RANK.indexOf(a.status) - NEED_RANK.indexOf(b.status))
-      .map(([n, f]) => ({ name: n, status: f.status, checkedAt: f.checkedAt ?? null, connect: !gateway.has(n), tools: f.tools }));
+      .map(([n, f]) => ({ name: n, status: f.status, checkedAt: f.checkedAt ?? null, connect: !gateway.has(n), ...spacesOf(n), tools: f.tools }));
     for (const x of servers) if (x.status === 'unknown' && x.connect && accountId) verifySoon(x.name, accountId);
     const need = { name: req, service: svc === SERVICE_OTHER ? null : svc };
     const chosen = servers.find((x) => x.name === remembered[needKey(need)]) ?? servers[0] ?? null;
@@ -1642,7 +1644,8 @@ async function postAgentLaunch(body) {
   }
   const use = needs.map((n) => {
     const x = n.servers.find((y) => y.name === (picked[needKey(n)] ?? n.chosen));
-    return x ? { service: needKey(n), server: x.name, tools: x.tools } : null;
+    const space = x?.spaces?.find((p) => p.id === x.space)?.label;
+    return x ? { service: needKey(n), server: x.name, tools: x.tools, ...(space ? { space } : {}) } : null;
   }).filter(Boolean);
   const r = agents.launch({
     id: body.id, values: body.values, folder: body.folder, files: body.files, session, mcp: use,

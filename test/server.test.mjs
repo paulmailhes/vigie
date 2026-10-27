@@ -1052,7 +1052,8 @@ const AgentsList = {
   agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
     fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
     mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES, 'missing'), service: opt('string'),
-      servers: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES), checkedAt: opt(ISO), connect: 'bool' }), chosen: opt('string'), connect: opt('string') }),
+      servers: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES), checkedAt: opt(ISO), connect: 'bool',
+        spaces: opt(arr({ id: 'string', label: 'string' })), space: opt('string') }), chosen: opt('string'), connect: opt('string') }),
     creates: arr('string'), error: opt('string') }),
 };
 const AgentFolder = {
@@ -1087,7 +1088,9 @@ Prépare le projet de {{client}}.
   const GW = path.join(DATA, 'gateway.json');
   const gw = (open) => ({ url: 'https://mcp.example.com/mcp', key: 'a'.repeat(48), profiles: [], active: null, addedAt: iso(-10), open });
   // un deuxième Figma, par la passerelle et pas encore autorisé : deux Figma à choisir
-  wj(GW, { servers: { 'webflow-essai': gw(true), 'notion-essai': gw(false), 'figma-equipe': { ...gw(false), url: 'https://mcp.figma.com/mcp' } }, clients: {} });
+  // Webflow : deux espaces autorisés, « Agence » actif
+  const espaces = { profiles: [{ id: 'p1', label: 'Agence', authorizedAt: iso(-5) }, { id: 'p2', label: 'Client', authorizedAt: iso(-4) }], active: 'p1' };
+  wj(GW, { servers: { 'webflow-essai': { ...gw(true), ...espaces }, 'notion-essai': gw(false), 'figma-equipe': { ...gw(false), url: 'https://mcp.figma.com/mcp' } }, clients: {} });
   let r = await get('/api/v2/agents');
   assert.equal(r.status, 200, r.text);
   conforms(r.body, AgentsList);
@@ -1108,7 +1111,12 @@ Prépare le projet de {{client}}.
   const figmas = [['figma-perso', 'connected', true], ['figma-equipe', 'needs-auth', false]];
   assert.match(a.mcp[0].servers[0].checkedAt, /^\d{4}-/, 'la date du relevé qui l\'a vu');
   assert.equal(a.mcp[0].servers[1].checkedAt, null, 'la passerelle sait sans relevé');
-  const noDates = (list) => list.map((m) => ({ ...m, servers: m.servers.map(({ checkedAt, ...x }) => x) }));
+  // les espaces d'un MCP de la passerelle (Webflow : un par espace de travail), et l'actif
+  assert.deepEqual(a.mcp[2].servers[0].spaces, [{ id: 'p1', label: 'Agence' }, { id: 'p2', label: 'Client' }]);
+  assert.equal(a.mcp[2].servers[0].space, 'p1');
+  assert.deepEqual([a.mcp[3].servers[0].spaces, a.mcp[3].servers[0].space], [[], null], 'passerelle sans espace encore autorisé');
+  assert.ok(!('spaces' in a.mcp[0].servers[0]), 'un MCP du Mac n\'a pas d\'espaces');
+  const noDates = (list) => list.map((m) => ({ ...m, servers: m.servers.map(({ checkedAt, spaces, space, ...x }) => x) }));
   assert.deepEqual(noDates(a.mcp), [
     need('figma-perso', 'figma', 'connected', figmas, 'figma-perso', 'figma-perso'), // relevé « état réel des MCP »
     need('inexistant', null, 'unknown', [['inexistant', 'unknown', true]], 'inexistant', 'inexistant'), // sans service : ce MCP-là
@@ -1133,6 +1141,7 @@ Prépare le projet de {{client}}.
   assert.match(choisi, /## MCP à utiliser\n\n- figma : « figma-equipe » \(ses outils commencent par `mcp__figma-equipe__`\)\. N'en prends pas un autre figma\.\n/);
   assert.match(choisi, /- gmail : « Gmail » \(ses outils commencent par `mcp__claude_ai_Gmail__`\)/, 'un connecteur : ses outils sous son nom claude.ai');
   assert.ok(!choisi.includes('stripe :'), 'aucun MCP : rien à nommer');
+  assert.match(choisi, /- webflow : « webflow-essai », espace « Agence » \(il ne voit que celui-là\) \(ses outils commencent par `mcp__webflow-essai__`\)/);
   assert.ok(choisi.indexOf('## MCP à utiliser') < choisi.indexOf('## Consignes'));
   const again = noDates((await get('/api/v2/agents')).body.agents.find((x) => x.id === 'demarrer-projet').mcp);
   assert.deepEqual(again.filter((m) => m.service === 'figma').map((m) => [m.chosen, m.status, m.connect]),
