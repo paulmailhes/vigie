@@ -40,6 +40,11 @@ français, tu tutoies l'utilisateur, tu restes concret.
   propose. Tu prépares, l'utilisateur publie.
 - **Reprise** : si le dossier a déjà un rapport de contrôle (`docs/controle-publication-*.md`), lis-le d'abord ;
   ce contrôle-ci dit ce qui a changé depuis (réglé, nouveau, toujours là).
+- **Appliquer des corrections déjà préparées** (on te le demande : « Applique les corrections préparées… », ou le
+  rapport de moins de 7 jours en liste qui n'ont pas été appliquées et on ne te demande pas un contrôle neuf) : ne
+  refais pas le contrôle. Relis seulement, par le MCP, la valeur actuelle de chaque point à corriger (le site a pu
+  changer depuis : un point déjà réglé est sauté, un point qui a changé est signalé au lieu d'être écrasé), applique,
+  vérifie, puis passe directement aux étapes 3 à 6 (rapport mis à jour, enregistrement, compte rendu).
 - Ce qu'il faut contrôler : {{controles}}. « Tout le site » : toutes les parties de la grille.
 
 ## 1. Le site, l'outil et la grille
@@ -105,6 +110,11 @@ Puis applique-les une par une, relis chaque correction par le MCP pour vérifier
 jour (✅ corrigé par Claude). Un texte que tu écris (titre, description, alt) part de ce que dit la page, sans
 promesse ni mot-clé inventé.
 
+Pas maintenant (« Non, le rapport seulement », ou seulement une partie) : les corrections restent écrites dans le
+rapport, avec leurs valeurs, et le rapport pour Vigie propose de les faire plus tard (`next`) :
+`{ "label": "Appliquer les N corrections", "message": "Applique maintenant les N corrections préparées dans docs/controle-publication-AAAA-MM-JJ.md (section « Ce que Claude peut corriger »), sans refaire le contrôle : relis chaque valeur avant de l'écrire, ne publie rien, puis mets à jour le rapport." }`.
+Vigie en fait un bouton ; une fois appliquées, retire-les de `next`.
+
 ## 5. Enregistrer
 
 Si le dossier est un dépôt git : `git add docs/ CLAUDE.md` puis
@@ -114,8 +124,9 @@ d'abord.
 ## 6. Le compte rendu
 
 Le rapport pour Vigie (plus haut) suit chaque étape : « en cours » pendant l'analyse, puis le verdict, le décompte
-(✅ ok, ⚠️ warn, ⛔ block), le chemin du rapport détaillé, ce que tu as corrigé (`done`) et ce qui reste à
-l'utilisateur dans Webflow (`todo`, avec `where` : l'écran et le chemin), le plus grave d'abord.
+(✅ ok, ⚠️ warn, ⛔ block), le chemin du rapport détaillé, ce que tu as corrigé (`done`), ce qui reste à
+l'utilisateur dans Webflow (`todo`, avec `where` : l'écran et le chemin), le plus grave d'abord, et ce que toi tu peux
+encore faire (`next`). Les corrections que Claude peut faire ne vont jamais dans `todo`.
 
 Dans la conversation, court (quinze lignes au plus), sans liste de questions :
 - le verdict et le décompte ; le lien du rapport ;

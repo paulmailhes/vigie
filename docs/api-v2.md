@@ -526,7 +526,8 @@ Chaque lancement est noté (`data/agent-runs.json`) et son rapport part « en co
 Le brief dit à l'agent de le tenir à jour (section « Le rapport pour Vigie ») : `status` (`running`, `done`,
 `blocked`), `title`, `verdict`, `level` (`ok`, `warn`, `block`), `counts` (`ok`, `warn`, `block`), `report` (chemin
 du rapport détaillé, dans le dossier), `links` (`https` seulement), `done` (ce que l'agent a fait), `todo` (ce qui reste
-à l'utilisateur : `{ text, where, severity: block | warn | info, done }`). Le moteur le relit à chaque appel, vérifié
+à l'utilisateur : `{ text, where, severity: block | warn | info, done }`), `next` (ce que l'agent peut faire ensuite à la
+demande : `{ label, message }`, 3 au plus ; l'app en fait un bouton qui envoie `message` dans sa conversation). Le moteur le relit à chaque appel, vérifié
 et borné (un fichier, pas un lien, 256 Ko au plus ; textes sur une ligne ; 100 actions, 50 lignes « fait », 10 liens) :
 chaque action porte son `index` dans le fichier. Il surveille les dossiers `.vigie` des lancements montrés : un rapport
 réécrit réveille `GET /api/v2/changes`.

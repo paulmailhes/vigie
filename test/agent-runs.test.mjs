@@ -48,6 +48,10 @@ test('rapport vérifié : champs bornés, adresses https seulement, chemin du ra
   assert.deepEqual(r.done, ['12 titres SEO réécrits']);
   assert.deepEqual(r.todo.map((t) => [t.index, t.text.length, t.severity, t.done]), [[0, 19, 'block', false], [2, 21, 'warn', false], [3, 300, 'warn', true]]);
   assert.ok(!('secret' in r));
+  assert.deepEqual(cleanReport({ next: [{ label: 'Appliquer les 10 corrections', message: 'Applique\nles corrections' }, { label: 'Sans message' },
+    { label: 'x'.repeat(80), message: 'm' }, 'oups', { label: 'a', message: 'b' }, { label: 'c', message: 'd' }] }, W.folder).next,
+  [{ label: 'Appliquer les 10 corrections', message: 'Applique les corrections' }, { label: 'x'.repeat(60), message: 'm' }, { label: 'a', message: 'b' }],
+  'trois suites au plus, avec leur message, sur une ligne');
   for (const report of ['../../ailleurs.md', '/etc/passwd', 'docs/../../x.md']) assert.equal(cleanReport({ report }, W.folder).report, null, report);
   // illisible, trop gros, lien : pas de rapport
   W.write('{ pas du json');

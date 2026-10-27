@@ -418,6 +418,29 @@ extension VigieStore {
         if await write("/api/v2/agents/runs", body) == nil { agentRuns = before }
     }
 
+    /// Une suite proposée par l'agent (« Appliquer les 10 corrections ») : sa conversation s'ouvre dans VS Code et le
+    /// message y part (envoi automatique, accès Accessibilité) ; sinon il est copié, à coller.
+    func sendToRun(_ run: RecipeRun, _ step: AgentNextStep) async {
+        guard !isDemo else { show(info: "Démonstration : « \(step.label) » partirait dans la conversation de l'agent"); return }
+        let vscode = (run.surface ?? "vscode") == AgentSurface.vscode.rawValue
+        guard AgentAutoSend.allowed, vscode, run.conversation != nil else {
+            SystemActions.copy(step.message)
+            await openConversationInVSCode(run.conversation, cwd: run.folder)
+            show(info: "Le message est copié : colle-le dans la conversation de l'agent (⌘V) puis Entrée.")
+            return
+        }
+        let job = AgentAutoSend(surface: .vscode, folder: run.folder, marker: String(step.message.prefix(48)))
+        let watching = Task { await job.run(timeout: .seconds(45)) }
+        await openConversationInVSCode(run.conversation, cwd: run.folder)
+        job.answered(prompt: step.message)
+        if await watching.value == .sent {
+            show(info: "« \(step.label) » : c'est parti. Le rapport se met à jour ici.")
+        } else {
+            SystemActions.copy(step.message)
+            show(info: "Le message n'a pas pu partir tout seul : il est copié, colle-le dans la conversation (⌘V) puis Entrée.")
+        }
+    }
+
     /// Retire un lancement de la liste (son rapport reste dans le dossier du projet).
     func hideAgentRun(_ run: RecipeRun) async {
         let before = agentRuns

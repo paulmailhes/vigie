@@ -9,6 +9,7 @@ Chaque point : ce qu'on attend, et la gravité d'un écart.
 
 | Point | Attendu | Gravité |
 |---|---|---|
+| Offre d'hébergement | Une offre de site (CMS ou Business) : sans elle, ni domaine, ni sitemap, ni 301, ni langues, et 50 envois de formulaire en tout. Signes : « Add CMS or Business Hosting » sur la recherche, réglages du sitemap refusés, `sitemap.xml` en 404 | Bloquant |
 | Domaine personnalisé | Le domaine du client est branché, et un domaine est choisi par défaut (avec ou sans www) | Bloquant |
 | HTTPS | `http://` redirige en 301 vers `https://`, certificat valide | Bloquant |
 | www / sans www | L'un redirige en 301 vers l'autre, jamais deux versions qui répondent 200 | Bloquant |
@@ -17,6 +18,8 @@ Chaque point : ce qu'on attend, et la gravité d'un écart.
 | Page 404 | Personnalisée, avec un lien vers l'accueil | À corriger |
 | Mot de passe | Aucune protection oubliée sur le site ou une page | Bloquant |
 | Favicon et webclip | Favicon 32 × 32 et webclip 256 × 256 posés | À corriger |
+| Fuseau horaire | Celui du client (Europe/Paris) : il date les articles du CMS et les envois de formulaire | À corriger |
+| E-commerce du modèle | Pas de pages /checkout, /product/… ni de produits de démonstration publiés (modèles achetés) | Bloquant |
 | Redirections 301 | Anciennes adresses importantes (ancien site) redirigées vers les nouvelles | À corriger |
 
 ## 2. SEO et partage (chaque page, et chaque modèle de page CMS)
@@ -29,7 +32,7 @@ Chaque point : ce qu'on attend, et la gravité d'un écart.
 | Open Graph | Titre, description et image (1200 × 630) ; à défaut, ceux du SEO | À corriger |
 | Pages CMS | Titre et description liés à des champs de la collection (pas le même texte sur tous les articles) | À corriger |
 | Canonical | URL canonique du site = le domaine choisi par défaut | À corriger |
-| Indexation | Les pages utiles sont indexables ; les pages techniques (merci, mentions, styleguide) exclues ou en noindex selon le cas | À corriger |
+| Indexation | Les pages utiles sont indexables ; les pages techniques (merci, recherche, 401, styleguide) et les outils internes (générateur de signature, carte de visite…) exclus ou en noindex | À corriger |
 | sitemap.xml | Généré automatiquement, accessible, sans page exclue ni brouillon | À corriger |
 | robots.txt | Ne bloque pas le site (pas de `Disallow: /` oublié), indique le sitemap | Bloquant si tout est bloqué |
 | Langue | Attribut `lang` du site juste (`fr`) | À corriger |

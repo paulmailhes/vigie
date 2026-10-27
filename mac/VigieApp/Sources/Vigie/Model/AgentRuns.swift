@@ -38,10 +38,18 @@ struct AgentReport: Decodable, Equatable, Sendable {
     @Lossy var links: [AgentReportLink]
     @Lossy var done: [String]
     @Lossy var todo: [AgentTodo]
+    /// Ce que l'agent peut faire ensuite à ta demande : un bouton envoie le message dans sa conversation.
+    @Lossy var next: [AgentNextStep]
 
     var isRunning: Bool { status == nil || status == "running" }
     var isBlocked: Bool { status == "blocked" }
     var openTodo: [AgentTodo] { todo.filter { !$0.done } }
+}
+
+struct AgentNextStep: Decodable, Equatable, Sendable, Identifiable {
+    var label: String
+    var message: String
+    var id: String { label }
 }
 
 struct AgentReportCounts: Decodable, Equatable, Sendable {

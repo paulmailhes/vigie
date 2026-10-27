@@ -258,7 +258,8 @@ struct DecodingTests {
             "report": { "status": "done", "level": "warn", "verdict": "Prêt après 2 actions", "counts": { "ok": 3 },
                         "todo": [ { "index": 0, "text": "Brancher le domaine", "severity": "block", "done": true },
                                   { "index": 2, "text": "Relier les fiches", "severity": "warn", "done": false }, { "text": "sans index" } ],
-                        "done": ["Titres"], "links": [ { "label": "Figma", "url": "https://figma.com/x" } ] } },
+                        "done": ["Titres"], "links": [ { "label": "Figma", "url": "https://figma.com/x" } ],
+                        "next": [ { "label": "Appliquer les 9 corrections", "message": "Applique-les" }, { "label": "sans message" } ] } },
           { "id": "b", "agent": "demarrer", "folder": "/Users/alex/Code/atelier", "report": { "status": "running" } },
           { "id": "c", "agent": "x", "folder": "/x", "report": "illisible" },
           { "agent": "sans id" } ] }
@@ -268,6 +269,7 @@ struct DecodingTests {
         #expect(a.project == "cabinet-martin" && a.displayName == "Contrôler" && a.at != nil)
         #expect(a.report?.todo.map(\.index) == [0, 2] && a.report?.openTodo.map(\.text) == ["Relier les fiches"])
         #expect(RecipeRunState(a.report) == .todo(1))
+        #expect(a.report?.next.map(\.label) == ["Appliquer les 9 corrections"])
         #expect(RecipeRunState(list.runs[1].report) == .running && list.runs[1].displayName == "demarrer")
         #expect(list.runs[2].report == nil && RecipeRunState(nil) == .running)
         var blocked = a.report

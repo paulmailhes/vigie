@@ -153,6 +153,16 @@ struct RecipeRunRow: View {
                     countChip(counts.block, "bloquant", "bloquants", "xmark.octagon.fill", Theme.alert)
                 }
             }
+            if let next = report?.next, !next.isEmpty, report?.isRunning == false {
+                HStack(spacing: 8) {
+                    ForEach(next) { step in
+                        AsyncButton(step.label, systemImage: "wand.and.stars") { await store.sendToRun(run, step) }
+                            .glassButton(.primary)
+                            .controlSize(.small)
+                            .help("Envoie à l'agent, dans sa conversation : « \(step.message) »")
+                    }
+                }
+            }
             if let todo = report?.todo, !todo.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("À valider de ton côté")

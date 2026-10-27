@@ -11,13 +11,51 @@
       "at": "2026-10-27T15:10:00Z",
       "changedAt": "2026-10-27T15:31:00Z",
       "report": {
-        "status": "done", "level": "block", "title": "Contrôle avant publication", "verdict": "Pas prêt : 1 point bloquant et 3 actions dans Webflow",
-        "counts": { "ok": 41, "warn": 3, "block": 1 }, "report": "docs/controle-publication-2026-10-27.md", "links": [],
-        "done": ["12 titres SEO réécrits", "8 descriptions ajoutées", "23 textes alternatifs d'images", "Données structurées LegalService sur l'accueil"],
+        "status": "done",
+        "level": "block",
+        "title": "Contrôle avant publication",
+        "verdict": "Pas prêt : 1 point bloquant et 3 actions dans Webflow",
+        "counts": {
+          "ok": 41,
+          "warn": 3,
+          "block": 1
+        },
+        "report": "docs/controle-publication-2026-10-27.md",
+        "links": [],
+        "done": [
+          "12 titres SEO réécrits",
+          "8 descriptions ajoutées",
+          "23 textes alternatifs d'images",
+          "Données structurées LegalService sur l'accueil"
+        ],
         "todo": [
-          { "index": 0, "text": "Brancher le domaine cabinet-martin.fr et le choisir par défaut", "where": "Site settings › Publishing", "severity": "block", "done": false },
-          { "index": 1, "text": "Relier les cartes de la liste Actualités à leur article", "where": "Designer › page Actualités › carte › Link settings", "severity": "warn", "done": false },
-          { "index": 2, "text": "Envoyer les formulaires vers l'adresse du cabinet", "where": "Site settings › Forms", "severity": "warn", "done": true }
+          {
+            "index": 0,
+            "text": "Brancher le domaine cabinet-martin.fr et le choisir par défaut",
+            "where": "Site settings › Publishing",
+            "severity": "block",
+            "done": false
+          },
+          {
+            "index": 1,
+            "text": "Relier les cartes de la liste Actualités à leur article",
+            "where": "Designer › page Actualités › carte › Link settings",
+            "severity": "warn",
+            "done": false
+          },
+          {
+            "index": 2,
+            "text": "Envoyer les formulaires vers l'adresse du cabinet",
+            "where": "Site settings › Forms",
+            "severity": "warn",
+            "done": true
+          }
+        ],
+        "next": [
+          {
+            "label": "Appliquer les 9 corrections",
+            "message": "Applique maintenant les 9 corrections préparées dans docs/controle-publication-2026-10-27.md, sans refaire le contrôle."
+          }
         ]
       }
     },
@@ -31,7 +69,16 @@
       "conversation": null,
       "at": "2026-10-27T15:40:00Z",
       "changedAt": "2026-10-27T15:42:00Z",
-      "report": { "status": "running", "title": "Démarrer le projet Atelier Durand", "verdict": "Captures des sites de référence", "links": [], "done": ["Dossier et documentation"], "todo": [] }
+      "report": {
+        "status": "running",
+        "title": "Démarrer le projet Atelier Durand",
+        "verdict": "Captures des sites de référence",
+        "links": [],
+        "done": [
+          "Dossier et documentation"
+        ],
+        "todo": []
+      }
     }
   ]
 }
