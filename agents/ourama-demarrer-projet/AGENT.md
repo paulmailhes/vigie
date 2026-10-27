@@ -106,9 +106,9 @@ c'est certain (titre identique), sinon « à retrouver ».
 ## 5. Le fichier Figma du projet
 
 Le MCP Figma ne sait pas dupliquer un fichier : tu **construis** le fichier avec les scripts de
-`{{dossier_agent}}/figma/`. Avant : charge en une fois les outils du **MCP Figma**, quel que soit son nom (`figma`,
-`figma-pro`, `claude.ai Figma`… : celui qui répond ; s'il y en a plusieurs, celui dont `whoami` montre l'équipe
-OURAMA) : `create_new_file`, `create_session`, `use_figma`, `upload_assets`, `get_screenshot`, et la compétence **/figma-use** (ou la ressource
+`{{dossier_agent}}/figma/`. Avant : charge en une fois les outils du **MCP Figma** que nomme « MCP à utiliser »
+plus haut (choisi dans Vigie ; jamais un autre) : `create_new_file`, `create_session`, `use_figma`, `upload_assets`,
+`get_screenshot`, et la compétence **/figma-use** (ou la ressource
 `skill://figma/figma-use/SKILL.md`), obligatoire avant tout `use_figma` (`skillNames: "resource:figma-use"`).
 
 Recopie chaque script **tel quel** dans `code` ; tu ne remplaces que `__PARAMS__` ou `__DONNEES__` (objet JSON valide,

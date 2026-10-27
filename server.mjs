@@ -1505,46 +1505,59 @@ function postAccounts(body) {
 // s'il est autorisé ; les autres : dernier relevé de `claude mcp list` pour ce compte, MCP du Mac (dossier perso), et
 // à défaut le connecteur claude.ai de ce nom (« Gmail » comme « claude.ai Gmail »).
 // Un MCP demandé par un service (« figma », ou un nom qui le dit : « figma-pro ») se contente de n'importe quel MCP de
-// ce service, quel que soit son nom (Mac, passerelle, connecteur claude.ai), le mieux connecté d'abord ; aucun :
-// « missing ». Un autre nom : ce MCP-là. `connect` : le nom à passer à POST /api/v2/mcp/connect (pas la passerelle).
+// ce service, quel que soit son nom (Mac, passerelle, connecteur claude.ai) ; aucun : « missing ». Un autre nom : ce
+// MCP-là. `servers` : ceux qui conviennent, le mieux connecté d'abord ; `chosen` : celui que l'agent utilisera (le
+// dernier choisi dans le formulaire s'il est encore là, sinon le premier) ; son état fait `status`, et `connect` est
+// le nom à passer à POST /api/v2/mcp/connect (pas pour la passerelle, qui s'autorise par la page MCP).
 const NEED_RANK = ['connected', 'pending-approval', 'needs-auth', 'failed', 'unknown', 'disabled'];
+const needKey = (n) => n.service ?? n.name; // la clé d'un choix retenu (data/state.json, agentsMcp)
+function needStatus(name, accountId) {
+  try {
+    if (gateway.has(name)) return gateway.ready(name) ? 'connected' : 'needs-auth';
+    const s = mcp.statusFor(name, { accountId, cwd: HOME });
+    return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
+  } catch { return 'unknown'; }
+}
+// `tools` (pas dans la réponse) : le début du nom de ses outils, que le brief donne à l'agent.
+function agentNeeds(list, accountId) {
+  let gw = {}, declared = [], seen = new Map();
+  try { gw = gateway.status(); } catch { /* passerelle illisible : sans elle */ }
+  try { declared = mcp.forProject(HOME, { accountId }); seen = mcp.seenFor(accountId); } catch { /* relevés illisibles */ }
+  const state = readState();
+  const remembered = isObj(state.agentsMcp) ? state.agentsMcp : {};
+  return list.map((req) => {
+    const svc = mcpService(req);
+    const found = new Map();
+    const add = (n, status, cli = n) => { if (!found.has(n)) found.set(n, { status, tools: `mcp__${toolKey(cli)}__` }); };
+    if (svc === SERVICE_OTHER) add(req, needStatus(req, accountId));
+    else {
+      for (const [n, g] of Object.entries(gw)) if (mcpService(n, { url: g.url }) === svc) add(n, needStatus(n, accountId));
+      for (const s of declared) if (s.service === svc) add(s.name, needStatus(s.name, accountId));
+      // les connecteurs claude.ai, sous leur nom court (« Figma ») ; les MCP d'un projet ne comptent pas (pas dans le
+      // dossier du nouveau projet)
+      for (const [n, st] of seen) {
+        const short = n.replace(/^claude\.ai\s+/, '');
+        if (short !== n && mcpService(n) === svc) add(short, st, n);
+      }
+    }
+    const servers = [...found].sort(([, a], [, b]) => NEED_RANK.indexOf(a.status) - NEED_RANK.indexOf(b.status))
+      .map(([n, f]) => ({ name: n, status: f.status, connect: !gateway.has(n), tools: f.tools }));
+    const need = { name: req, service: svc === SERVICE_OTHER ? null : svc };
+    const chosen = servers.find((x) => x.name === remembered[needKey(need)]) ?? servers[0] ?? null;
+    return { ...need, status: chosen ? chosen.status : 'missing', servers, chosen: chosen?.name ?? null, connect: chosen?.connect ? chosen.name : null };
+  });
+}
+const needView = (n) => ({ ...n, servers: n.servers.map(({ name, status, connect }) => ({ name, status, connect })) });
 function agentsView() {
   const model = accounts.load();
   const accountId = chosenAccount(model, null);
   const acc = model.accounts.find((a) => a.id === accountId);
-  const status = (name) => {
-    try {
-      if (gateway.has(name)) return gateway.ready(name) ? 'connected' : 'needs-auth';
-      const s = mcp.statusFor(name, { accountId, cwd: HOME });
-      return s !== 'unknown' ? s : mcp.statusFor(name, { accountId, cwd: HOME, scope: 'connector' });
-    } catch { return 'unknown'; }
-  };
-  let gw = {};
-  try { gw = gateway.status(); } catch { /* passerelle illisible : sans elle */ }
-  const need = (req) => {
-    const svc = mcpService(req);
-    if (svc === SERVICE_OTHER) return { name: req, service: null, status: status(req), servers: [req], connect: gateway.has(req) ? null : req };
-    const found = new Map();
-    for (const [n, g] of Object.entries(gw)) if (mcpService(n, { url: g.url }) === svc) found.set(n, status(n));
-    try {
-      for (const s of mcp.forProject(HOME, { accountId })) if (s.service === svc && !found.has(s.name)) found.set(s.name, status(s.name));
-      // les connecteurs claude.ai, sous leur nom court (« Figma ») ; les MCP d'un projet ne comptent pas (pas dans le
-      // dossier du nouveau projet)
-      for (const [n, st] of mcp.seenFor(accountId)) {
-        const short = n.replace(/^claude\.ai\s+/, '');
-        if (short !== n && mcpService(n) === svc && !found.has(short)) found.set(short, st);
-      }
-    } catch { /* relevés illisibles : ce qu'on a */ }
-    const servers = [...found].sort(([, a], [, b]) => NEED_RANK.indexOf(a) - NEED_RANK.indexOf(b)).map(([n]) => n);
-    const best = servers[0];
-    return { name: req, service: svc, status: best ? found.get(best) : 'missing', servers, connect: best && !gateway.has(best) ? best : null };
-  };
   const available = desktop.agentSurfaces();
   return [200, {
     account: acc ? { id: acc.id, label: acc.label || acc.id } : null,
     // où un agent peut s'ouvrir, et celui proposé (le dernier utilisé s'il est encore là)
     surfaces: { available, chosen: chooseSurface(available, readState().agentsSurface) },
-    agents: agents.list().map((a) => ({ ...a, mcp: a.mcp.map(need) })),
+    agents: agents.list().map((a) => ({ ...a, mcp: agentNeeds(a.mcp, accountId).map(needView) })),
   }];
 }
 
@@ -1582,8 +1595,22 @@ async function postAgentLaunch(body) {
   if (!Object.hasOwn(SURFACE_MISSING, surface)) return bad('Où ouvrir l\'agent ? « vscode » ou « claude-app ».');
   const session = body.session ?? null;
   if (session !== null && (typeof session !== 'string' || !UUID.test(session))) return bad(SESSION_GONE);
+  // Le MCP de chaque service : celui choisi dans le formulaire (`mcp` : { service ou nom : MCP }), sinon le dernier
+  // choisi ou le mieux connecté ; le brief le nomme, pour que l'agent n'en prenne pas un autre.
+  const picked = body.mcp ?? {};
+  if (!isObj(picked)) return bad('MCP choisis illisibles.');
+  const known = agents.get(body.id);
+  const needs = known && !known.error ? agentNeeds(known.mcp, chosenAccount(accounts.load(), null)) : [];
+  for (const [k, v] of Object.entries(picked)) {
+    const n = needs.find((x) => needKey(x) === k);
+    if (!n || typeof v !== 'string' || !n.servers.some((x) => x.name === v)) return bad(`« ${String(v).slice(0, 60)} » n'est plus là : ferme le formulaire et rouvre-le.`);
+  }
+  const use = needs.map((n) => {
+    const x = n.servers.find((y) => y.name === (picked[needKey(n)] ?? n.chosen));
+    return x ? { service: needKey(n), server: x.name, tools: x.tools } : null;
+  }).filter(Boolean);
   const r = agents.launch({
-    id: body.id, values: body.values, folder: body.folder, files: body.files, session,
+    id: body.id, values: body.values, folder: body.folder, files: body.files, session, mcp: use,
     // après toutes les vérifications du dossier et des fichiers, avant la première écriture
     before: (target) => {
       if (!available.length) return { error: NO_SURFACE };
@@ -1595,8 +1622,13 @@ async function postAgentLaunch(body) {
   if (!r.ok) return bad(r.error || 'Ça n\'a pas marché : réessaie dans un instant.', r.status || 400);
   try {
     const s = readState();
-    if (s.agentsSurface !== surface) { s.agentsSurface = surface; writeState(s); }
-  } catch (e) { console.error('[vigie] surface des agents :', clean(e)); }
+    const mcpPicks = { ...(isObj(s.agentsMcp) ? s.agentsMcp : {}), ...picked };
+    if (s.agentsSurface !== surface || JSON.stringify(mcpPicks) !== JSON.stringify(s.agentsMcp ?? {})) {
+      s.agentsSurface = surface;
+      s.agentsMcp = mcpPicks;
+      writeState(s);
+    }
+  } catch (e) { console.error('[vigie] surface et MCP des agents :', clean(e)); }
   const localId = session && surface === 'claude-app' ? desktop.claudeSessions().get(session)?.localId ?? null : null;
   let opened = 'none';
   try { opened = await opener.launch({ surface, folder: r.folder, prompt: r.prompt, session, localId }); } catch (e) { console.error('[vigie] ouverture de l\'agent :', clean(e)); }

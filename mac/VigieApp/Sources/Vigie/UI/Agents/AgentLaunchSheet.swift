@@ -30,6 +30,8 @@ struct AgentLaunchSheet: View {
     @State private var launching = false
     /// Le dernier lancement a été refusé : effacé dès qu'un champ, le dossier ou les fichiers changent.
     @State private var launchIssue: String?
+    /// Le MCP choisi par service quand plusieurs conviennent (deux Figma) ; sinon celui que propose Vigie.
+    @State private var mcpPicks: [String: String] = [:]
     @FocusState private var focused: Focus?
 
     private enum Focus: Hashable {
@@ -85,6 +87,7 @@ struct AgentLaunchSheet: View {
         height += 44 + CGFloat(attachments.items.count) * 26
         if let info, !info.resumable.isEmpty { height += 130 }
         if !agent.willCreate.isEmpty { height += 34 + CGFloat(agent.willCreate.count) * 22 }
+        height += CGFloat(choosable.count) * 30
         return min(780, height)
     }
 
@@ -456,8 +459,42 @@ struct AgentLaunchSheet: View {
             && legacyFilesIssue == nil && box.copying == 0
     }
 
+    /// L'agent avec les MCP choisis ici : leur état et ce qui reste à régler suivent le choix.
+    private var picked: AgentInfo {
+        var copy = agent
+        copy.mcp = agent.mcp.map { mcp in mcpPicks[mcp.key].map(mcp.picking) ?? mcp }
+        return copy
+    }
+
+    /// Les services pour lesquels plusieurs MCP conviennent, une fois chacun.
+    private var choosable: [AgentMCP] {
+        var seen = Set<String>()
+        return picked.mcp.filter { $0.servers.count > 1 && seen.insert($0.key).inserted }
+    }
+
+    /// Deux Figma (ou plus) : lequel l'agent utilisera. Vigie retient le choix pour la fois suivante.
+    @ViewBuilder
+    private var mcpChoice: some View {
+        let list = choosable
+        if !list.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(list) { mcp in
+                    Picker(mcp.title, selection: Binding { mcp.chosen ?? mcp.servers.first?.name ?? "" } set: { mcpPicks[mcp.key] = $0 }) {
+                        ForEach(mcp.servers) { server in
+                            Text("\(server.name) — \(MCPStatusStyle.label(server.mcpStatus))").tag(server.name)
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(launching)
+                    .help("L'agent n'utilisera que ce \(mcp.title) ; Vigie s'en souviendra la prochaine fois")
+                }
+            }
+        }
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
+            mcpChoice
             notes
             if let launchIssue {
                 Label(launchIssue, systemImage: "exclamationmark.triangle.fill")
@@ -522,7 +559,7 @@ struct AgentLaunchSheet: View {
     @ViewBuilder
     private var notes: some View {
         let account = store.agentsState?.account?.displayName
-        let toFix = agent.mcpToFix
+        let toFix = picked.mcpToFix
         if account != nil || !toFix.isEmpty || !missing.isEmpty || surfaceIssue != nil {
             VStack(alignment: .leading, spacing: 4) {
                 // l'app Claude a son propre compte : celui de Vigie ne vaut que pour VS Code
@@ -540,7 +577,7 @@ struct AgentLaunchSheet: View {
                     Label(here ? "À régler d'abord : \(list)." : "À régler d'abord sur la page MCP : \(list).",
                           systemImage: "exclamationmark.triangle")
                         .foregroundStyle(Theme.warn)
-                    HStack(spacing: 10) { AgentMCPFixes(agent: agent, pageLink: false) }
+                    HStack(spacing: 10) { AgentMCPFixes(agent: picked, pageLink: false) }
                         .buttonStyle(.link)
                 }
                 if let surfaceIssue {
@@ -567,8 +604,9 @@ struct AgentLaunchSheet: View {
             let value = Self.clean(values[field.id], kind: field.kind)
             if !value.isEmpty { sent[field.id] = value }
         }
+        let mcp = Dictionary(choosable.compactMap { m in m.chosen.map { (m.key, $0) } }, uniquingKeysWith: { first, _ in first })
         let outcome = await store.launchAgent(agent, values: sent, folder: AgentFolderRule.expanded(folder),
-                                              files: attachments.paths, surface: chosenSurface, session: session)
+                                              files: attachments.paths, surface: chosenSurface, session: session, mcp: mcp)
         launching = false
         switch outcome {
         case .launched: dismiss()

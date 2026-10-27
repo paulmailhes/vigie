@@ -166,6 +166,10 @@ struct AgentMCPBadge: View {
                 .foregroundStyle(color)
             Text(mcp.title)
                 .fontWeight(.medium)
+            if let detail = mcp.chosenDetail {
+                Text("· \(detail)")
+                    .foregroundStyle(.secondary)
+            }
             Text(label)
                 .foregroundStyle(color)
         }
@@ -174,9 +178,9 @@ struct AgentMCPBadge: View {
         .padding(.vertical, 3)
         .background(.quaternary, in: .capsule)
         .fixedSize()
-        .help(mcp.servers.isEmpty || mcp.servers == [mcp.title] ? "" : "Par " + mcp.servers.formatted(.list(type: .or).locale(Fmt.locale)))
+        .help(mcp.servers.count > 1 ? "L'agent utilisera \(mcp.chosen ?? mcp.title) ; un autre se choisit au lancement" : "")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(mcp.title) : \(label)")
+        .accessibilityLabel("\(mcp.title)\(mcp.chosenDetail.map { " (\($0))" } ?? "") : \(label)")
     }
 }
 

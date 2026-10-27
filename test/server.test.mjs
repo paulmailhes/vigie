@@ -1031,7 +1031,8 @@ const AgentsList = {
   account: opt({ id: 'string', label: 'string' }), surfaces: { available: arr(SURFACE), chosen: opt(SURFACE) },
   agents: arr({ id: 'string', name: 'string', description: opt('string'), icon: opt('string'), folder: 'string',
     fields: arr({ id: 'string', label: 'string', type: oneOf('text', 'longtext', 'url', 'urls'), required: 'bool', help: opt('string'), placeholder: opt('string') }),
-    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES, 'missing'), service: opt('string'), servers: arr('string'), connect: opt('string') }),
+    mcp: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES, 'missing'), service: opt('string'),
+      servers: arr({ name: 'string', status: oneOf(...HEALTH_STATUSES), connect: 'bool' }), chosen: opt('string'), connect: opt('string') }),
     creates: arr('string'), error: opt('string') }),
 };
 const AgentFolder = {
@@ -1065,7 +1066,8 @@ Prépare le projet de {{client}}.
   // deux MCP de la passerelle : l'un ouvert (prêt), l'autre jamais autorisé
   const GW = path.join(DATA, 'gateway.json');
   const gw = (open) => ({ url: 'https://mcp.example.com/mcp', key: 'a'.repeat(48), profiles: [], active: null, addedAt: iso(-10), open });
-  wj(GW, { servers: { 'webflow-essai': gw(true), 'notion-essai': gw(false) }, clients: {} });
+  // un deuxième Figma, par la passerelle et pas encore autorisé : deux Figma à choisir
+  wj(GW, { servers: { 'webflow-essai': gw(true), 'notion-essai': gw(false), 'figma-equipe': { ...gw(false), url: 'https://mcp.figma.com/mcp' } }, clients: {} });
   let r = await get('/api/v2/agents');
   assert.equal(r.status, 200, r.text);
   conforms(r.body, AgentsList);
@@ -1080,16 +1082,39 @@ Prépare le projet de {{client}}.
   assert.deepEqual(a.creates, ['Le dossier du projet et sa documentation', 'Le fichier Figma du projet']);
   assert.deepEqual(r.body.agents[0].creates, []);
   assert.deepEqual(a.fields.map((f) => [f.id, f.type, f.required]), [['client', 'text', true], ['questionnaire', 'longtext', false]]);
-  const need = (name, service, status, servers, connect) => ({ name, service, status, servers, connect });
+  // servers : [nom, état, connectable d'ici] ; chosen : celui que l'agent utilisera
+  const need = (name, service, status, servers, chosen, connect) =>
+    ({ name, service, status, servers: servers.map(([n, st, c]) => ({ name: n, status: st, connect: c })), chosen, connect });
+  const figmas = [['figma-perso', 'connected', true], ['figma-equipe', 'needs-auth', false]];
   assert.deepEqual(a.mcp, [
-    need('figma-perso', 'figma', 'connected', ['figma-perso'], 'figma-perso'), // relevé de l'essai « état réel des MCP »
-    need('inexistant', null, 'unknown', ['inexistant'], 'inexistant'),           // un nom sans service : ce MCP-là
-    need('webflow-essai', 'webflow', 'connected', ['webflow-essai'], null),      // passerelle : prête si autorisée,
-    need('notion-essai', 'notion', 'needs-auth', ['notion-essai'], null),        // connectée par la page MCP
-    need('Gmail', 'gmail', 'needs-auth', ['Gmail'], 'Gmail'),                    // connecteur claude.ai, sous son nom court
-    need('figma', 'figma', 'connected', ['figma-perso'], 'figma-perso'),         // « figma » : n'importe quel Figma
-    need('stripe', 'stripe', 'missing', [], null),                               // aucun : à ajouter
+    need('figma-perso', 'figma', 'connected', figmas, 'figma-perso', 'figma-perso'), // relevé « état réel des MCP »
+    need('inexistant', null, 'unknown', [['inexistant', 'unknown', true]], 'inexistant', 'inexistant'), // sans service : ce MCP-là
+    need('webflow-essai', 'webflow', 'connected', [['webflow-essai', 'connected', false]], 'webflow-essai', null), // passerelle :
+    need('notion-essai', 'notion', 'needs-auth', [['notion-essai', 'needs-auth', false]], 'notion-essai', null), // par la page MCP
+    need('Gmail', 'gmail', 'needs-auth', [['Gmail', 'needs-auth', true]], 'Gmail', 'Gmail'), // connecteur claude.ai, nom court
+    need('figma', 'figma', 'connected', figmas, 'figma-perso', 'figma-perso'),       // « figma » : n'importe quel Figma, le mieux connecté
+    need('stripe', 'stripe', 'missing', [], null, null),                              // aucun : à ajouter
   ]);
+
+  // choisir son Figma au lancement : le brief le nomme (avec le début de ses outils), Vigie le retient
+  const choix = path.join(CODE, 'choix-du-figma');
+  const pick = (mcp) => post('/api/v2/agents/launch', { id: 'demarrer-projet', values: { client: 'Atelier' }, folder: choix, mcp });
+  for (const bad of [{ figma: 'figma-inconnu' }, { stripe: 'stripe' }, { figma: 7 }, ['figma-equipe']]) {
+    const b = await pick(bad);
+    assert.equal(b.status, 400, JSON.stringify(bad));
+  }
+  assert.equal(fs.existsSync(choix), false, 'rien de créé pour un MCP qui n\'est plus là');
+  r = await pick({ figma: 'figma-equipe' });
+  assert.equal(r.status, 200, r.text);
+  const choisi = fs.readFileSync(r.body.briefFile, 'utf8');
+  assert.match(choisi, /## MCP à utiliser\n\n- figma : « figma-equipe » \(ses outils commencent par `mcp__figma-equipe__`\)\. N'en prends pas un autre figma\.\n/);
+  assert.match(choisi, /- gmail : « Gmail » \(ses outils commencent par `mcp__claude_ai_Gmail__`\)/, 'un connecteur : ses outils sous son nom claude.ai');
+  assert.ok(!choisi.includes('stripe :'), 'aucun MCP : rien à nommer');
+  assert.ok(choisi.indexOf('## MCP à utiliser') < choisi.indexOf('## Consignes'));
+  const again = (await get('/api/v2/agents')).body.agents.find((x) => x.id === 'demarrer-projet').mcp;
+  assert.deepEqual(again.filter((m) => m.service === 'figma').map((m) => [m.chosen, m.status, m.connect]),
+    [['figma-equipe', 'needs-auth', null], ['figma-equipe', 'needs-auth', null]], 'le choix est retenu, pour les deux demandes de Figma');
+  fs.rmSync(choix, { recursive: true, force: true });
   fs.rmSync(GW);
   assert.equal((await raw('GET', '/api/v2/agents', { token: null })).status, 401);
 

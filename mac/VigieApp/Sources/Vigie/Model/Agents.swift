@@ -124,25 +124,44 @@ struct AgentField: Decodable, Equatable, Sendable, Identifiable {
 
 /// Un MCP nécessaire à l'agent et son état (le même que sur la page MCP). Un simple nom est accepté aussi.
 /// Un MCP demandé par un agent. Demandé par son service (« figma ») : n'importe quel MCP de ce service fait l'affaire,
-/// quel que soit son nom ; `servers` dit lesquels, le mieux connecté d'abord. `status` « missing » : aucun.
+/// quel que soit son nom ; `servers` dit lesquels, le mieux connecté d'abord, et `chosen` celui que l'agent utilisera
+/// (le dernier choisi dans le formulaire). `status` est le sien ; « missing » : aucun.
 struct AgentMCP: Decodable, Equatable, Sendable, Identifiable {
     var name: String
     var status: String?
     var service: String?
-    var servers: [String] = []
+    @Lossy var servers: [AgentMCPServer] = []
+    var chosen: String?
     /// Le nom à connecter depuis la page Agents (absent : rien à connecter ici, ou par la page MCP).
     var connect: String?
 
     var id: String { name }
+    /// La clé du choix envoyé au lancement : le service, ou le nom sans service connu.
+    var key: String { service ?? name }
     var mcpStatus: MCPStatus { MCPStatus(raw: status) }
     var isMissing: Bool { status == "missing" }
     /// Le MCP officiel de ce service dans la bibliothèque, pour l'ajouter d'un clic.
     var libraryEntry: MCPLibraryEntry? { service.flatMap { s in MCPLibraryEntry.all.first { $0.id == s } } }
     /// « Figma » plutôt que « figma-pro » : le service compte, pas le nom.
     var title: String { libraryEntry?.title ?? name }
+    /// Le MCP utilisé, quand son nom en dit plus que le service (« figma-pro » pour « Figma »).
+    var chosenDetail: String? {
+        guard let chosen, chosen.caseInsensitiveCompare(title) != .orderedSame else { return nil }
+        return chosen
+    }
+
+    /// Le même besoin avec un autre MCP choisi (le formulaire) : son état et ce qu'on peut connecter d'ici suivent.
+    func picking(_ server: String) -> AgentMCP {
+        guard let pick = servers.first(where: { $0.name == server }) else { return self }
+        var copy = self
+        copy.chosen = pick.name
+        copy.status = pick.status
+        copy.connect = pick.connect ? pick.name : nil
+        return copy
+    }
 
     private enum CodingKeys: String, CodingKey {
-        case name, status, service, servers, connect
+        case name, status, service, servers, chosen, connect
     }
 
     init(from decoder: any Decoder) throws {
@@ -155,8 +174,30 @@ struct AgentMCP: Decodable, Equatable, Sendable, Identifiable {
         name = try container.decode(String.self, forKey: .name)
         status = try? container.decodeIfPresent(String.self, forKey: .status)
         service = try? container.decodeIfPresent(String.self, forKey: .service)
-        servers = ((try? container.decodeIfPresent([String].self, forKey: .servers)) ?? nil) ?? []
+        _servers = (try? container.decodeIfPresent(Lossy<AgentMCPServer>.self, forKey: .servers)) ?? Lossy(wrappedValue: [])
+        chosen = try? container.decodeIfPresent(String.self, forKey: .chosen)
         connect = try? container.decodeIfPresent(String.self, forKey: .connect)
+    }
+}
+
+/// Un MCP qui convient à un besoin : son nom, son état, et s'il se connecte d'ici (pas par la passerelle).
+struct AgentMCPServer: Decodable, Equatable, Sendable, Identifiable {
+    var name: String
+    var status: String?
+    var connect = false
+
+    var id: String { name }
+    var mcpStatus: MCPStatus { MCPStatus(raw: status) }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, status, connect
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        status = try? container.decodeIfPresent(String.self, forKey: .status)
+        connect = ((try? container.decodeIfPresent(Bool.self, forKey: .connect)) ?? nil) ?? false
     }
 }
 

@@ -353,14 +353,16 @@ enum AgentLaunch {
         return list.first?.id
     }
 
-    /// POST /api/v2/agents/launch : `files`, `surface` et `session` seulement s'il y a quelque chose à dire.
+    /// POST /api/v2/agents/launch : `files`, `surface`, `session` et `mcp` (le MCP choisi par service, quand il y en
+    /// avait plusieurs) seulement s'il y a quelque chose à dire.
     static func body(agent: String, values: [String: String], folder: String, files: [String],
-                     surface: AgentSurface?, session: String?) -> JSONValue {
+                     surface: AgentSurface?, session: String?, mcp: [String: String] = [:]) -> JSONValue {
         var body: [String: JSONValue] = ["id": .string(agent), "values": .object(values.mapValues(JSONValue.string)),
                                          "folder": .string(folder)]
         if !files.isEmpty { body["files"] = .array(files.map(JSONValue.string)) }
         if let surface { body["surface"] = .string(surface.rawValue) }
         if let session { body["session"] = .string(session) }
+        if !mcp.isEmpty { body["mcp"] = .object(mcp.mapValues(JSONValue.string)) }
         return .object(body)
     }
 

@@ -423,14 +423,14 @@ extension VigieStore {
     /// Un refus revient à la feuille, qui le montre et reste ouverte (le toast de la fenêtre serait caché derrière
     /// elle) ; le reste s'affiche ici, une fois la feuille fermée.
     func launchAgent(_ agent: AgentInfo, values: [String: String], folder: String, files: [String],
-                     surface: AgentSurface?, session: String?) async -> AgentLaunchOutcome {
+                     surface: AgentSurface?, session: String?, mcp: [String: String] = [:]) async -> AgentLaunchOutcome {
         if isDemo {
             let place = surface?.label ?? "VS Code"
             show(info: "Démonstration : rien n'a été créé (pour de vrai, \(place) s'ouvrirait sur \(Fmt.shortPath(folder)))")
             return .launched(message: "", copy: nil, alert: false)
         }
         let body = AgentLaunch.body(agent: agent.id, values: values, folder: folder, files: files,
-                                    surface: surface, session: session)
+                                    surface: surface, session: session, mcp: mcp)
         let outcome = AgentLaunch.outcome(await send("/api/v2/agents/launch", body, patient: true), surface: surface)
         switch outcome {
         case .refused:

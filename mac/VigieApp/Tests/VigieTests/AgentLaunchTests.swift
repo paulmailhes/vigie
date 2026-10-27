@@ -375,12 +375,14 @@ struct AgentLaunchTests {
         #expect(AgentLaunch.buttonTitle(surface: nil, continuing: false) == "Lancer")
     }
 
-    /// `files`, `surface` et `session` ne partent que s'ils disent quelque chose.
+    /// `files`, `surface`, `session` et `mcp` ne partent que s'ils disent quelque chose.
     @Test func sendsOnlyWhatIsChosen() {
         let full = AgentLaunch.body(agent: "demarrer-projet", values: ["brief": "Bonjour"], folder: "/Users/alex/Code/cabinet-martin",
-                                    files: ["/Users/alex/Downloads/charte.pdf"], surface: .claudeApp, session: "c1")
+                                    files: ["/Users/alex/Downloads/charte.pdf"], surface: .claudeApp, session: "c1",
+                                    mcp: ["figma": "figma-pro"])
         #expect(full == ["id": "demarrer-projet", "values": ["brief": "Bonjour"], "folder": "/Users/alex/Code/cabinet-martin",
-                         "files": ["/Users/alex/Downloads/charte.pdf"], "surface": "claude-app", "session": "c1"])
+                         "files": ["/Users/alex/Downloads/charte.pdf"], "surface": "claude-app", "session": "c1",
+                         "mcp": ["figma": "figma-pro"]])
         let bare = AgentLaunch.body(agent: "a", values: [:], folder: "/Users/alex/Code/x", files: [], surface: nil, session: nil)
         #expect(bare == ["id": "a", "values": [:], "folder": "/Users/alex/Code/x"])
     }
