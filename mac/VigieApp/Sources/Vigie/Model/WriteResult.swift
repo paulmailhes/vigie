@@ -28,9 +28,12 @@ struct WriteResult: Decodable, Equatable, Sendable {
     var surface: String?
     /// Les fichiers joints, tels que rangés dans le projet (« sources/charte.pdf »).
     @Lossy var copied: [String]
+    /// Ce qui ne s'est pas passé comme prévu, sans faire échouer l'action (supprimer un compte : déconnexion pas
+    /// confirmée, dossier laissé en place).
+    var notices: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt, opened, surface, copied
+        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt, opened, surface, copied, notices
         case switchInfo = "switch"
     }
 

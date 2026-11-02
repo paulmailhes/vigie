@@ -8,7 +8,8 @@ enum OnboardingStep: Hashable {
 }
 
 /// Premier lancement : ce qu'est Vigie, les outils de l'utilisateur, les actions sensibles, les comptes, Codex,
-/// les MCP, puis on active. Revoir à tout moment : menu Vigie > Revoir l'accueil.
+/// les MCP, puis on active. Toutes les fonctionnalités de Vigie sont cochées d'office, chacune expliquée pour savoir
+/// quand la décocher. Revoir à tout moment : menu Vigie › Revoir l'accueil, ou Réglages › Général.
 struct OnboardingView: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -72,6 +73,14 @@ struct OnboardingView: View {
                 choice = tools.chosen ?? tools.detected ?? choice
                 if !choice.any { choice.claudeVSCode = true }
                 choiceLoaded = true
+            }
+            // Premier lancement : toutes les fonctionnalités cochées d'office (décochables à chaque étape)
+            if !done, !defaultsApplied, !store.isDemo {
+                defaultsApplied = true
+                if !store.autoAccept { store.autoAccept = true }
+                if !store.questionsAuto { store.questionsAuto = true }
+                if !store.connectorsDefaultOn { store.connectorsDefaultOn = true }
+                if !store.autoUpdate { store.autoUpdate = true }
             }
             if let index = steps.firstIndex(of: startAt) { step = index }
         }
@@ -258,7 +267,7 @@ struct OnboardingView: View {
                     Toggle(isOn: $store.connectorsDefaultOn) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Activés dans les nouvelles conversations")
-                            Text("Coupés par défaut : ils arrivent dans toutes les conversations du compte, et sur un compte partagé ce sont aussi ceux des autres. Tu peux les activer pour une conversation précise.")
+                            Text("Ils arrivent dans chaque nouvelle conversation. Coupe-les si le compte est partagé : ce seraient aussi ceux des autres. Tu peux toujours les allumer ou les couper pour une conversation précise.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -315,6 +324,8 @@ struct OnboardingView: View {
     /// État de l'autorisation des notifications : « Commencer » attend qu'elles soient autorisées.
     @State private var notifications: UNAuthorizationStatus?
     @State private var defaultsApplied = false
+    /// Accès Accessibilité : les agents démarrent tout seuls.
+    @State private var autoSend = AgentAutoSend.allowed
     private var notificationsAllowed: Bool {
         notifications == .authorized || notifications == .provisional
             || !Bundle.main.bundlePath.hasSuffix(".app") // lancée hors de son app (développement) : rien à demander
@@ -335,6 +346,25 @@ struct OnboardingView: View {
                 setting("Mises à jour automatiques",
                         "Vigie installe tout seul ses nouvelles versions et te montre ce qui a changé.",
                         isOn: $store.autoUpdate)
+                Divider()
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Agents qui démarrent tout seuls")
+                        Text("Avec l'accès Accessibilité, Vigie envoie le message d'un agent dans le champ de Claude, sans que tu appuies sur Entrée.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if autoSend {
+                        Label("Autorisé", systemImage: "checkmark")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Autoriser") { AgentAutoSend.requestAccess() }
+                            .glassButton(.primary)
+                    }
+                }
+                .padding(12)
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -378,11 +408,10 @@ struct OnboardingView: View {
         }
         .task {
             notifications = await NotificationSettingsView.authorization()
-            // Première fois : l'auto-accept et les réponses en ton absence sont cochés d'office (décochables ici).
-            guard !done, !defaultsApplied, !store.isDemo else { return }
-            defaultsApplied = true
-            if !store.autoAccept { store.autoAccept = true }
-            if !store.questionsAuto { store.questionsAuto = true }
+            while !Task.isCancelled && !autoSend {
+                try? await Task.sleep(for: .seconds(2))
+                autoSend = AgentAutoSend.allowed
+            }
         }
         // retour de Réglages Système : l'autorisation a peut-être changé
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -554,7 +583,12 @@ struct OnboardingAddAccountSheet: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Adresse e-mail du compte (facultatif)", text: $email, prompt: Text("toi@exemple.fr"))
                 .textFieldStyle(.roundedBorder)
-            Text("Ton navigateur s'ouvre ensuite sur la page de connexion de Claude : connecte-toi avec cette adresse.")
+            Label("Avant : sur claude.ai, dans ton navigateur, sois connecté avec CE compte (sinon passe dessus, ou déconnecte-toi). La connexion reprend le compte ouvert dans le navigateur : avec un autre, Vigie connecterait un compte qu'il a peut-être déjà.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.callout)
+                .foregroundStyle(Theme.warn)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Ton navigateur s'ouvre ensuite sur la page de connexion de Claude. Avec l'adresse, Vigie vérifie que c'est le bon compte.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

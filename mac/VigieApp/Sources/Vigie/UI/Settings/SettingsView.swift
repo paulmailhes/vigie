@@ -1,13 +1,17 @@
 import SwiftUI
 import UserNotifications
 
-/// Fenêtre Réglages (⌘,) : garde-fous et notifications.
+/// Fenêtre Réglages (⌘,) : les choix de l'accueil et les fonctionnalités, les garde-fous, les notifications, les mises
+/// à jour.
 struct SettingsView: View {
     @Environment(VigieStore.self) private var store
 
     var body: some View {
         @Bindable var store = store
         TabView(selection: $store.settingsTab) {
+            Tab("Général", systemImage: "gearshape", value: SettingsTab.general) {
+                GeneralSettingsView()
+            }
             Tab("Garde-fous", systemImage: Icon.guardRule, value: SettingsTab.guards) {
                 GuardSettingsView()
             }

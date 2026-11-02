@@ -62,7 +62,7 @@ struct AccountsView: View {
                     .help("Ajouter un compte")
             }
         }
-        .sheet(isPresented: $showAddAccount) { AddAccountSheet() }
+        .sheet(isPresented: $showAddAccount) { OnboardingAddAccountSheet() }
         .task(id: store.windowVisible) { await store.followAccounts() }
     }
 
@@ -89,6 +89,7 @@ struct AccountsView: View {
 struct AccountCard: View {
     @Environment(VigieStore.self) private var store
     let account: Account
+    @State private var confirmRemove = false
     let highlighted: Bool
 
     var body: some View {
@@ -97,6 +98,24 @@ struct AccountCard: View {
             // Codex : connexion puis approbation du hook, tant que ce n'est pas fait
             if account.isCodex && !(account.isConnected && account.hook?.trusted == true) {
                 CodexSetupSteps(account: account, polls: false)
+            }
+            if let same = account.sameAs, !same.isEmpty {
+                let names = same.map { id in store.accounts.first(where: { $0.id == id })?.displayName ?? id }
+                    .formatted(.list(type: .and).locale(Fmt.locale))
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Même compte Claude que \(names) : au moment de la connexion, ton navigateur était connecté à ce compte-là.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.alert)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Text("Sur claude.ai, passe sur le bon compte (ou déconnecte-toi), puis :")
+                            .foregroundStyle(.secondary)
+                        AsyncButton("Reconnecter", systemImage: "arrow.clockwise") { await store.connectAccount(account.id) }
+                            .glassButton()
+                            .controlSize(.small)
+                    }
+                }
+                .font(.callout)
             }
             if account.wrongAccount == true {
                 Label {
@@ -155,6 +174,23 @@ struct AccountCard: View {
                 .glassButton(.primary)
                 .help("Ouvre la page de connexion de Claude dans ton navigateur")
             }
+            // un compte ajouté (pas celui du Mac, ni Codex) : le supprimer
+            if account.configDir != nil && !account.isCodex {
+                Menu {
+                    Button("Supprimer le compte…", systemImage: "trash", role: .destructive) { confirmRemove = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Plus d'actions sur ce compte")
+            }
+        }
+        .confirmationDialog("Supprimer « \(account.displayName) » de Vigie ?", isPresented: $confirmRemove) {
+            Button("Supprimer", role: .destructive) { Task { await store.removeAccount(account.id) } }
+        } message: {
+            Text("Il est déconnecté de Claude Code sur ce Mac ; son dossier est mis de côté (rien n'est effacé) ; ses conversations passent sur le compte par défaut. Ton abonnement Claude n'est pas touché.")
         }
     }
 

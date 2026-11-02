@@ -283,6 +283,20 @@ struct DecodingTests {
         #expect(RecipeRunState(clean) == .ready && RecipeRunState.ready.color == Theme.live)
     }
 
+    /// Un compte en double (même compte claude.ai qu'un autre) et la réponse d'une suppression avec ses remarques.
+    @Test func decodesAccountDuplicateAndRemoval() throws {
+        let account = try JSONDecoder().decode(Account.self, from: Data("""
+        { "id": "pro-yanyn", "label": "Pro · yanyn", "email": "a@exemple.fr", "connected": true, "sameAs": ["travail2"], "configDir": "/x" }
+        """.utf8))
+        #expect(account.sameAs == ["travail2"])
+        let plain = try JSONDecoder().decode(Account.self, from: Data(#"{ "id": "travail1", "connected": true }"#.utf8))
+        #expect(plain.sameAs == nil)
+        let removed = try JSONDecoder().decode(WriteResult.self, from: Data("""
+        { "ok": true, "message": "Pro · yanyn est supprimé de Vigie.", "notices": ["Déconnexion pas confirmée par Claude Code."] }
+        """.utf8))
+        #expect(removed.notices == ["Déconnexion pas confirmée par Claude Code."] && removed.message != nil)
+    }
+
     /// Des cases à cocher : leurs choix, un symbole par choix, ceux cochés d'avance (seulement parmi les choix) ; sans
     /// choix, une ligne de texte.
     @Test func decodesChoicesField() throws {

@@ -23,6 +23,9 @@ struct Account: Decodable, Equatable, Sendable, Identifiable {
     /// Adresse prévue pour ce compte ; `wrongAccount` = connecté avec une autre adresse.
     var expectedEmail: String?
     var wrongAccount: Bool?
+    /// Les autres comptes de Vigie connectés au même compte claude.ai (doublon : le navigateur était connecté au
+    /// mauvais compte au moment de la connexion).
+    var sameAs: [String]?
     var connected: Bool?
     var isDefault: Bool?
     @Tolerant var usage: AccountUsage?

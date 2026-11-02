@@ -285,6 +285,20 @@ extension VigieStore {
         await reloadAfterWrite(accounts: true)
     }
 
+    /// Supprime un compte de Vigie (déconnecté, dossier mis de côté) : il disparaît tout de suite de la liste, et
+    /// revient si le moteur refuse.
+    func removeAccount(_ id: String) async {
+        let label = accounts.first(where: { $0.id == id })?.displayName ?? id
+        guard let result = await write("/api/v2/accounts", ["action": "remove", "id": .string(id)]) else {
+            await reloadAfterWrite(accounts: true)
+            return
+        }
+        let notes = result.notices ?? []
+        if notes.isEmpty { show(info: result.message ?? "\(label) est supprimé de Vigie.") }
+        else { show(error: ([result.message ?? "\(label) est supprimé."] + notes).joined(separator: " ")) }
+        await reloadAfterWrite(accounts: true)
+    }
+
     /// Relève à nouveau les crédits d'un compte (ou de tous) : POST {action: "refresh", id}.
     func refreshUsage(_ id: String?) async {
         var body: [String: JSONValue] = ["action": "refresh"]

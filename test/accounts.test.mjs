@@ -23,7 +23,7 @@ const WRAP = path.join(TMP, 'install', 'bin', 'claude-account-wrapper');
 Object.assign(process.env, { VIGIE_DATA: DATA, VIGIE_HOME: HOME, VIGIE_ACCOUNTS_ROOT: ACC, VIGIE_VSCODE_SETTINGS: VSC, VIGIE_RUNCAT_STATE: RUNCAT, VIGIE_WRAPPER: WRAP });
 delete process.env.VIGIE_CLAUDE_BIN; // les relevés n'utilisent que le faux binaire passé explicitement
 
-const { createAccounts, keychainItem, parseJsonc, setJsoncKey, rereadEstimate, SHARED, WRAPPER_KEY } = await import('../lib/accounts.mjs');
+const { createAccounts, MAIN_ID, keychainItem, parseJsonc, setJsoncKey, rereadEstimate, SHARED, WRAPPER_KEY } = await import('../lib/accounts.mjs');
 
 const w = (p, s, mode) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s, mode ? { mode } : undefined); };
 const wj = (p, o) => w(p, JSON.stringify(o, null, 2));
@@ -514,6 +514,46 @@ test('connecter sans Claude Code utilisable : Terminal tout de suite ; copie de 
   const lit = runner.calls.find((c) => c.cmd === '/usr/bin/osascript').args.find((a) => a.startsWith('do script '));
   assert.ok(lit.includes(`'${ext}'`), 'la commande de l\'extension, pas « claude » (absent du PATH)');
   runner.login = undefined;
+});
+
+test('supprimer un compte : déconnecté, dossier mis de côté, copie du coffre retirée, défaut rendu ; le compte du Mac reste', () => {
+  const A = createAccounts({ ...opts, claudeBin: '/faux/bin/claude' });
+  const { account } = A.create('À supprimer');
+  const coffre = path.join(DATA, 'coffre', `claude-${account.id}.json`);
+  fs.mkdirSync(path.dirname(coffre), { recursive: true });
+  fs.writeFileSync(coffre, '{}');
+  assert.equal(A.setDefault(account.id).ok, true);
+  runner.calls.length = 0;
+  runner.login = 0;
+  const r = A.remove(account.id);
+  runner.login = undefined;
+  assert.deepEqual([r.ok, r.notices], [true, []], JSON.stringify(r));
+  const out = runner.calls.find((c) => c.args[0] === 'auth');
+  assert.deepEqual([out.args, out.opts.env.CLAUDE_CONFIG_DIR], [['auth', 'logout'], account.configDir], 'déconnecté, dans son dossier');
+  assert.equal(fs.existsSync(account.configDir), false);
+  const aside = fs.readdirSync(path.join(ACC, '.supprimes'));
+  assert.ok(aside.some((n) => n.startsWith(`${account.id}-`)), 'mis de côté, pas effacé');
+  assert.equal(fs.existsSync(coffre), false);
+  const v = A.view();
+  assert.ok(!v.accounts.some((a) => a.id === account.id));
+  assert.equal(v.defaultForNew, MAIN_ID, 'le compte par défaut redevient celui du Mac');
+  assert.match(A.remove(MAIN_ID).error, /compte du Mac ne se supprime pas/);
+  assert.deepEqual(A.remove('inconnu'), { ok: false, error: 'Compte inconnu.' });
+  assert.equal(A.apply({ action: 'remove', id: 'inconnu' }).ok, false, 'par le point d\'entrée unique');
+});
+
+test('même compte claude.ai connecté dans deux comptes de Vigie : chacun dit avec lequel il fait doublon', () => {
+  const A = createAccounts({ ...opts, claudeBin: '/faux/bin/claude' });
+  const one = A.create('Doublon un').account, two = A.create('Doublon deux').account;
+  for (const a of [one, two]) wj(path.join(a.configDir, '.claude.json'), { oauthAccount: { emailAddress: 'Meme@Exemple.test', accountUuid: 'uuid-d' } });
+  let s = Object.fromEntries(A.summaries().map((x) => [x.id, x.sameAs]));
+  assert.deepEqual([s[one.id], s[two.id]], [[], []], 'pas connectés (rien au trousseau) : pas de doublon');
+  for (const a of [one, two]) runner.keychain.add(keychainItem(a.configDir));
+  s = Object.fromEntries(A.summaries().map((x) => [x.id, x.sameAs]));
+  assert.deepEqual([s[one.id], s[two.id]], [[two.id], [one.id]]);
+  assert.ok(Object.entries(s).filter(([id]) => id !== one.id && id !== two.id).every(([, v]) => !v.includes(one.id)));
+  A.remove(one.id);
+  A.remove(two.id);
 });
 
 // --- bascule ---

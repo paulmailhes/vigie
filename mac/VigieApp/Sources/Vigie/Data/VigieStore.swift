@@ -156,7 +156,7 @@ final class VigieStore {
     var focusTabs = false
     var toast: Toast?
     /// Onglet affiché dans la fenêtre Réglages.
-    var settingsTab: SettingsTab = .guards
+    var settingsTab: SettingsTab = .general
     private(set) var restarting = false
 
     @ObservationIgnored var openMainWindow: (() -> Void)?

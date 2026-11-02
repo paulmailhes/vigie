@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findClaudeBin, isEditorCopy, canRun } from '../lib/claude-bin.mjs';
+import { findClaudeBin, isEditorCopy, canRun, claudeBinResolver } from '../lib/claude-bin.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie-claude-bin-'));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -35,4 +35,28 @@ test('nvm et PATH ; une commande absente n\'est pas lançable', () => {
   assert.equal(canRun('claude', { PATH: '/usr/bin' }), false);
   assert.equal(canRun('/nulle/part/claude'), false);
   assert.equal(canRun(bin), true);
+});
+
+test('la copie de l\'app Claude (pas celle de sa machine virtuelle) ; retrouvé quand l\'extension ou l\'app se met à jour', () => {
+  const home = fs.mkdtempSync(path.join(TMP, 'h-'));
+  const env = { PATH: '/usr/bin:/bin' };
+  const app = path.join(home, 'Library/Application Support/Claude');
+  exe(path.join(app, 'claude-code-vm/2.1.304/claude'));
+  assert.equal(findClaudeBin({ home, env }), null, 'la copie Linux de la machine virtuelle ne compte pas');
+  const v1 = exe(path.join(app, 'claude-code/2.1.304/6bbba6adc37f/claude.app/Contents/MacOS/claude'));
+  assert.equal(findClaudeBin({ home, env }), v1);
+  assert.equal(isEditorCopy(v1), true, 'pas dans le PATH : nommée en entier dans un Terminal de repli');
+  // le moteur a démarré avant : le chemin retenu disparaît à la mise à jour, le suivant est trouvé
+  const now = claudeBinResolver({ find: () => findClaudeBin({ home, env }) });
+  assert.equal(now(), v1);
+  fs.rmSync(path.join(app, 'claude-code/2.1.304'), { recursive: true });
+  const v2 = exe(path.join(app, 'claude-code/2.1.320/a1b2c3d4e5f6/claude.app/Contents/MacOS/claude'));
+  assert.equal(now(), v2, 'retrouvé après la mise à jour');
+  // rien au démarrage, installé ensuite : trouvé sans redémarrer
+  const empty = fs.mkdtempSync(path.join(TMP, 'h-'));
+  const later = claudeBinResolver({ find: () => findClaudeBin({ home: empty, env }) });
+  assert.equal(later(), null);
+  const local = exe(path.join(empty, '.local/bin/claude'));
+  assert.equal(later(), local);
+  assert.equal(claudeBinResolver({ fixed: '/choisi/claude', find: () => local })(), '/choisi/claude', 'un chemin imposé reste');
 });
