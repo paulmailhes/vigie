@@ -511,7 +511,14 @@ final class VigieStore {
         return true
     }
 
+    /// Relevés manqués d'affilée (moteur injoignable), et depuis quand : un seul relevé en retard (Mac chargé, moteur
+    /// occupé quelques secondes) ne doit pas afficher « le moteur ne répond pas ».
+    @ObservationIgnored private var missedReads = 0
+    @ObservationIgnored private var missedSince: Date?
+
     private func readSucceeded() {
+        missedReads = 0
+        missedSince = nil
         update(\.connection, .ok)
         lastReadError = nil
     }
@@ -522,7 +529,11 @@ final class VigieStore {
         let clientError = error as? ClientError ?? .unreadable
         switch clientError {
         case .unreachable:
-            update(\.connection, .down)
+            // en panne pour de bon : deux relevés manqués d'affilée, ou 8 s sans réponse
+            missedReads += 1
+            let since = missedSince ?? .now
+            missedSince = since
+            if missedReads >= 2 || Date.now.timeIntervalSince(since) > 8 { update(\.connection, .down) }
         case .refused(let text):
             update(\.connection, .failing(text))
         case .notFound:
@@ -542,6 +553,11 @@ final class VigieStore {
     func write(_ path: String, _ body: JSONValue, quiet: Bool = false) async -> WriteResult? {
         switch await send(path, body) {
         case .success(let result): return result
+        case .failure(.unreachable):
+            // une écriture sans réponse à temps : l'action se fait peut-être encore (les relevés diront si le moteur
+            // est vraiment en panne)
+            if !quiet { show(error: "Le moteur n'a pas répondu à temps : l'action continue peut-être, vérifie dans un instant") }
+            return nil
         case .failure(let error):
             if !quiet { show(error: error.message) }
             return nil
@@ -560,9 +576,8 @@ final class VigieStore {
         do {
             return .success(try await client.post(path, body, patient: patient))
         } catch {
-            let clientError = error as? ClientError ?? .unreadable
-            if clientError == .unreachable { update(\.connection, .down) }
-            return .failure(clientError)
+            // une écriture qui tarde ne dit pas que le moteur est en panne : ce sont les relevés qui le disent
+            return .failure(error as? ClientError ?? .unreadable)
         }
     }
 

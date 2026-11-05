@@ -1236,15 +1236,17 @@ describe('connecter un MCP (claude mcp login, faux binaire)', () => {
     const r = await mcp.connectEverywhere({ name: 'figma-perso', force: true });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(r.accounts.sort(), ['perso', 'travail1'], 'les deux comptes qui le déclarent, même connectés');
-    assert.match(r.message, /est déconnecté de tes 2 comptes.*connecte-toi avec le compte que tu veux/);
+    assert.match(r.message, /se déconnecte de tes 2 comptes.*connecte-toi avec le compte que tu veux/);
+    // la réponse part tout de suite ; les déconnexions suivent, partout
+    await waitFor(() => calls().filter((c) => c.ev === 'logout' && c.name === 'figma-perso').length === 2);
     const logouts = calls().filter((c) => c.ev === 'logout' && c.name === 'figma-perso');
-    assert.deepEqual(logouts.map((c) => c.id).sort(), ['main', 'perso'], 'déconnecté partout, tout de suite');
+    assert.deepEqual(logouts.map((c) => c.id).sort(), ['main', 'perso'], 'déconnecté partout');
     await waitFor(() => calls().filter((c) => c.ev === 'login' && c.name === 'figma-perso').length === 2, 8000);
     const order = calls().filter((c) => ['logout', 'login'].includes(c.ev) && c.name === 'figma-perso').map((c) => c.ev);
     assert.deepEqual(order, ['logout', 'logout', 'login', 'login'], 'toutes les déconnexions avant la première connexion');
     // sans `force` : seulement les comptes à connecter
     const plain = await mcp.connectEverywhere({ name: 'figma-perso' });
-    assert.ok(!plain.message.includes('déconnecté'));
+    assert.ok(!plain.message.includes('déconnecte'));
     await settle(mcp);
   });
 

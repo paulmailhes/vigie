@@ -95,6 +95,18 @@ struct VigieClient: Sendable {
         return URLSession(configuration: configuration)
     }()
 
+    /// Une écriture : ce que l'utilisateur demande peut prendre quelques secondes (connecter un MCP sur chaque compte,
+    /// supprimer un compte, lancer Claude Code pour une connexion) ; 5 s faisait croire le moteur en panne alors que
+    /// l'action se faisait.
+    private static let writeSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+
     /// Pour une écriture qui attend une fenêtre (lancer un agent : le moteur attend que VS Code soit prêt, 30 s au
     /// plus, et copie les fichiers joints) : le délai court couperait la réponse en route.
     private static let patientSession: URLSession = {
@@ -172,7 +184,7 @@ struct VigieClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("1", forHTTPHeaderField: "X-Vigie")
             request.httpBody = try? JSONEncoder().encode(body)
-            let data = try await Self.send(request, acceptErrorBody: true, session: patient ? Self.patientSession : Self.session)
+            let data = try await Self.send(request, acceptErrorBody: true, session: patient ? Self.patientSession : Self.writeSession)
             guard let result = try? JSONDecoder().decode(WriteResult.self, from: data) else {
                 throw ClientError.unreadable
             }
