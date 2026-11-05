@@ -333,6 +333,22 @@ struct DecodingTests {
         #expect(bare.suggestedFolder(values: [:]) == "~/Code/")
     }
 
+    @Test func decodesRequestEndsAndWorkflows() throws {
+        let json = """
+        [ { "kind": "missionDone", "id": "fin:c1:ch1", "conversationId": "c1", "title": "Les 29 étapes sont faites.",
+            "detail": "8 commits · tests verts", "prompt": "Applique la charte", "question": null, "toYou": "relire",
+            "durationMs": 34800000, "url": null, "ts": "2026-11-05T10:42:00Z" },
+          { "kind": "workflowDone", "id": "wf:c1:run", "conversationId": "c1", "title": "partie-c", "status": "failed",
+            "agents": 11, "agentsFailed": 1, "durationMs": 5000, "ts": "2026-11-05T10:40:00Z" },
+          { "kind": "artifact", "conversationId": "c1", "title": "Page", "url": "https://x", "ts": "2026-11-05T10:00:00Z" } ]
+        """
+        let reports = try JSONDecoder().decode([Report].self, from: Data(json.utf8))
+        #expect(reports[0].stableKey == "fin:c1:ch1")
+        #expect(reports[0].prompt == "Applique la charte" && reports[0].toYou == "relire" && reports[0].question == nil)
+        #expect(reports[1].reportKind == .workflowDone && reports[1].status == "failed" && reports[1].agentsFailed == 1)
+        #expect(reports[2].stableKey.hasPrefix("artifact|c1|https://x|Page|"), "sans identifiant : clé reconstituée")
+    }
+
     @Test func fineFormats() {
         #expect(Fmt.rate(1.2) == "1,2 %/h")
         #expect(Fmt.pctFine(0.034) == "0,03 %")

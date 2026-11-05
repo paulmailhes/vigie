@@ -340,7 +340,9 @@ test('rapports et compteurs depuis un instant', async () => {
   assert.equal(kinds.filter((k) => k === 'artifact').length, 2);
   assert.ok(kinds.includes('missionDone'), 'chapitre 1 fini, l\'utilisateur absent 15 min avant la demande suivante');
   const m = r.find((x) => x.kind === 'missionDone');
-  assert.equal(m.title, 'Fais la partie A du plan');
+  assert.equal(m.prompt, 'Fais la partie A du plan', 'la vraie demande à part');
+  assert.equal(m.title, 'Partie A faite.', 'le titre dit ce que Claude a fait, plus la demande');
+  assert.match(m.id, /^fin:/);
   assert.equal(m.conversationTitle, 'Refaire le site Horizon');
   assert.ok(!kinds.includes('workflowDone'), 'workflow relancé, pas terminé');
   assert.deepEqual(conv.sinceCounts(since), { testsFailed: 2, limits: 1, reports: r.length });
@@ -352,12 +354,34 @@ test('fin de mission : pas de rapport si l\'utilisateur a répondu tout de suite
   const F = mk(sid);
   const p = path.join(PROJECTS, '-Users-alex-Code-vite', `${sid}.jsonl`);
   const work = (t0) => Array.from({ length: 6 }, (_, i) => F.call('Bash', { command: 'ls' }, { ts: T(t0 + i) }));
-  write(p, [F.human('première demande', T(0)), work(1), F.say('Fait.', T(8)), F.human('deuxième', T(10)), work(11), F.say('Fait aussi.', T(18)),
-    F.human('troisième', T(40)), F.say('ok', T(41))]);
+  write(p, [F.human('première demande', T(0)), work(1), F.say('Fait.', T(8)), F.human('deuxième demande', T(10)), work(11), F.say('Fait aussi.', T(18)),
+    F.human('troisième demande', T(40)), F.say('ok', T(41))]);
   const ix = newIndexer();
   await ix.refresh();
   const r = createConversations(ix).reports(new Date(BASE - 60_000).toISOString()).filter((x) => x.conversationId === sid);
-  assert.deepEqual(r.map((x) => x.title), ['deuxième'], 'réponse 2 min après la première : déjà vue ; la deuxième est restée 22 min sans réponse');
+  assert.deepEqual(r.map((x) => x.prompt), ['Deuxième demande'], 'réponse 2 min après la première : déjà vue ; la deuxième est restée 22 min sans réponse');
+  assert.deepEqual(r.map((x) => x.title), ['Fait aussi.']);
+  fs.rmSync(path.dirname(p), { recursive: true });
+});
+
+test('fin de demande : une relance garde la vraie demande et le même identifiant ; question finale repérée', async () => {
+  const sid = 'f0f0f0f0-0000-4000-8000-000000000005';
+  const F = mk(sid);
+  const p = path.join(PROJECTS, '-Users-alex-Code-vite2', `${sid}.jsonl`);
+  const work = (t0) => Array.from({ length: 6 }, (_, i) => F.call('Bash', { command: 'ls' }, { ts: T(t0 + i) }));
+  write(p, [F.human('Ok donc refais toute la page d\'accueil', T(0)), work(1), F.say('En bref : accueil refait, reste le pied de page.\n\nDétails.', T(8)),
+    F.human('continue', T(20)), work(21), F.say('Pied de page fait aussi.\n\nÀ toi : relire le texte légal.\n\nJe publie maintenant ?', T(28)),
+    F.human('troisième demande assez longue', T(50)), F.say('ok', T(51))]);
+  const ix = newIndexer();
+  await ix.refresh();
+  const r = createConversations(ix).reports(new Date(BASE - 60_000).toISOString()).filter((x) => x.conversationId === sid);
+  assert.equal(r.length, 1, 'une seule fin pour la demande et sa relance');
+  assert.match(r[0].id, new RegExp(`^fin:${sid}:`));
+  assert.equal(r[0].prompt, 'Refais toute la page d\'accueil', 'sans « ok donc », et pas « continue »');
+  assert.equal(r[0].title, 'Pied de page fait aussi.');
+  assert.equal(r[0].question, 'Je publie maintenant ?');
+  assert.equal(r[0].toYou, 'relire le texte légal.');
+  assert.equal(r[0].durationMs, 28 * 60_000, 'depuis la vraie demande');
   fs.rmSync(path.dirname(p), { recursive: true });
 });
 

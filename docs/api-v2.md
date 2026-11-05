@@ -82,7 +82,19 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
       "conversationId": "…", "conversationTitle": "Atelier",
       "title": "Analyse finale atelier", "detail": "Pourquoi atelier perd des joueurs…",
       "url": "https://claude.ai/artifact/…",    // ?
-      "ts": "…" }
+      "ts": "…" },
+    { "kind": "missionDone", "id": "fin:<conv>:<demande>",  // une seule fin par demande, relances comprises
+      "conversationId": "…", "conversationTitle": "Atelier",
+      "title": "Les 29 étapes du plan 1.4 sont faites.",  // ce que Claude a fait (« En bref : », sinon 1re phrase utile)
+      "detail": "8 commits · tests verts · 11 agents, 1 en échec",  // ? 4 faits au plus
+      "prompt": "Applique la charte 1.4 à tous les écrans…", // la vraie demande, sans « continue » ni « ok donc »
+      "question": "Je publie maintenant ?",       // ? le compte rendu finit par cette question
+      "toYou": "relire la planche",               // ? ce que Claude laisse à l'utilisateur (« À toi : … »)
+      "durationMs": 34800000, "url": null, "ts": "…" },
+    { "kind": "workflowDone", "id": "wf:<conv>:<runId>", "conversationId": "…", "conversationTitle": "Atelier",
+      "title": "partie-c-charte-ecrans", "detail": "1re phrase de son résultat",  // ?
+      "status": "done",                           // done | failed | killed
+      "agents": 11, "agentsFailed": 1, "durationMs": 34800000, "url": null, "ts": "…" }
   ],
   "accounts": [ /* AccountSummary */ ],
   "conversations": [ /* ConversationSummary, ouvertes d'abord puis fermées des dernières 48 h */ ],

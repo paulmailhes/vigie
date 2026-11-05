@@ -182,18 +182,34 @@ enum ReportKind: String, Sendable {
 
 struct Report: Decodable, Equatable, Sendable {
     var kind: String?
+    /// Fin de demande : `fin:<conversation>:<demande>` (relances comprises) ; workflow : `wf:<conversation>:<run>`.
+    var id: String?
     var conversationId: String?
     var conversationTitle: String?
+    /// Ce que Claude a fait (fin de demande) ou le nom du workflow.
     var title: String?
+    /// Fin de demande : ses faits (« 8 commits · tests verts ») ; workflow : la 1re phrase de son résultat.
     var detail: String?
+    /// Fin de demande : la vraie demande, sans « continue ».
+    var prompt: String?
+    /// Fin de demande : le compte rendu finit par cette question.
+    var question: String?
+    /// Fin de demande : ce que Claude te laisse (« À toi : … »).
+    var toYou: String?
+    /// Workflow : done, failed ou killed.
+    var status: String?
+    var agents: Int?
+    var agentsFailed: Int?
+    var durationMs: Double?
     var url: String?
     @FlexDate var ts: Date?
 
     var reportKind: ReportKind { ReportKind(raw: kind) }
 
-    /// Clé stable pour l'affichage (le contrat ne donne pas d'identifiant).
+    /// Clé stable : l'identifiant du moteur, sinon une clé reconstituée (moteur plus ancien, artefacts).
     var stableKey: String {
-        [kind ?? "", conversationId ?? "", url ?? "", title ?? "", ts.map { String($0.timeIntervalSince1970) } ?? ""]
+        if let id, !id.isEmpty { return id }
+        return [kind ?? "", conversationId ?? "", url ?? "", title ?? "", ts.map { String($0.timeIntervalSince1970) } ?? ""]
             .joined(separator: "|")
     }
 }
