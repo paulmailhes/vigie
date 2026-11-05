@@ -74,6 +74,12 @@ final class SnapshotRunner {
                     await capture(window, String(format: "%02d", offset + 4) + "-detail-\(slug)-\(theme)")
                 }
                 store.conversationPanel = nil
+                // Fenêtre étroite : la page ne doit jamais dépasser (barre et puces passent à la ligne).
+                window.setFrame(NSRect(origin: window.frame.origin, size: NSSize(width: 860, height: 820)), display: true)
+                await settle(1.0)
+                await capture(window, "03b-conversation-etroite-\(theme)")
+                place(window)
+                await settle(0.6)
             }
 
             store.showAccounts(nil)

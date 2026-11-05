@@ -293,10 +293,13 @@ struct WorkflowTile: View {
                             .monospacedDigit()
                     }
                     if running {
-                        HStack {
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                Text(countLine)
+                                Spacer(minLength: 8)
+                                segments
+                            }
                             Text(countLine)
-                            Spacer(minLength: 8)
-                            segments
                         }
                         if agents.isEmpty, let log = workflow.lastLog {
                             Text(log).foregroundStyle(.secondary).lineLimit(1)
@@ -379,10 +382,11 @@ struct DetailsBar: View {
     let open: (ConversationPanel) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        WrapLayout(spacing: 6, lineSpacing: 6) {
             Text("Détails")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .padding(.vertical, 3)
             if !model.feed.isEmpty {
                 chip("Journal \(Fmt.int(model.feed.count))", dot: model.feed.contains { $0.value.decisionKind == .blocked || $0.value.decisionKind == .waiting } ? Theme.alert : nil, .journal)
             }
@@ -403,8 +407,8 @@ struct DetailsBar: View {
             if !answers.isEmpty {
                 chip(answers.count > 1 ? "\(answers.count) éléments pour toi" : "1 élément pour toi", .answers)
             }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.callout)
     }
 

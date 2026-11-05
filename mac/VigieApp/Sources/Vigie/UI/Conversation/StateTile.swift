@@ -45,14 +45,14 @@ struct StateTile: View {
                 }
                 .padding(.leading, 17)
             }
-            HStack(alignment: .center, spacing: 8) {
+            WrapLayout(spacing: 8, lineSpacing: 6) {
                 Text(timeLine)
                     .foregroundStyle(.secondary)
                     .help(placeHelp)
+                    .padding(.vertical, 2)
                 ForEach(chips) { chip in
                     chipView(chip)
                 }
-                Spacer(minLength: 8)
                 if verdict.openButton {
                     AsyncButton(summary.replyLabel) { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
                         .glassButton(.primary)
@@ -60,6 +60,7 @@ struct StateTile: View {
             }
             .font(.callout)
             .padding(.leading, 17)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)

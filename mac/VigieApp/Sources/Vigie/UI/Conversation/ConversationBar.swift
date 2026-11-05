@@ -14,19 +14,21 @@ struct ConversationBar: View {
     @State private var busy: String?
 
     var body: some View {
-        HStack(spacing: 8) {
-            if summary.isCodex {
-                Label("Codex", systemImage: "chevron.left.forwardslash.chevron.right")
-                    .help("Conversation Codex (OpenAI), sur ton compte ChatGPT")
-                autoAcceptMenu
-            } else {
-                accountMenu
-                autoAcceptMenu
-                connectorsMenu
+        // La plus large qui tient : libellés entiers, puis courts, puis sur deux lignes, puis une par ligne. La barre
+        // ne force jamais la page à dépasser la fenêtre.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { menus(compact: false); Spacer(minLength: 8); openButton(compact: false) }
+            HStack(spacing: 8) { menus(compact: true); Spacer(minLength: 8); openButton(compact: true) }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) { menus(compact: true) }
+                openButton(compact: true)
             }
-            Spacer(minLength: 8)
-            openButton
+            VStack(alignment: .leading, spacing: 6) {
+                menus(compact: true)
+                openButton(compact: true)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .menuStyle(.button)
         .buttonStyle(.borderless)
         .labelStyle(.titleAndIcon)
@@ -50,6 +52,19 @@ struct ConversationBar: View {
         }
     }
 
+    @ViewBuilder
+    private func menus(compact: Bool) -> some View {
+        if summary.isCodex {
+            Label("Codex", systemImage: "chevron.left.forwardslash.chevron.right")
+                .help("Conversation Codex (OpenAI), sur ton compte ChatGPT")
+            autoAcceptMenu(compact)
+        } else {
+            accountMenu(compact)
+            autoAcceptMenu(compact)
+            connectorsMenu(compact)
+        }
+    }
+
     private func run(_ menu: String, _ work: @escaping @MainActor () async -> Void) {
         busy = menu
         Task { @MainActor in
@@ -62,7 +77,7 @@ struct ConversationBar: View {
 
     private var currentAccount: Account? { store.account(summary.accountId) }
 
-    private var accountMenu: some View {
+    private func accountMenu(_ compact: Bool) -> some View {
         Menu {
             Text("Compte de cette conversation")
             ForEach(store.accounts) { account in
@@ -77,7 +92,10 @@ struct ConversationBar: View {
                 .disabled(!account.isConnected && account.id != currentAccount?.id)
             }
         } label: {
-            BusyLabel(busy: busy == "account") { Label("Compte : \(currentAccount?.displayName ?? "?")", systemImage: "person.crop.circle") }
+            BusyLabel(busy: busy == "account") {
+                Label(compact ? (currentAccount?.displayName ?? "Compte") : "Compte : \(currentAccount?.displayName ?? "?")",
+                      systemImage: "person.crop.circle")
+            }
         }
         .fixedSize()
         .glassButton()
@@ -96,7 +114,7 @@ struct ConversationBar: View {
 
     // MARK: Auto-accept de cette conversation
 
-    private var autoAcceptMenu: some View {
+    private func autoAcceptMenu(_ compact: Bool) -> some View {
         Menu {
             Text("Auto-accept dans cette conversation")
             Button { run("auto") { await store.setAutoAccept(nil, for: summary.id) } } label: {
@@ -110,7 +128,7 @@ struct ConversationBar: View {
             }
         } label: {
             BusyLabel(busy: busy == "auto") {
-                Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
+                Label(compact ? autoAcceptText.replacingOccurrences(of: "Auto-accept", with: "Auto") : autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
             }
         }
         .fixedSize()
@@ -128,14 +146,14 @@ struct ConversationBar: View {
 
     // MARK: MCP du compte
 
-    private var connectorsMenu: some View {
+    private func connectorsMenu(_ compact: Bool) -> some View {
         let on = summary.connectors == "on"
         return Menu {
             Text("MCP de ton compte claude.ai dans cette conversation")
             Button { run("mcp") { await store.setConnectors(false, for: summary.id) } } label: { choice("Coupés (recommandé)", selected: !on) }
             Button { run("mcp") { await store.setConnectors(true, for: summary.id) } } label: { choice("Activés", selected: on) }
         } label: {
-            BusyLabel(busy: busy == "mcp") { Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp) }
+            BusyLabel(busy: busy == "mcp") { Label(compact ? (on ? "MCP : activés" : "MCP : coupés") : (on ? "MCP du compte : activés" : "MCP du compte : coupés"), systemImage: Icon.mcp) }
         }
         .fixedSize()
         .glassButton()
@@ -145,7 +163,7 @@ struct ConversationBar: View {
     // MARK: Ouvrir
 
     @ViewBuilder
-    private var openButton: some View {
+    private func openButton(compact: Bool) -> some View {
         if summary.surface == "terminal", let cwd = summary.cwd {
             // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
             Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
@@ -157,7 +175,7 @@ struct ConversationBar: View {
                     Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
                 }
             } label: {
-                Label(summary.openLabel, systemImage: "arrow.up.forward.app")
+                Label(compact ? "Ouvrir" : summary.openLabel, systemImage: "arrow.up.forward.app")
             } primaryAction: {
                 Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
             }

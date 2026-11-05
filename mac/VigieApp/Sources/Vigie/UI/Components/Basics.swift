@@ -159,3 +159,36 @@ struct ShowAllButton: View {
             .font(.callout)
     }
 }
+
+/// Des éléments côte à côte qui passent à la ligne quand la place manque (puces, boutons) : jamais plus larges que
+/// leur conteneur.
+struct WrapLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            let item = min(size.width, width)
+            if x > 0 && x + item > width { y += line + lineSpacing; x = 0; line = 0 }
+            x += item + spacing
+            line = max(line, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + line)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            let item = min(size.width, bounds.width)
+            if x > bounds.minX && x + item > bounds.maxX { y += line + lineSpacing; x = bounds.minX; line = 0 }
+            view.place(at: CGPoint(x: x, y: y + (line > 0 ? 0 : 0)), proposal: ProposedViewSize(width: item, height: size.height))
+            x += item + spacing
+            line = max(line, size.height)
+        }
+    }
+}
