@@ -117,7 +117,6 @@ final class VigieStore {
     // MARK: Interface
 
     var route: Route? = .overview
-    var conversationTab: ConversationTab = .fil
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
     /// Installation du moteur par l'app elle-même (app glissée dans Applications) : en cours, ou échouée.
@@ -163,8 +162,6 @@ final class VigieStore {
     var mcpChecking = false
     /// MCP en cours de vérification seule (« Vérifier » d'un agent ou de la page MCP), par nom.
     var verifying: Set<String> = []
-    /// Demande d'amener les onglets de la conversation en haut (« Voir » d'une action bloquée).
-    var focusTabs = false
     var toast: Toast?
     /// Onglet affiché dans la fenêtre Réglages.
     var settingsTab: SettingsTab = .general

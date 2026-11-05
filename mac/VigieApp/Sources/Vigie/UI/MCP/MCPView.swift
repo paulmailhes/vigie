@@ -206,16 +206,18 @@ struct MCPSectionHeader: View {
 /// « 3 657 en 7 j ».
 struct UsesLabel: View {
     let count: Int?
+    /// « en 7 j » sur la page MCP ; « ici » dans une conversation (ses appels, depuis son début).
+    var here = false
 
     var body: some View {
-        Text("\(Fmt.int(count)) en 7 j")
+        Text(here ? "\(Fmt.count(count ?? 0, "appel")) ici" : "\(Fmt.int(count)) en 7 j")
             .font(.caption)
             .monospacedDigit()
             .foregroundStyle(.secondary)
-            .help("Utilisations en 7 jours")
+            .help(here ? "Appels dans cette conversation" : "Utilisations en 7 jours")
             .frame(minWidth: 62, alignment: .trailing)
             .opacity((count ?? 0) == 0 ? 0.6 : 1)
-            .accessibilityLabel("\(Fmt.int(count)) utilisations en 7 jours")
+            .accessibilityLabel(here ? "\(Fmt.int(count)) appels dans cette conversation" : "\(Fmt.int(count)) utilisations en 7 jours")
     }
 }
 

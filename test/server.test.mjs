@@ -326,7 +326,7 @@ const Overview = {
     state: opt(oneOf('waiting', 'blocked', 'awaiting')), approvalId: opt('string'), approved: opt('bool'), pendingId: opt('string'), expiresAt: opt(ISO), rule: opt('string'), command: opt('string'),
     byAgent: opt('string'), cwd: opt('string'), needsPassword: opt('bool'),
   }),
-  reports: arr({ kind: oneOf('artifact', 'missionDone', 'workflowDone'), conversationId: 'string', conversationTitle: 'string', title: 'string', detail: opt('string'), url: opt('string'), ts: ISO }),
+  reports: arr({ kind: oneOf('artifact', 'missionDone', 'workflowDone', 'agentDone'), conversationId: 'string', conversationTitle: 'string', title: 'string', detail: opt('string'), url: opt('string'), ts: ISO }),
   accounts: arr(AccountSummary), conversations: arr(ConversationSummary),
   recentAccepted: arr({ ts: ISO, conversationId: opt('string'), conversationTitle: opt('string'), project: opt('string'), kind: ITEM_KIND,
     title: 'string', detail: opt('string'), decision: DECISION, agent: opt('string'), service: opt(SERVICE) }),

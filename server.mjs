@@ -889,7 +889,9 @@ function overviewV2() {
       limits: counts.limits,
     },
     toReview: review,
-    reports: conv.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo).slice(0, MAX_REPORTS),
+    reports: [...conv.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo),
+      ...safeCodex(() => codex.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo), [])]
+      .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || ''))).slice(0, MAX_REPORTS),
     accounts: withCodexAccount(ctx.accSums),
     conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
@@ -1153,6 +1155,8 @@ function conversationV2(id) {
     background: d.background || [],
     // ce qu'elle a laissé tourner (outil En fond), d'après le dernier relevé
     processes: processes.view().groups.filter((g) => g.conversationId === id),
+    // lancée par un agent de Vigie : son rapport
+    agentRun: runsView()[1].runs.find((r) => r.conversation === id) ?? null,
   };
 }
 

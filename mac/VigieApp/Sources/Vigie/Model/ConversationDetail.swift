@@ -29,6 +29,8 @@ struct ConversationDetail: Decodable, Equatable, Sendable {
     @Lossy var background: [BackgroundCommand]
     /// Ce qu'elle a laissé tourner (outil En fond).
     @Lossy var processes: [BackgroundGroup]
+    /// Lancée par un agent de Vigie : le lancement et son rapport.
+    @Tolerant var agentRun: RecipeRun?
     /// Facultatif : tokens relus si la conversation change de compte.
     var contextTokens: Int?
 }
@@ -119,6 +121,8 @@ struct WorkPlan: Decodable, Equatable, Sendable {
     var title: String?
     var file: String?
     @FlexDate var updatedAt: Date?
+    /// Date de l'avancement (registre d'exécution), plus juste que celle du fichier.
+    @FlexDate var progressAt: Date?
     @Lossy var steps: [PlanStep]
     var done: Int?
     var total: Int?

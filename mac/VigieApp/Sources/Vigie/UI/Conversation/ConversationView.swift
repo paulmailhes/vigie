@@ -124,11 +124,15 @@ struct ConversationView: View {
         // agents seuls, et ceux dont le workflow n'a pas de tuile
         let solo = (model.runningAgents + model.doneAgents.filter { Self.recent($0, now: now) })
             .filter { $0.workflow == nil || !shown.contains($0.workflow ?? "") }
-        if !workflows.isEmpty || !solo.isEmpty {
+        let run = model.raw.agentRun?.report != nil ? model.raw.agentRun : nil
+        if !workflows.isEmpty || !solo.isEmpty || run != nil {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Au travail")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let run, let summary = store.conversation(conversationID) {
+                    AgentReportTile(run: run, summary: summary)
+                }
                 ForEach(workflows) { workflow in
                     WorkflowTile(workflow: workflow,
                                  agents: model.runningAgents.filter { $0.workflow == (workflow.name ?? workflow.id) },
@@ -185,5 +189,61 @@ struct CardHeader: View {
                 .labelStyle(.titleAndIcon)
             }
         }
+    }
+}
+
+/// La conversation vient d'un lancement d'agent Vigie : son rapport, en tête de « Au travail ».
+struct AgentReportTile: View {
+    @Environment(VigieStore.self) private var store
+    let run: RecipeRun
+    let summary: ConversationSummary
+
+    var body: some View {
+        let report = run.report
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                (Text("Agent ").foregroundStyle(.secondary) + Text(run.displayName).bold())
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(status(report)).foregroundStyle(report?.isBlocked == true ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
+            }
+            if let verdict = report?.verdict ?? report?.title {
+                Text(verdict).lineLimit(2)
+            }
+            if let counts = report?.counts {
+                Text([counts.block.flatMap { $0 > 0 ? Fmt.count($0, "bloquant") : nil },
+                      counts.warn.flatMap { $0 > 0 ? "\($0) à corriger" : nil },
+                      counts.ok.flatMap { $0 > 0 ? "\($0) OK" : nil }].compactMap { $0 }.joined(separator: " · "))
+                    .foregroundStyle(.secondary)
+            }
+            if stale {
+                Text("Le rapport dit « en cours », mais la conversation ne travaille plus depuis plus de 2 h.")
+                    .foregroundStyle(Theme.warn)
+            }
+            HStack(spacing: 8) {
+                if let step = report?.next.first {
+                    AsyncButton(step.label) { await store.sendToRun(run, step) }
+                        .glassButton(.primary)
+                }
+                Button("Voir le rapport") { store.route = .agents }
+                    .glassButton()
+            }
+        }
+        .font(.callout)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quinary, in: .rect(cornerRadius: Theme.corner))
+    }
+
+    private func status(_ report: AgentReport?) -> String {
+        guard let report else { return "pas encore de rapport" }
+        if report.isBlocked { return "bloqué" }
+        return report.isRunning ? "en cours" : "fini"
+    }
+
+    /// Un rapport « en cours » alors que la conversation dort depuis 2 h.
+    private var stale: Bool {
+        guard run.report?.isRunning == true, summary.state != .working, let last = summary.lastActivity else { return false }
+        return store.now.timeIntervalSince(last) > 7200
     }
 }

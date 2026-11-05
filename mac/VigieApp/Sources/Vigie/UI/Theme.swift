@@ -149,6 +149,7 @@ enum Theme {
         case .artifact: Icon.artifact
         case .missionDone: Icon.mission
         case .workflowDone: Icon.workflow
+        case .agentDone: Icon.agent
         case .other: "bell"
         }
     }

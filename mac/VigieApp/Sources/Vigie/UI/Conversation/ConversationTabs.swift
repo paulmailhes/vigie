@@ -1,107 +1,5 @@
 import SwiftUI
 
-/// Le contenu de l'onglet choisi : d'abord l'essentiel (les plus récents), puis « Tout afficher ».
-struct ConversationTabContent: View {
-    let tab: ConversationTab
-    let model: ConversationDetailModel
-    let cwd: String?
-
-    @State private var showAll = false
-    @State private var showDoneAgents = false
-
-    /// Combien d'éléments on montre avant « Tout afficher ».
-    private static let shown = 8
-
-    var body: some View {
-        switch tab {
-        case .fil:
-            FilView(milestones: model.milestones)
-
-        case .mcp:
-            ConversationMCPList(model: model, cwd: cwd)
-
-        case .agents:
-            ForEach(model.raw.workflows.filter { $0.status == "running" }) { workflow in
-                WorkflowRow(workflow: workflow)
-            }
-            if model.runningAgents.isEmpty {
-                EmptyRow(text: "Aucun agent en cours")
-            } else {
-                ForEach(limited(model.runningAgents)) { agent in
-                    AgentRow(agent: agent)
-                }
-                more(model.runningAgents.count)
-            }
-            if !model.doneAgents.isEmpty {
-                DisclosureGroup(isExpanded: $showDoneAgents) {
-                    ForEach(model.doneAgents) { agent in
-                        AgentRow(agent: agent)
-                    }
-                } label: {
-                    Text("Terminés (\(model.doneAgents.count))")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-        case .files:
-            if !model.artifacts.isEmpty {
-                Text("Publié sur claude.ai · \(Fmt.int(model.artifacts.count))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
-                ForEach(model.artifacts.prefix(5)) { row in
-                    ArtifactRow(artifact: row.value)
-                }
-            }
-            if model.files.isEmpty {
-                EmptyRow(text: "Aucun fichier créé ou modifié")
-            } else {
-                ForEach(filesShown, id: \.0) { location, rows in
-                    Text("\(Theme.title(for: location)) · \(Fmt.int(model.filesByLocation.first { $0.0 == location }?.1.count ?? rows.count))")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                    ForEach(rows) { row in
-                        FileRow(file: row.value, cwd: cwd)
-                    }
-                }
-                more(model.files.count)
-            }
-
-        case .tests:
-            if model.tests.isEmpty {
-                EmptyRow(text: "Aucune vérification lancée")
-            } else {
-                ForEach(limited(model.tests)) { row in
-                    TestRow(test: row.value)
-                }
-                more(model.tests.count)
-            }
-        }
-    }
-
-    private func limited<Item>(_ items: [Item]) -> [Item] {
-        showAll ? items : Array(items.prefix(Self.shown))
-    }
-
-    @ViewBuilder
-    private func more(_ count: Int) -> some View {
-        if !showAll && count > Self.shown {
-            ShowAllButton(count: count) { withAnimation(.smooth) { showAll = true } }
-        }
-    }
-
-    /// Fichiers les plus récents d'abord, rangés par lieu, au plus `shown` en tout tant qu'on n'a pas tout demandé.
-    private var filesShown: [(FileLocation, [Row<FileItem>])] {
-        guard !showAll else { return model.filesByLocation }
-        let recent = Set(model.files.prefix(Self.shown).map(\.id))
-        return model.filesByLocation.compactMap { location, rows in
-            let kept = rows.filter { recent.contains($0.id) }
-            return kept.isEmpty ? nil : (location, kept)
-        }
-    }
-}
-
 struct EmptyRow: View {
     let text: String
 
@@ -456,7 +354,7 @@ struct ConversationMCPList: View {
                     .font(.callout)
                     .foregroundStyle(status == .connected ? AnyShapeStyle(.secondary) : AnyShapeStyle(MCPStatusStyle.color(status)))
             }
-            UsesLabel(count: item.uses)
+            UsesLabel(count: item.uses, here: true)
         }
         .opacity(status == .disabled ? Theme.dim : 1)
     }

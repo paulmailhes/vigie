@@ -128,7 +128,7 @@ struct SideTiles: View {
                             Text("Ensuite : \(next.label)").foregroundStyle(.secondary).lineLimit(1)
                         }
                     } else if plan.doneCount >= plan.totalCount {
-                        Text("✓ fini\(plan.updatedAt.map { " à \(Fmt.time($0))" } ?? "")").foregroundStyle(.secondary)
+                        Text("✓ fini\((plan.progressAt ?? plan.updatedAt).map { " à \(Fmt.time($0))" } ?? "")").foregroundStyle(.secondary)
                     }
                     if let task = detail.now?.tasks.first(where: { $0.state == .doing })?.text {
                         let tasks = detail.now?.tasks ?? []

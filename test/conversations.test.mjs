@@ -799,3 +799,22 @@ test('détail : messages depuis la vraie demande, fin du dernier tour, agents li
   assert.deepEqual(d.messages, []);
   fs.rmSync(dir, { recursive: true });
 });
+
+test('plan : une étape cochée en tête de titre reste une étape, « (FAIT) » en capitales compte comme faite', async () => {
+  const { parsePlan } = await import('../lib/indexer.mjs');
+  const p = parsePlan('# Plan\n\n### ✅ L2.1 Menu\n\n### ~~L2.2 Score~~\n\n### [x] L2.3 Jauge\n\n### L2.4 Icônes (FAIT)\n\n### L2.5 Grain de nuit\n');
+  assert.deepEqual(p.steps.map((s) => s.id), ['L2.1', 'L2.2', 'L2.3', 'L2.4', 'L2.5'], 'le total ne baisse plus quand Claude coche une étape');
+  assert.deepEqual(p.steps.map((s) => s.status), ['done', 'done', 'done', 'done', 'todo']);
+});
+
+test('messages de Claude : le gras par paires est retiré, pas les tirets bas d\'un nom de fichier ni un type générique', async () => {
+  const sid = 'f0f0f0f0-0000-4000-8000-000000000007';
+  const F = mk(sid);
+  const p = path.join(PROJECTS, '-Users-alex-Code-noms', `${sid}.jsonl`);
+  write(p, [F.human('Corrige le module de démarrage du projet', T(0)), F.say('**Fait** : `__init__.py` et Array<String> corrigés <system-reminder>x</system-reminder>.', T(2))]);
+  const ix = newIndexer();
+  await ix.refresh();
+  const d = createConversations(ix).detail(sid);
+  assert.equal(d.messages[0].text, 'Fait : `__init__.py` et Array<String> corrigés x.');
+  fs.rmSync(path.dirname(p), { recursive: true });
+});

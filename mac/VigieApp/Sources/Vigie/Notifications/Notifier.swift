@@ -236,6 +236,8 @@ final class Notifier {
                 if let candidate = missionEnd(report, store: store, name: name) { list.append(candidate) }
             case .workflowDone:
                 if let candidate = workflowEnd(report, reports: reports, store: store, name: name) { list.append(candidate) }
+            case .agentDone:
+                if let candidate = agentEnd(report, store: store, name: name) { list.append(candidate) }
             case .artifact, .other:
                 continue
             }
@@ -359,6 +361,24 @@ final class Notifier {
                                   title: "\(conversation) · workflow \(outcome)", subtitle: report.title ?? "",
                                   body: lines.isEmpty ? "Workflow \(outcome)" : lines.joined(separator: "\n"),
                                   conversationId: report.conversationId, version: end.timeIntervalSince1970))
+    }
+
+    /// Un agent lancé seul, fini après plus de 10 min : dans le centre de notifications, sans bannière ; une bannière
+    /// s'il échoue, ou si personne ne lira son résultat (conversation fermée, ou au repos 2 min après sa fin).
+    private func agentEnd(_ report: Report, store: VigieStore, name: (String?, String?) -> String) -> Candidate? {
+        guard recent(report.ts), let end = report.ts else { return nil }
+        let summary = report.conversationId.flatMap { store.conversation($0) }
+        let failed = report.status == "failed" || report.status == "killed"
+        let unread = summary == nil || summary?.state == .closed
+            || (summary?.state == .idle && Date.now.timeIntervalSince(end) > 120)
+        if !failed && !unread && Date.now.timeIntervalSince(end) < 120 && summary?.state != .working { return nil } // elle va le lire
+        let conversation = name(report.conversationId, report.conversationTitle)
+        let duration = Fmt.duration(ms: report.durationMs)
+        return Candidate(key: "m:" + report.stableKey, kind: failed ? .stopped : .missionDone,
+                         title: "\(conversation) · agent \(failed ? "en échec" : "fini") : \(report.title ?? "agent")",
+                         subtitle: duration, body: report.detail ?? (failed ? "Il s'est arrêté sans résultat" : "Fini"),
+                         conversationId: report.conversationId, reviewId: nil,
+                         version: end.timeIntervalSince1970, quiet: !failed && !unread)
     }
 
     /// Une fin notifiée est retirée si sa conversation reprend le travail.

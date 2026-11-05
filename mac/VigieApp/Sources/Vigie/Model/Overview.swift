@@ -179,7 +179,7 @@ struct QuestionOption: Decodable, Equatable, Sendable {
 }
 
 enum ReportKind: String, Sendable {
-    case artifact, missionDone, workflowDone, other
+    case artifact, missionDone, workflowDone, agentDone, other
 
     init(raw: String?) { self = raw.flatMap(ReportKind.init(rawValue:)) ?? .other }
 }
