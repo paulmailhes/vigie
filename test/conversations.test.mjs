@@ -818,3 +818,18 @@ test('messages de Claude : le gras par paires est retiré, pas les tirets bas d\
   assert.equal(d.messages[0].text, 'Fait : `__init__.py` et Array<String> corrigés x.');
   fs.rmSync(path.dirname(p), { recursive: true });
 });
+
+test('titre d\'une ancienne conversation, lu une fois dans son transcript (outil En fond)', async () => {
+  const sid = 'f0f0f0f0-0000-4000-8000-000000000008';
+  const F = mk(sid);
+  const p = path.join(PROJECTS, '-Users-alex-Code-vieux', `${sid}.jsonl`);
+  write(p, [F.human('Monte un petit serveur pour voir le prototype', T(-5000)), { type: 'ai-title', aiTitle: 'Prototype de la page d\'accueil', sessionId: sid }]);
+  const ix = newIndexer();
+  const info = ix.conversationInfo(sid);
+  assert.equal(info.title, 'Prototype de la page d\'accueil');
+  assert.equal(info.cwd, CWD);
+  fs.rmSync(p);
+  assert.equal(ix.conversationInfo(sid).title, 'Prototype de la page d\'accueil', 'gardé : le transcript n\'est relu qu\'une fois');
+  assert.equal(ix.conversationInfo('f0f0f0f0-0000-4000-8000-00000000dead'), null);
+  fs.rmSync(path.dirname(p), { recursive: true });
+});

@@ -213,11 +213,18 @@ struct BackgroundRow: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(where_)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 200, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    // la conversation qui l'a lancé : son titre, puis son projet et son état
+                    Text(group.conversationTitle ?? group.project ?? "Conversation inconnue")
+                        .lineLimit(1)
+                        .help(group.conversationTitle ?? "")
+                    Text(where_)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .font(.callout)
+                .frame(width: 260, alignment: .leading)
                 Text(Fmt.age(since: group.startedAt, now: store.now))
                     .font(.callout)
                     .monospacedDigit()
@@ -237,7 +244,7 @@ struct BackgroundRow: View {
             if expanded { details }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(group.label ?? "Commande"), \(where_), \(Fmt.memory(mb: group.memoryMb))")
+        .accessibilityLabel("\(group.label ?? "Commande"), lancé par \(group.conversationTitle ?? "une conversation"), \(where_), \(Fmt.memory(mb: group.memoryMb))")
     }
 
     private var color: Color {
@@ -249,9 +256,9 @@ struct BackgroundRow: View {
     }
 
     private var where_: String {
-        let name = group.project ?? group.conversationTitle ?? "Conversation inconnue"
+        let name = group.project ?? "?"
         switch group.groupState {
-        case .forgotten: return "\(name) · fermée"
+        case .forgotten: return "\(name) · fermée\(group.forgottenSince.map { " \(Fmt.ago($0, now: store.now))" } ?? "")"
         case .working: return "\(name) · travaille"
         case .waiting: return "\(name) · t'attend"
         case .idle: return "\(name) · au repos"
@@ -290,9 +297,15 @@ struct BackgroundRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                if let id = group.conversationId, store.conversation(id) != nil {
-                    Button("Voir la conversation") { store.route = .conversation(id) }
-                        .glassButton()
+                if let id = group.conversationId {
+                    if store.conversation(id) != nil {
+                        Button("Voir la conversation") { store.route = .conversation(id) }
+                            .glassButton()
+                    } else {
+                        // fermée depuis plus de 48 h : Vigie ne la suit plus, VS Code la rouvre
+                        AsyncButton("Rouvrir la conversation") { await store.openConversationInVSCode(id, cwd: group.cwd) }
+                            .glassButton()
+                    }
                 }
                 if let cwd = group.cwd {
                     Button("Afficher le dossier") {

@@ -100,8 +100,12 @@ const processes = createProcesses({
   live: () => indexer.live,
   conversation: (sid) => {
     const s = indexer.sessions.get(sid);
-    if (!s) return null;
-    return { title: s.title || indexer.live.get(sid)?.name || null, project: s.cwd ? path.basename(s.cwd) : null, cwd: s.cwd || null, lastTs: s.lastTs || null };
+    // ancienne (hors des 48 h suivies) : son titre et son dossier, lus une fois dans son transcript
+    const old = !s?.title || !s?.cwd ? indexer.conversationInfo(sid) : null;
+    const cwd = s?.cwd || old?.cwd || null;
+    const title = s?.title || indexer.live.get(sid)?.name || old?.title || null;
+    if (!title && !cwd) return null;
+    return { title, project: cwd ? path.basename(cwd) : null, cwd, lastTs: s?.lastTs || old?.lastTs || null };
   },
   autoStop: () => PROCESSES && readState().stopForgotten,
   log: (m) => console.error(`[vigie] ${m}`),
