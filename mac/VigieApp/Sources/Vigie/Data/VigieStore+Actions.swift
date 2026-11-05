@@ -495,9 +495,13 @@ extension VigieStore {
     }
 
     /// « Partout » : chaque compte qui demande ce MCP, l'un après l'autre (une page d'autorisation à la fois).
-    func mcpConnectEverywhere(name: String) async {
-        guard let result = await write("/api/v2/mcp/connect", ["name": .string(name), "everywhere": .bool(true)]) else { return }
-        show(info: result.message ?? "Connecte « \(name) » dans ton navigateur, une fois par compte")
+    /// `force` : « Reconnecter partout avec un autre compte » — déconnecté de chaque compte d'abord, puis reconnecté.
+    func mcpConnectEverywhere(name: String, force: Bool = false) async {
+        var body: [String: JSONValue] = ["name": .string(name), "everywhere": .bool(true)]
+        if force { body["force"] = .bool(true) }
+        guard let result = await write("/api/v2/mcp/connect", .object(body)) else { return }
+        show(info: (result.message ?? "Connecte « \(name) » dans ton navigateur, une fois par compte")
+             + ((result.notices ?? []).isEmpty ? "" : " " + (result.notices ?? []).joined(separator: " ")))
         await reloadAfterWrite(mcp: true)
     }
 

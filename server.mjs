@@ -1542,7 +1542,7 @@ function lastStatus(name, body) {
 }
 async function postMcpConnect(body) {
   // « Connecter partout » : chaque compte qui le demande, l'un après l'autre (MCP du Mac seulement)
-  if (body.everywhere === true) return mcpReply(await mcp.connectEverywhere({ name: body.name }));
+  if (body.everywhere === true) return mcpReply(await mcp.connectEverywhere({ name: body.name, force: body.force === true }));
   const name = connectName(body);
   if (body.force !== true && typeof name === 'string' && name && lastStatus(name, body) === 'connected') {
     return bad('Déjà connecté : rien à faire (le reconnecter couperait la connexion actuelle).');

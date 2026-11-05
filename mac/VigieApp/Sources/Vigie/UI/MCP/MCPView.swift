@@ -228,12 +228,14 @@ struct UserMCPRow: View {
     let projects: [KnownProject]
     let edit: () -> Void
     let remove: () -> Void
+    @State private var confirmSwitch = false
 
     var body: some View {
         let active = server.disabledIn.isEmpty
         // Par Vigie, l'état se lit sur la passerelle (une autorisation pour tous) ; en direct, compte par compte.
         let summary = gateway == nil ? MCPAccountSummary(accounts: accounts, health: server.health, declaredIn: server.accounts) : MCPAccountSummary(accounts: [], health: [])
         let notChecked = gateway == nil && server.health.isEmpty && server.needsAuth == true
+        let switchCount = server.accounts.count
         MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !active, uses: server.uses7d) {
             Toggle("Actif", isOn: everywhere)
                 .toggleStyle(.switch)
@@ -260,6 +262,11 @@ struct UserMCPRow: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("Reconnecter « \(server.name) » partout avec un autre compte ?", isPresented: $confirmSwitch) {
+            Button("Déconnecter et reconnecter") { Task { await store.mcpConnectEverywhere(name: server.name, force: true) } }
+        } message: {
+            Text("Il est déconnecté de \(switchCount == 1 ? "ton compte Claude" : "tes \(switchCount) comptes Claude"), puis ton navigateur s'ouvre une fois par compte pour le reconnecter. Avant : sur le site du service (figma.com…), connecte-toi avec le nouveau compte — c'est lui qui sera autorisé. Une conversation déjà ouverte le reprend après « Reconnect » dans son panneau MCP.")
         }
     }
 
@@ -333,6 +340,7 @@ struct UserMCPRow: View {
                         }
                     }
                 }
+                Button("Reconnecter partout avec un autre compte…", systemImage: "person.2.badge.gearshape") { confirmSwitch = true }
             }
             Button("Modifier", systemImage: "pencil", action: edit)
             Button("Demander à Claude", systemImage: "bubble.left.and.text.bubble.right") {

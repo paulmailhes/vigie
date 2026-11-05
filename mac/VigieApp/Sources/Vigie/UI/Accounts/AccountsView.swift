@@ -15,22 +15,9 @@ struct AccountsView: View {
             } else {
                 ScrollViewReader { proxy in
                     Form {
-                        ForEach(accounts) { account in
-                            Section {
-                                AccountCard(account: account, highlighted: account.id == highlight)
-                            }
-                            .id(account.id)
-                        }
-
+                        // En tête : le compte sur lequel part chaque nouvelle conversation (on ne le voyait pas en bas)
                         Section {
-                            Picker(selection: $store.defaultAccountID) {
-                                ForEach(accounts.filter { !$0.isCodex }) { account in
-                                    Text(account.displayName).tag(account.id)
-                                }
-                            } label: {
-                                Text("Compte des nouvelles conversations")
-                            }
-                            .pickerStyle(.menu)
+                            DefaultAccountChoice(accounts: accounts.filter { !$0.isCodex })
 
                             // Toujours actif (le moteur s'en charge) : on ne le montre que s'il n'a pas pu l'être.
                             if !wrapperActive && store.tools?.chosen?.claudeVSCode != false && store.engineInfo != nil {
@@ -42,6 +29,13 @@ struct AccountsView: View {
                                         .glassButton()
                                 }
                             }
+                        }
+
+                        ForEach(accounts) { account in
+                            Section {
+                                AccountCard(account: account, highlighted: account.id == highlight)
+                            }
+                            .id(account.id)
                         }
                     }
                     .pageForm()
@@ -261,13 +255,55 @@ struct UsageGaugeRow: View {
 }
 
 extension VigieStore {
-    /// Compte des nouvelles conversations (lié au sélecteur).
+    /// Compte des nouvelles conversations, tel que le moteur le connaît.
     var defaultAccountID: String {
-        get {
-            accountsState?.defaultForNew ?? accounts.first(where: { $0.isDefault == true })?.id ?? accounts.first?.id ?? ""
+        accountsState?.defaultForNew ?? accounts.first(where: { $0.isDefault == true })?.id ?? accounts.first?.id ?? ""
+    }
+}
+
+/// Le compte des nouvelles conversations, en tête de la page : bien visible, expliqué, et changé seulement par un clic
+/// dans son menu (un sélecteur lié pouvait se réécrire tout seul quand la liste des comptes se rechargeait).
+struct DefaultAccountChoice: View {
+    @Environment(VigieStore.self) private var store
+    let accounts: [Account]
+
+    var body: some View {
+        let current = store.defaultAccountID
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "plus.bubble.fill")
+                .font(.title2)
+                .foregroundStyle(Theme.action)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Compte des nouvelles conversations")
+                    .font(.headline)
+                Text("Chaque nouvelle conversation part sur ce compte. Une conversation déjà commencée garde le sien : change-le depuis la conversation.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Menu {
+                ForEach(accounts) { account in
+                    Button {
+                        guard account.id != current else { return }
+                        Task { await store.setDefaultAccount(account.id) }
+                    } label: {
+                        if account.id == current {
+                            Label(account.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(account.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Text(accounts.first(where: { $0.id == current })?.displayName ?? "Choisir")
+                    .fontWeight(.semibold)
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .help("Le compte sur lequel partent les nouvelles conversations")
         }
-        set {
-            Task { await setDefaultAccount(newValue) }
-        }
+        .padding(.vertical, 6)
     }
 }

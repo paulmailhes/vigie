@@ -865,6 +865,7 @@ if (args[0] === 'mcp' && args[1] === 'get') {
   process.stdout.write(args[2] + ':\\n  Scope: User config (available in all your projects)\\n  Status: ' + line.split(' - ').pop() + '\\n  Type: http\\n');
   process.exit(0);
 }
+if (args[0] === 'mcp' && args[1] === 'logout') { log({ ev: 'logout', name: args[2] }); console.log('Cleared OAuth credentials for ' + args[2]); process.exit(0); }
 if (args[0] === 'mcp' && args[1] === 'login') {
   if (args[2] === '--help') {
     log({ ev: 'help' });
@@ -1226,6 +1227,24 @@ describe('connecter un MCP (claude mcp login, faux binaire)', () => {
     assert.equal((await mcp.connect({ name: 'figma-perso', accountId: 'perso', path: path.join(CODE, 'alpha') })).ok, true);
     assert.equal(terminal.length, 0);
     await waitFor(() => calls().some((c) => c.ev === 'login' && c.name === 'figma-perso' && c.configDir === PERSO_DIR));
+    await settle(mcp);
+  });
+
+  test('reconnecter partout avec un autre compte : déconnecté de chaque compte d\'abord, puis connecté l\'un après l\'autre', async () => {
+    seedHome(); seedLists();
+    const mcp = mk();
+    const r = await mcp.connectEverywhere({ name: 'figma-perso', force: true });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(r.accounts.sort(), ['perso', 'travail1'], 'les deux comptes qui le déclarent, même connectés');
+    assert.match(r.message, /est déconnecté de tes 2 comptes.*connecte-toi avec le compte que tu veux/);
+    const logouts = calls().filter((c) => c.ev === 'logout' && c.name === 'figma-perso');
+    assert.deepEqual(logouts.map((c) => c.id).sort(), ['main', 'perso'], 'déconnecté partout, tout de suite');
+    await waitFor(() => calls().filter((c) => c.ev === 'login' && c.name === 'figma-perso').length === 2, 8000);
+    const order = calls().filter((c) => ['logout', 'login'].includes(c.ev) && c.name === 'figma-perso').map((c) => c.ev);
+    assert.deepEqual(order, ['logout', 'logout', 'login', 'login'], 'toutes les déconnexions avant la première connexion');
+    // sans `force` : seulement les comptes à connecter
+    const plain = await mcp.connectEverywhere({ name: 'figma-perso' });
+    assert.ok(!plain.message.includes('déconnecté'));
     await settle(mcp);
   });
 
