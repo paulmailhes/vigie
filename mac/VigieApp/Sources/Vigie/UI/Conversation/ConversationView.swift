@@ -33,32 +33,6 @@ struct ConversationView: View {
         }
         .navigationTitle(summary?.shortTitle ?? "Conversation")
         .navigationSubtitle(summary?.title ?? "")
-        .toolbar {
-            if let summary {
-                // Ses réglages, juste après son titre : compte, auto-accept de cette conversation, MCP du compte.
-                ToolbarItem(placement: .navigation) {
-                    ConversationControls(summary: summary, contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
-                }
-                ToolbarItem {
-                    if summary.surface == "terminal", let cwd = summary.cwd {
-                        // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
-                        Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
-                    } else {
-                        Menu {
-                            if let cwd = summary.cwd {
-                                Button("Ouvrir le dossier dans VS Code") { SystemActions.openInVSCode(path: cwd) }
-                                Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
-                            }
-                        } label: {
-                            Label(summary.openLabel, systemImage: "arrow.up.forward.app")
-                        } primaryAction: {
-                            Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
-                        }
-                        .help("Ouvrir cette conversation là où elle tourne (la flèche : son dossier)")
-                    }
-                }
-            }
-        }
         .inspector(isPresented: Binding(get: { shownPanel != nil },
                                         set: { if !$0 { store.conversationPanel = nil } })) {
             if let panel = shownPanel, let summary {
@@ -96,6 +70,7 @@ struct ConversationView: View {
                                                now: store.now) { store.account($0)?.displayName ?? "l'autre compte" }
         Page {
             VStack(alignment: .leading, spacing: 12) {
+                ConversationBar(summary: summary, contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
                 StateTile(summary: summary, model: model, verdict: verdict, open: open)
                 if let model {
                     let wide = width >= Self.twoColumns

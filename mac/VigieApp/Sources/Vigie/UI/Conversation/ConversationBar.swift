@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Les réglages d'une conversation, dans la barre d'outils de sa page : son compte (bascule avec confirmation), son
-/// auto-accept (comme le réglage général, toujours, jamais) et les MCP de ton compte claude.ai. Codex : l'auto-accept
-/// seulement.
-struct ConversationControls: View {
+/// La barre d'une conversation, en haut de sa page (la barre d'outils de la fenêtre appartient à toute l'app) : son
+/// compte (bascule avec confirmation), son auto-accept (comme le réglage général, toujours, jamais), les MCP de ton
+/// compte claude.ai, et de quoi l'ouvrir là où elle tourne. Codex : l'auto-accept seulement.
+struct ConversationBar: View {
     @Environment(VigieStore.self) private var store
     let summary: ConversationSummary
     let contextTokens: Int?
@@ -24,10 +24,16 @@ struct ConversationControls: View {
                 autoAcceptMenu
                 connectorsMenu
             }
+            Spacer(minLength: 8)
+            openButton
         }
-        // dans la barre d'outils, un menu n'affiche que son icône : ici le texte compte
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
         .labelStyle(.titleAndIcon)
-        .fixedSize()
+        .tint(.primary) // réglages : neutres, le bleu reste aux actions
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.quinary, in: .rect(cornerRadius: Theme.corner))
         .confirmationDialog(pendingAccount.map { "Passer sur \($0.displayName) ?" } ?? "",
                             isPresented: $confirmSwitch, titleVisibility: .visible, presenting: pendingAccount) { account in
             Button(summary.state == .working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
@@ -71,8 +77,10 @@ struct ConversationControls: View {
                 .disabled(!account.isConnected && account.id != currentAccount?.id)
             }
         } label: {
-            BusyLabel(busy: busy == "account") { Label(currentAccount?.displayName ?? "Compte", systemImage: "person.crop.circle") }
+            BusyLabel(busy: busy == "account") { Label("Compte : \(currentAccount?.displayName ?? "?")", systemImage: "person.crop.circle") }
         }
+        .fixedSize()
+        .glassButton()
         .help("Compte de cette conversation")
     }
 
@@ -105,14 +113,16 @@ struct ConversationControls: View {
                 Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
             }
         }
-        .help("Auto-accept pour cette conversation seulement (le réglage général est l'interrupteur à droite)")
+        .fixedSize()
+        .glassButton()
+        .help("Auto-accept pour cette conversation seulement (le réglage général est l'interrupteur en haut à droite)")
     }
 
     private var autoAcceptText: String {
         switch summary.autoAcceptOverride {
-        case true?: "Auto : toujours"
-        case false?: "Auto : jamais"
-        case nil: (summary.autoAccept ?? store.autoAccept) ? "Auto : oui" : "Auto : non"
+        case true?: "Auto-accept : toujours"
+        case false?: "Auto-accept : jamais"
+        case nil: "Auto-accept : \((summary.autoAccept ?? store.autoAccept) ? "oui" : "non")"
         }
     }
 
@@ -125,9 +135,36 @@ struct ConversationControls: View {
             Button { run("mcp") { await store.setConnectors(false, for: summary.id) } } label: { choice("Coupés (recommandé)", selected: !on) }
             Button { run("mcp") { await store.setConnectors(true, for: summary.id) } } label: { choice("Activés", selected: on) }
         } label: {
-            BusyLabel(busy: busy == "mcp") { Label(on ? "MCP : activés" : "MCP : coupés", systemImage: Icon.mcp) }
+            BusyLabel(busy: busy == "mcp") { Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp) }
         }
+        .fixedSize()
+        .glassButton()
         .help("Les MCP de ton compte claude.ai (Gmail, Drive…) dans cette conversation. Les MCP de ton Mac et du projet restent actifs.")
+    }
+
+    // MARK: Ouvrir
+
+    @ViewBuilder
+    private var openButton: some View {
+        if summary.surface == "terminal", let cwd = summary.cwd {
+            // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
+            Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
+                .glassButton()
+        } else {
+            Menu {
+                if let cwd = summary.cwd {
+                    Button("Ouvrir le dossier dans VS Code") { SystemActions.openInVSCode(path: cwd) }
+                    Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
+                }
+            } label: {
+                Label(summary.openLabel, systemImage: "arrow.up.forward.app")
+            } primaryAction: {
+                Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
+            }
+            .fixedSize()
+            .glassButton(.primary)
+            .help("Ouvrir cette conversation là où elle tourne (la flèche : son dossier)")
+        }
     }
 
     @ViewBuilder
