@@ -51,11 +51,10 @@ final class SnapshotRunner {
             await settle(1.0)
             await capture(window, "01-vue-ensemble-\(theme)")
 
-            // Haut de la page d'une conversation (en-tête, où ça en est, plan), puis chaque onglet.
+            // Page d'une conversation, puis son détail à droite (agent, plan, journal, MCP).
             for (number, id, name) in [(2, conversationID, "atelier"), (3, secondID, "boutique")] {
                 guard let id else { continue }
-                store.conversationTab = .fil
-                store.focusTabs = false
+                store.conversationPanel = nil
                 store.route = .conversation(id)
                 _ = await waitUntil(seconds: 5) { self.store.details[id] != nil }
                 await settle(1.0)
@@ -64,13 +63,17 @@ final class SnapshotRunner {
             if let conversationID {
                 store.route = .conversation(conversationID)
                 _ = await waitUntil(seconds: 5) { self.store.details[conversationID] != nil }
-                for (offset, tab) in ConversationTab.allCases.enumerated() {
-                    store.conversationTab = tab
-                    store.focusTabs = true
+                let model = store.details[conversationID]
+                var panels: [(String, ConversationPanel)] = [("fil", .thread), ("plan", .plan), ("journal", .journal), ("mcp", .mcp)]
+                if let agent = model?.runningAgents.first { panels.insert(("agent", .agent(agent.id)), at: 0) }
+                if !(model?.raw.messages.isEmpty ?? true) { panels.insert(("message", .message((model?.raw.messages.count ?? 1) - 1)), at: 0) }
+                for (offset, (slug, panel)) in panels.enumerated() {
+                    store.conversationPanelOwner = conversationID
+                    store.conversationPanel = panel
                     await settle(0.9)
-                    await capture(window, String(format: "%02d", offset + 4) + "-onglet-\(tab.slug)-\(theme)")
+                    await capture(window, String(format: "%02d", offset + 4) + "-detail-\(slug)-\(theme)")
                 }
-                store.conversationTab = .fil
+                store.conversationPanel = nil
             }
 
             store.showAccounts(nil)
@@ -177,6 +180,22 @@ final class SnapshotRunner {
             pieces.append(.glass(below.insetBy(dx: 8, dy: 8)))
             if let sidebar = renderSidebar(size: below.size, behind: window) {
                 pieces.append(.image(sidebar, below))
+            }
+        }
+
+        // Le détail d'une conversation (inspecteur, en verre lui aussi) : rendu à part de la même façon.
+        if let panel = store.conversationPanel, case .conversation(let id) = store.route, let summary = store.conversation(id),
+           let sidebar = sidebarRect(window, frameView) {
+            let tall = glassViews(in: frameView).filter { $0.frame.height > 200 }.map { place($0, in: frameView) }
+            if let right = tall.filter({ $0.minX > sidebar.maxX + 100 }).max(by: { $0.minX < $1.minX }) {
+                let toolbarHeight = max(0, frameView.bounds.height - window.contentLayoutRect.height)
+                let rect = NSRect(x: right.minX, y: right.minY, width: right.width, height: right.height - toolbarHeight)
+                let view = ConversationInspector(panel: panel, summary: summary, model: store.details[id])
+                    .frame(width: rect.width, height: rect.height, alignment: .top)
+                    .background(.background)
+                if let image = renderAlone(AnyView(view), size: rect.size) {
+                    pieces.append(.image(image, rect))
+                }
             }
         }
 
@@ -296,10 +315,25 @@ final class SnapshotRunner {
 
     /// Zone de la barre latérale sous la barre d'outils, dans le repère de l'image.
     private func sidebarRect(_ window: NSWindow, _ frameView: NSView) -> NSRect? {
-        guard let glass = glassViews(in: frameView).first(where: { $0.frame.height > 200 }) else { return nil }
+        // la plus à gauche : le détail d'une conversation (inspecteur) est lui aussi en verre, à droite
+        let tall = glassViews(in: frameView).filter { $0.frame.height > 200 }
+        guard let glass = tall.min(by: { place($0, in: frameView).minX < place($1, in: frameView).minX }) else { return nil }
         let rect = place(glass, in: frameView)
         let toolbarHeight = max(0, frameView.bounds.height - window.contentLayoutRect.height)
         return NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height - toolbarHeight)
+    }
+
+    /// Une vue rendue dans une fenêtre d'appoint (hors du verre), à la taille donnée.
+    private func renderAlone(_ root: AnyView, size: NSSize) -> NSBitmapImageRep? {
+        let helper = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        helper.isReleasedWhenClosed = false
+        helper.appearance = NSApplication.shared.appearance
+        helper.contentView = NSHostingView(rootView: root.environment(store))
+        guard let view = helper.contentView else { return nil }
+        view.layoutSubtreeIfNeeded()
+        helper.displayIfNeeded()
+        defer { helper.close() }
+        return render(view)
     }
 
     /// La même SidebarView (mêmes données, même sélection), rendue hors du verre.

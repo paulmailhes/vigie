@@ -41,7 +41,8 @@ struct ReviewRow: View {
     }
 
     private var detailLine: String {
-        [item.conversationTitle, item.detail, item.ts.map { Fmt.when($0, now: store.now) }]
+        // sur la page de sa conversation, son nom n'est pas répété
+        [inConversation ? nil : item.conversationTitle, item.detail, item.ts.map { Fmt.when($0, now: store.now) }]
             .compactMap { $0?.isEmpty == false ? $0 : nil }
             .joined(separator: " · ")
     }

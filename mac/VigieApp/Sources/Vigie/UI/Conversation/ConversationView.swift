@@ -1,120 +1,24 @@
 import SwiftUI
 
-/// Le détail d'une conversation : en-tête, « Maintenant » (ta demande, où elle en est, ce qui en est sorti),
-/// sa feuille de route (plan, tâches, sinon ses documents de suivi), puis le fil et les onglets de détail.
+/// La page d'une conversation, en tuiles : l'État (toujours), l'Échange entre toi et Claude juste dessous avec à côté
+/// au plus deux petites tuiles (ce qui cloche, le plan, ce qui est publié), puis ce qui travaille (workflows et agents)
+/// et une ligne de détails. Une tuile n'apparaît que si elle a quelque chose à dire ; un clic ouvre le détail à
+/// droite, la page restant visible et à jour à côté.
 struct ConversationView: View {
     @Environment(VigieStore.self) private var store
     let conversationID: String
 
-    private static let tabsAnchor = "onglets"
+    @State private var width: CGFloat = 1000
+
+    /// Sous cette largeur (inspecteur ouvert ou petite fenêtre), tout passe sur une colonne.
+    private static let twoColumns: CGFloat = 860
 
     var body: some View {
-        @Bindable var store = store
         let summary = store.conversation(conversationID)
         let model = store.details[conversationID]
         Group {
             if let summary {
-                ScrollViewReader { proxy in
-                    Page {
-                        ConversationHeader(summary: summary, model: model,
-                                           contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
-
-                        // Pour toi : ses questions et actions en attente, ses réponses choisies par Vigie à relire
-                        let waiting = store.toReview.filter { $0.conversationId == conversationID }
-                        if !waiting.isEmpty {
-                            CardSection {
-                                ForEach(waiting) { item in
-                                    ReviewRow(item: item, inConversation: true)
-                                }
-                            } header: {
-                                HStack(spacing: 6) {
-                                    Text("Pour toi")
-                                    CountBadge(count: waiting.count, urgent: waiting.contains { $0.needsDecision || $0.reviewKind == .waiting })
-                                }
-                            }
-                        }
-
-                        CardSection {
-                            NowSection(summary: summary, model: model)
-                        } header: {
-                            CardHeader(title: "Maintenant", date: model?.raw.now?.live?.ts ?? model?.raw.now?.ts)
-                        }
-
-                        // Ce qui a été accepté : automatiquement, par toi, refusé ou bloqué
-                        if let model, !model.accepted.isEmpty || !model.raw.activity.isEmpty {
-                            AcceptedSection(model: model)
-                        }
-
-                        if let plan = model?.raw.now?.plan, !plan.steps.isEmpty {
-                            CardSection {
-                                PlanView(plan: plan)
-                            } header: {
-                                CardHeader(title: plan.title ?? "Plan", date: plan.updatedAt)
-                            }
-                        }
-
-                        if let tasks = model?.raw.now?.tasks, !tasks.isEmpty {
-                            CardSection {
-                                TaskChecklist(tasks: tasks)
-                            } header: {
-                                CardHeader(title: "Ses tâches pour ta demande", date: model?.raw.now?.tasksTs)
-                            }
-                        }
-
-                        if let doc = model?.raw.trackingDoc {
-                            CardSection {
-                                RoadmapView(doc: doc, cwd: summary.cwd)
-                            } header: {
-                                CardHeader(title: "Feuille de route · \(doc.title ?? (doc.path as NSString).lastPathComponent)", date: doc.updatedAt)
-                            }
-                        }
-
-                        CardSection {
-                            if let model {
-                                ConversationTabContent(tab: store.conversationTab, model: model, cwd: summary.cwd)
-                                    .id("\(conversationID)-\(store.conversationTab.rawValue)")
-                            } else {
-                                HStack {
-                                    Spacer()
-                                    ProgressView().controlSize(.small)
-                                    Spacer()
-                                }
-                            }
-                        } header: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Détails")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Picker("Afficher", selection: $store.conversationTab) {
-                                    ForEach(ConversationTab.allCases) { tab in
-                                        Text(tab.title).tag(tab)
-                                    }
-                                }
-                                .navigationTabsStyle()
-                                .labelsHidden()
-                                .font(.body)
-                                HStack(spacing: 6) {
-                                    Text(store.conversationTab.subtitle)
-                                    Spacer(minLength: 8)
-                                    if let model {
-                                        Text(countText(store.conversationTab, model: model))
-                                            .monospacedDigit()
-                                    }
-                                }
-                                .font(.callout)
-                                .fontWeight(.regular)
-                                .foregroundStyle(.secondary)
-                            }
-                            .padding(.bottom, 2)
-                        }
-                        .id(Self.tabsAnchor)
-                    }
-                    .onChange(of: store.focusTabs && model != nil, initial: true) { _, ready in
-                        guard ready else { return }
-                        store.focusTabs = false
-                        withAnimation(.smooth) { proxy.scrollTo(Self.tabsAnchor, anchor: .top) }
-                    }
-                }
+                page(summary, model)
             } else if store.loadedOnce {
                 ContentUnavailableView {
                     Label("Conversation introuvable", systemImage: "questionmark.bubble")
@@ -130,35 +34,133 @@ struct ConversationView: View {
         .navigationTitle(summary?.shortTitle ?? "Conversation")
         .navigationSubtitle(summary?.title ?? "")
         .toolbar {
-            if let summary, summary.surface == "claude-app" || summary.surface == "codex-app" {
+            if let summary {
                 ToolbarItem {
-                    AsyncButton(summary.openLabel, systemImage: "arrow.up.forward.app") {
-                        await store.openConversationInVSCode(summary.id, cwd: summary.cwd)
+                    if summary.surface == "terminal", let cwd = summary.cwd {
+                        // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
+                        Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
+                    } else {
+                        AsyncButton(summary.openLabel, systemImage: "arrow.up.forward.app") {
+                            await store.openConversationInVSCode(summary.id, cwd: summary.cwd)
+                        }
+                        .help("Ouvrir cette conversation là où elle tourne")
                     }
-                    .help("La conversation est dans cette app")
-                }
-            } else if let cwd = summary?.cwd {
-                ToolbarItem {
-                    Button("Ouvrir le projet dans VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
-                        SystemActions.openInVSCode(path: cwd)
-                    }
-                    .help("Ouvrir le dossier du projet dans VS Code")
                 }
             }
+        }
+        .inspector(isPresented: Binding(get: { shownPanel != nil },
+                                        set: { if !$0 { store.conversationPanel = nil } })) {
+            if let panel = shownPanel, let summary {
+                ConversationInspector(panel: panel, summary: summary, model: model)
+                    .inspectorColumnWidth(min: 300, ideal: 380, max: 480)
+            }
+        }
+        .onKeyPress(.escape) {
+            guard shownPanel != nil else { return .ignored }
+            store.conversationPanel = nil
+            return .handled
         }
         .task(id: "\(conversationID)|\(store.windowVisible)") {
             await store.follow(conversation: conversationID)
         }
     }
 
-    private func countText(_ tab: ConversationTab, model: ConversationDetailModel) -> String {
-        switch tab {
-        case .fil: Fmt.count(model.milestones.count, "jalon")
-        case .agents: "\(Fmt.int(model.runningAgents.count)) en cours"
-        case .files: Fmt.count(model.files.count, "fichier")
-        case .tests: Fmt.count(model.tests.count, "vérification")
-        case .mcp: Fmt.count(model.raw.mcp.count, "MCP", "MCP")
+    /// Le détail ouvert, s'il appartient à cette conversation.
+    private var shownPanel: ConversationPanel? {
+        store.conversationPanelOwner == conversationID ? store.conversationPanel : nil
+    }
+
+    private func open(_ panel: ConversationPanel) {
+        if shownPanel == panel {
+            store.conversationPanel = nil
+        } else {
+            store.conversationPanel = panel
+            store.conversationPanelOwner = conversationID
         }
+    }
+
+    @ViewBuilder
+    private func page(_ summary: ConversationSummary, _ model: ConversationDetailModel?) -> some View {
+        let verdict = ConversationVerdict.make(summary: summary, detail: model?.raw, urgent: store.urgentItems(for: conversationID),
+                                               now: store.now) { store.account($0)?.displayName ?? "l'autre compte" }
+        Page {
+            VStack(alignment: .leading, spacing: 12) {
+                StateTile(summary: summary, model: model, verdict: verdict, open: open)
+                if let model {
+                    let wide = width >= Self.twoColumns
+                    let side = SideTiles.kinds(model, now: store.now)
+                    if wide && !side.isEmpty {
+                        HStack(alignment: .top, spacing: 12) {
+                            ExchangeTile(summary: summary, model: model, verdict: verdict, open: open)
+                                .frame(maxWidth: .infinity)
+                            SideTiles(model: model, open: open)
+                                .frame(width: min(320, width * 0.32))
+                        }
+                    } else {
+                        ExchangeTile(summary: summary, model: model, verdict: verdict, open: open)
+                        if !side.isEmpty {
+                            SideTiles(model: model, open: open)
+                        }
+                    }
+                    work(model)
+                    DetailsBar(summary: summary, model: model, open: open)
+                        .padding(.top, 2)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 30)
+                }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        }
+    }
+
+    /// Au travail : les workflows (une tuile mère avec ses agents) et les agents seuls. Absent si rien ne tourne.
+    @ViewBuilder
+    private func work(_ model: ConversationDetailModel) -> some View {
+        let now = store.now
+        let workflows = model.raw.workflows.filter { Self.visible($0, now: now) }
+        let shown = Set(workflows.map { $0.name ?? $0.id })
+        // agents seuls, et ceux dont le workflow n'a pas de tuile
+        let solo = (model.runningAgents + model.doneAgents.filter { Self.recent($0, now: now) })
+            .filter { $0.workflow == nil || !shown.contains($0.workflow ?? "") }
+        if !workflows.isEmpty || !solo.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Au travail")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(workflows) { workflow in
+                    WorkflowTile(workflow: workflow,
+                                 agents: model.runningAgents.filter { $0.workflow == (workflow.name ?? workflow.id) },
+                                 open: open)
+                }
+                if !solo.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], alignment: .leading, spacing: 10) {
+                        ForEach(solo.prefix(6)) { agent in
+                            AgentTile(agent: agent, open: open)
+                        }
+                    }
+                    if solo.count > 6 {
+                        Text("+\(solo.count - 6) agents").font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Un workflow : en cours, ou fini depuis moins de 30 min ; en échec ou arrêté, 2 h.
+    static func visible(_ workflow: Workflow, now: Date) -> Bool {
+        if workflow.status == "running" { return true }
+        guard let start = workflow.startedAt else { return false }
+        let end = start.addingTimeInterval((workflow.durationMs ?? 0) / 1000)
+        let keep: TimeInterval = workflow.status == "failed" || workflow.status == "killed" ? 7200 : 1800
+        return now.timeIntervalSince(end) < keep
+    }
+
+    /// Un agent seul fini : gardé 10 min (en échec, 2 h).
+    static func recent(_ agent: AgentRun, now: Date) -> Bool {
+        guard let last = agent.lastAt else { return false }
+        return now.timeIntervalSince(last) < (agent.status == "failed" ? 7200 : 600)
     }
 }
 
@@ -183,344 +185,5 @@ struct CardHeader: View {
                 .labelStyle(.titleAndIcon)
             }
         }
-    }
-}
-
-extension View {
-    /// Onglets : `.tabs` sur macOS 27 (rendu et lecture VoiceOver d'onglets), segmenté avant.
-    @ViewBuilder
-    func navigationTabsStyle() -> some View {
-        if #available(macOS 27, *) {
-            pickerStyle(.tabs)
-        } else {
-            pickerStyle(.segmented)
-        }
-    }
-}
-
-/// En-tête compact : titre et trois réglages (compte, auto-accept, connecteurs), puis une ligne d'infos.
-struct ConversationHeader: View {
-    @Environment(VigieStore.self) private var store
-    let summary: ConversationSummary
-    let model: ConversationDetailModel?
-    let contextTokens: Int?
-
-    @State private var pendingAccount: Account?
-    @State private var confirmSwitch = false
-    /// Menu dont l'action attend le moteur (« account », « auto », « mcp ») : une roue tourne sur son libellé.
-    @State private var busy: String?
-
-    private func run(_ menu: String, _ work: @escaping @MainActor () async -> Void) {
-        busy = menu
-        Task { @MainActor in
-            await work()
-            if busy == menu { busy = nil }
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 16) {
-                    title
-                    Spacer(minLength: 12)
-                    controls
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    title
-                    controls
-                }
-            }
-            metaLine
-            if let resume = summary.resume {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .foregroundStyle(Theme.alert)
-                    Text("Arrêtée pour passer sur \(store.account(resume.to)?.displayName ?? "l'autre compte") : écris-lui un message (« continue ») dans VS Code, elle repart dessus.")
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    AsyncButton(summary.openLabel) { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
-                    .glassButton(.primary)
-                }
-                .padding(10)
-                .background(Theme.alert.opacity(0.08), in: .rect(cornerRadius: 10))
-            }
-        }
-        .padding(.horizontal, 6)
-        .confirmationDialog(pendingAccount.map { "Passer sur \($0.displayName) ?" } ?? "",
-                            isPresented: $confirmSwitch, titleVisibility: .visible, presenting: pendingAccount) { account in
-            Button(summary.state == .working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
-                run("account") { await store.switchAccount(of: summary.id, to: account.id) }
-            }
-            if summary.state == .working {
-                Button("Tout de suite (l'interrompt)") {
-                    run("account") { await store.switchAccount(of: summary.id, to: account.id, now: true) }
-                }
-            }
-            Button("Annuler", role: .cancel) {}
-        } message: { account in
-            Text(switchMessage(account))
-        }
-    }
-
-    private var title: some View {
-        Text(summary.title ?? summary.shortTitle)
-            .font(.title2.bold())
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .help(titleHelp)
-    }
-
-    /// Dossier, branche et début : au survol du titre, pas sur la page.
-    private var titleHelp: String {
-        var parts: [String] = []
-        if let cwd = summary.cwd ?? summary.project { parts.append(cwd) }
-        if let branch = summary.branch { parts.append("branche \(branch)") }
-        if let started = summary.startedAt { parts.append("depuis \(Fmt.when(started, now: store.now))") }
-        return parts.joined(separator: " · ")
-    }
-
-    private var metaLine: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 5) {
-                StatusDot(status: summary.state)
-                Text(Theme.label(for: summary.state))
-                    .foregroundStyle(Theme.needsYou(summary.state) ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
-            }
-            runningAccountLabel
-            if let rate = summary.rate, (rate.tokensPerMin ?? 0) > 0 {
-                RateBadge(rate: rate, alert: summary.alert?.isRunaway == true, compact: true, live: summary.state == .working)
-            }
-            // MCP : seulement s'il y en a à connecter (le détail est sur la page MCP)
-            if let count = mcpCount, count > 0, mcpIssues > 0 {
-                Button {
-                    store.route = .mcp
-                } label: {
-                    Label("\(Fmt.count(mcpIssues, "MCP", "MCP")) à connecter", systemImage: Icon.mcp)
-                        .foregroundStyle(Theme.warn)
-                }
-                .buttonStyle(.borderless)
-                .help("Les MCP de ton Mac et du projet, réglables sur la page MCP")
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-    }
-
-    /// MCP branchés et actifs pour cette conversation (hors connecteurs de compte).
-    /// MCP à connecter ou en échec pour le dossier et le compte de la conversation.
-    private var mcpIssues: Int {
-        model?.raw.mcp.count { $0.mcpStatus == .needsAuth || $0.mcpStatus == .failed } ?? 0
-    }
-
-
-    private var mcpCount: Int? {
-        guard let model else { return nil }
-        return model.raw.mcp.count { ($0.enabled ?? true) && $0.mcpScope != .connector }
-    }
-
-    private var controls: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                if summary.isCodex {
-                    Label("Codex", systemImage: "chevron.left.forwardslash.chevron.right")
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.quinary, in: .capsule)
-                        .help("Conversation Codex (OpenAI), sur ton compte ChatGPT")
-                    autoAcceptMenu
-                } else {
-                    accountMenu
-                    autoAcceptMenu
-                    connectorsMenu
-                }
-            }
-        }
-        .tint(.primary) // réglages : neutres, le bleu reste aux actions
-        .fixedSize()
-    }
-
-    // MARK: Compte
-
-    private var currentAccount: Account? { store.account(summary.accountId) }
-
-    private var accountMenu: some View {
-        Menu {
-            ForEach(store.accounts) { account in
-                Button {
-                    guard account.id != currentAccount?.id else { return }
-                    pendingAccount = account
-                    confirmSwitch = true
-                } label: {
-                    if account.id == currentAccount?.id {
-                        Label(account.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(account.isConnected ? account.displayName : "\(account.displayName) (pas connecté)")
-                    }
-                }
-                .disabled(!account.isConnected && account.id != currentAccount?.id)
-            }
-        } label: {
-            BusyLabel(busy: busy == "account") { Label(currentAccount?.displayName ?? "Compte", systemImage: "person.crop.circle") }
-        }
-        .menuStyle(.button)
-        .glassButton()
-        .help("Compte de cette conversation")
-    }
-
-    private func switchMessage(_ account: Account) -> String {
-        var text = summary.state == .working
-            ? "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
-            : "Elle reprend sur \(account.displayName) avec tout son historique."
-        if let contextTokens, contextTokens > 0 {
-            text += " ≈ \(Fmt.tokens(contextTokens)) tokens relus sur le nouveau compte."
-        }
-        return text
-    }
-
-    private func accountName(_ id: String?) -> String {
-        guard let id else { return "?" }
-        return store.account(id)?.displayName ?? id
-    }
-
-    /// Le compte du processus qui tourne vraiment, la bascule en attente, et l'historique en infobulle.
-    @ViewBuilder
-    private var runningAccountLabel: some View {
-        if let info = summary.account, let running = info.running {
-            let pendingTo = info.pending?.to ?? summary.pendingAccountId.flatMap { $0 != running ? $0 : nil }
-            HStack(spacing: 6) {
-                Label("Tourne sur \(accountName(running))", systemImage: "person.crop.circle")
-                    .foregroundStyle(pendingTo == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(Theme.warn))
-                if let pendingTo {
-                    Text("→ \(accountName(pendingTo)) à la fin du tour")
-                    AsyncButton("Tout de suite") { await store.switchAccount(of: summary.id, to: pendingTo, now: true) }
-                    .buttonStyle(.borderless)
-                    .help("Interrompt son travail et relance la conversation sur \(accountName(pendingTo)). Tu écris « continue » pour la reprendre.")
-                }
-            }
-            .help(launchHistoryText(info))
-        }
-    }
-
-    private func launchHistoryText(_ info: ConversationAccount) -> String {
-        let lines = (info.history ?? []).reversed().prefix(6).map { launch in
-            let when = launch.ts.map { Fmt.when($0, now: store.now) } ?? "?"
-            return "\(when) : lancée sur \(accountName(launch.accountId))"
-        }
-        return lines.isEmpty ? "Compte utilisé en ce moment" : "Lancements :\n" + lines.joined(separator: "\n")
-    }
-
-    // MARK: Auto-accept
-
-    private var autoAcceptMenu: some View {
-        Menu {
-            Button {
-                run("auto") { await store.setAutoAccept(nil, for: summary.id) }
-            } label: {
-                choiceLabel("Comme le réglage général (\(store.autoAccept ? "oui" : "non"))", selected: summary.autoAcceptOverride == nil)
-            }
-            Button {
-                run("auto") { await store.setAutoAccept(true, for: summary.id) }
-            } label: {
-                choiceLabel("Toujours", selected: summary.autoAcceptOverride == true)
-            }
-            Button {
-                run("auto") { await store.setAutoAccept(false, for: summary.id) }
-            } label: {
-                choiceLabel("Jamais", selected: summary.autoAcceptOverride == false)
-            }
-        } label: {
-            BusyLabel(busy: busy == "auto") {
-                Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
-            }
-        }
-        .menuStyle(.button)
-        .glassButton()
-        .help("Auto-accept pour cette conversation")
-    }
-
-    private var autoAcceptText: String {
-        switch summary.autoAcceptOverride {
-        case true?: "Auto-accept : toujours"
-        case false?: "Auto-accept : jamais"
-        case nil: "Auto-accept : \((summary.autoAccept ?? store.autoAccept) ? "oui" : "non")"
-        }
-    }
-
-    // MARK: Connecteurs
-
-    private var connectorsMenu: some View {
-        let on = summary.connectors == "on"
-        return Menu {
-            Button {
-                run("mcp") { await store.setConnectors(false, for: summary.id) }
-            } label: {
-                choiceLabel("Coupés (recommandé)", selected: !on)
-            }
-            Button {
-                run("mcp") { await store.setConnectors(true, for: summary.id) }
-            } label: {
-                choiceLabel("Activés", selected: on)
-            }
-        } label: {
-            BusyLabel(busy: busy == "mcp") { Label(on ? "MCP du compte : activés" : "MCP du compte : coupés", systemImage: Icon.mcp) }
-        }
-        .menuStyle(.button)
-        .glassButton()
-        .help("Les MCP de ton compte claude.ai (Gmail, Drive…) dans cette conversation. Les MCP de ton Mac et du projet restent actifs.")
-    }
-
-    @ViewBuilder
-    private func choiceLabel(_ text: String, selected: Bool) -> some View {
-        if selected {
-            Label(text, systemImage: "checkmark")
-        } else {
-            Text(text)
-        }
-    }
-}
-
-/// Le fil de tout ce qui a été accepté dans la conversation, plus récent d'abord : la décision de chaque ligne
-/// (Vigie, toi, refusée, bloquée) ; les actions sensibles ressortent.
-struct AcceptedSection: View {
-    let model: ConversationDetailModel
-    @State private var showAll = false
-    private static let shown = 12
-
-    var body: some View {
-        let feed = model.feed
-        let rows = showAll ? feed : Array(feed.prefix(Self.shown))
-        CardSection {
-            ForEach(rows) { row in
-                AcceptedRow(item: row.value)
-            }
-            if !showAll && feed.count > Self.shown {
-                ShowAllButton(count: feed.count) { showAll = true }
-            }
-        } header: {
-            HStack(spacing: 6) {
-                Text("Ses actions et leur résultat")
-                Text(summary(feed))
-                    .font(.callout)
-                    .fontWeight(.regular)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// « 128 automatiques · 3 par toi · 1 sensible »
-    private func summary(_ feed: [Row<AcceptedItem>]) -> String {
-        let items = feed.map(\.value)
-        var parts: [String] = []
-        let auto = items.count { $0.decisionKind == .auto }
-        let you = items.count { $0.decisionKind == .you }
-        let blocked = items.count { $0.decisionKind == .blocked || $0.decisionKind == .waiting }
-        let denied = items.count { $0.decisionKind == .denied }
-        if auto > 0 { parts.append(Fmt.count(auto, "automatique", "automatiques")) }
-        if you > 0 { parts.append("\(Fmt.int(you)) par toi") }
-        if blocked > 0 { parts.append(Fmt.count(blocked, "action sensible", "actions sensibles")) }
-        if denied > 0 { parts.append(Fmt.count(denied, "refusée", "refusées")) }
-        return parts.joined(separator: " · ")
     }
 }

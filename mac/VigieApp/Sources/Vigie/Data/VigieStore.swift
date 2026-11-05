@@ -93,6 +93,10 @@ final class VigieStore {
     var agentRuns: RecipeRunList?
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
+    /// Le détail ouvert à droite de la page d'une conversation (nil : fermé), et la conversation à laquelle il
+    /// appartient (une autre page ne le montre pas).
+    var conversationPanel: ConversationPanel?
+    var conversationPanelOwner: String?
     /// Ce que les conversations ont laissé tourner (page En fond, GET /api/v2/processes).
     var background: BackgroundList?
     /// Le résumé du dernier relevé, venu avec la vue d'ensemble (barre latérale, barre des menus).

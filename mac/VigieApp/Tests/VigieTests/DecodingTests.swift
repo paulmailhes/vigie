@@ -433,3 +433,48 @@ struct MCPCommandTests {
         #expect(!draft.containsMaskedValue)
     }
 }
+
+/// La tuile d'État : le premier verdict qui s'applique.
+struct VerdictTests {
+    private func summary(_ json: String) throws -> ConversationSummary {
+        try JSONDecoder().decode(ConversationSummary.self, from: Data(json.utf8))
+    }
+    private func detail(_ json: String) throws -> ConversationDetail {
+        try JSONDecoder().decode(ConversationDetail.self, from: Data(json.utf8))
+    }
+    private let now = Date(timeIntervalSince1970: 1_793_900_000)
+    private func make(_ s: ConversationSummary, _ d: ConversationDetail?) -> ConversationVerdict {
+        ConversationVerdict.make(summary: s, detail: d, urgent: [], now: now) { $0 ?? "?" }
+    }
+
+    @Test func workingPausedFinishedStopped() throws {
+        let iso = { (offset: TimeInterval) in ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_793_900_000 + offset)) }
+        // travaille, activité récente
+        var v = make(try summary(#"{"id":"c","status":"busy","lastActivity":"\#(iso(-30))","headline":"Étape 2"}"#), nil)
+        #expect(v.title == "Travaille" && v.tone == .live && v.line == "Étape 2")
+        // marquée en cours, muette depuis 15 min, rien ne tourne : sans nouvelles
+        v = make(try summary(#"{"id":"c","status":"busy","lastActivity":"\#(iso(-900))"}"#), nil)
+        #expect(v.title == "Sans nouvelles" && v.tone == .warn)
+        // au repos mais un agent tourne : en pause
+        v = make(try summary(#"{"id":"c","status":"idle","agentsRunning":1}"#), nil)
+        #expect(v.title == "En pause" && v.tone == .live)
+        // au repos, dernier compte rendu : finie, avec sa phrase utile
+        let finished = try detail(#"{"messages":[{"ts":"\#(iso(-180))","kind":"report","text":"x","brief":"Les 29 étapes sont faites."}],"ended":{"kind":"end","ts":"\#(iso(-180))"}}"#)
+        v = make(try summary(#"{"id":"c","status":"idle"}"#), finished)
+        #expect(v.title == "Finie" && v.line == "Les 29 étapes sont faites." && v.tone == .calm)
+        // arrêtée par une limite : rouge, pas finie
+        let limited = try detail(#"{"ended":{"kind":"limit","ts":"\#(iso(-60))"}}"#)
+        v = make(try summary(#"{"id":"c","status":"idle"}"#), limited)
+        #expect(v.title == "Arrêtée : limite atteinte" && v.tone == .alert && v.line == "Pas finie" && v.openButton)
+        // t'attend : la question de son dernier message
+        let asking = try detail(#"{"messages":[{"ts":"\#(iso(-60))","kind":"report","text":"x","ask":"Je publie ?"}]}"#)
+        v = make(try summary(#"{"id":"c","status":"waiting"}"#), asking)
+        #expect(v.title == "T'attend" && v.line == "« Je publie ? »" && v.tone == .alert)
+    }
+
+    @Test func markdownBlocks() {
+        let blocks = MarkdownBlocks.blocks("## Fait\n- un\n  - deux\n1. trois\n\nUn paragraphe\nsur deux lignes.\n```\ncode\n```\n> note")
+        #expect(blocks == [.heading("Fait", level: 2), .bullet("un", depth: 0), .bullet("deux", depth: 1), .numbered("trois", number: "1."),
+                           .paragraph("Un paragraphe\nsur deux lignes."), .code("code"), .quote("note")])
+    }
+}

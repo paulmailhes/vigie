@@ -744,3 +744,58 @@ test('conversations jetables (dossiers temporaires, brouillons) : hors de la vue
   fs.rmSync(path.dirname(px), { recursive: true });
   fs.rmSync(path.dirname(py), { recursive: true });
 });
+
+test('détail : messages depuis la vraie demande, fin du dernier tour, agents lisibles, temps restant, échecs du journal', async () => {
+  const sid = 'f0f0f0f0-0000-4000-8000-000000000006';
+  const F = mk(sid);
+  const dir = path.join(PROJECTS, '-Users-alex-Code-horizon');
+  const p = path.join(dir, `${sid}.jsonl`);
+  const wf = path.join(dir, sid, 'subagents', 'workflows', 'wf_ccc');
+  write(p, [F.human('Applique la charte 1.4 à tous les écrans, un agent par écran', T(0)),
+    F.asst([{ type: 'text', text: 'Je lance un agent par écran.' }], T(1), { stop: 'tool_use' }),
+    F.call('Workflow', { script: 'x' }, { ts: T(1), tur: { status: 'async_launched', taskId: 'task9', workflowName: 'charte', runId: 'wf_ccc' } }),
+    F.say('En bref : 3 écrans faits, le 4e tourne.\n\nTu veux que je publie ensuite ?', T(40))]);
+  const agent = (id, t0, t1, desc) => {
+    const A = mk(sid, { agentId: id });
+    write(path.join(wf, `agent-${id}.jsonl`), [A.user(`Pose la charte sur l'écran ${desc}`, T(t0)), A.call('Read', { file_path: '/x' }, { ts: T(t1) })]);
+    fs.writeFileSync(path.join(wf, `agent-${id}.meta.json`), JSON.stringify({ agentType: 'workflow-subagent', description: `faire:${desc}`, workflowPhase: 'Faire' }));
+  };
+  agent('ag1', 2, 12, 'E1'); agent('ag2', 2, 14, 'E2'); agent('ag3', 2, 16, 'E3'); agent('ag4', 2, 6, 'E4'); agent('ag5', 30, 41, 'E5');
+  write(path.join(wf, 'journal.jsonl'), [{ type: 'launched' },
+    ...['ag1', 'ag2', 'ag3', 'ag4', 'ag5'].map((a, i) => ({ type: 'started', key: `v2:${i}`, agentId: a, label: `faire:E${i + 1}`, phase: 'Faire' })),
+    { type: 'result', key: 'v2:0', agentId: 'ag1', result: 'En bref : écran 1 aux couleurs de la charte.' },
+    { type: 'result', key: 'v2:1', agentId: 'ag2', result: { verdict: 'Écran 2 conforme, contraste 4,8.' } },
+    { type: 'result', key: 'v2:2', agentId: 'ag3', result: 'Écran 3 fait.' },
+    { type: 'failed', key: 'v2:3', agentId: 'ag4' }]);
+  const old = new Date(BASE + 20 * 60_000);
+  for (const a of ['ag1', 'ag2', 'ag3', 'ag4']) fs.utimesSync(path.join(wf, `agent-${a}.jsonl`), old, old);
+  const ix = newIndexer();
+  await ix.refresh();
+  const conv = createConversations(ix);
+  let d = conv.detail(sid);
+  assert.deepEqual(d.messages.map((m) => m.kind), ['live', 'report']);
+  assert.equal(d.messages[1].brief, '3 écrans faits, le 4e tourne.');
+  assert.equal(d.messages[1].ask, 'Tu veux que je publie ensuite ?');
+  assert.equal(d.ended.kind, 'end');
+  assert.equal(d.current.text, 'Applique la charte 1.4 à tous les écrans, un agent par écran');
+  const all = [...d.agents.running, ...d.agents.done];
+  const byId = Object.fromEntries(all.map((a) => [a.id, a]));
+  assert.equal(byId.ag1.prompt, 'Pose la charte sur l\'écran E1');
+  assert.equal(byId.ag1.result, 'écran 1 aux couleurs de la charte.');
+  assert.equal(byId.ag2.result, 'Écran 2 conforme, contraste 4,8.', 'un résultat en objet : son verdict');
+  assert.equal(byId.ag4.status, 'failed', 'une ligne « failed » du journal');
+  assert.equal(byId.ag5.status, 'running');
+  assert.equal(byId.ag5.estimate.basis, 3, '3 agents finis de la même phase (l\'échec ne compte pas)');
+  assert.equal(byId.ag5.estimate.medianMs, 12 * 60_000);
+  assert.equal(byId.ag5.estimate.endsAt, new Date(BASE + 30 * 60_000 + 12 * 60_000 * 1.15).toISOString());
+  const w = d.workflows.find((x) => x.id === 'wf_ccc');
+  assert.deepEqual(w.counts, { running: 1, done: 3, failed: 1 });
+  assert.deepEqual(w.phaseProgress, [{ title: 'Faire', running: 1, done: 3, failed: 1 }]);
+  // nouvelle demande, Claude n'a encore rien écrit : ni l'ancien compte rendu, ni ses anciens messages
+  write(p, [F.human('Maintenant la page de contact, même charte', T(50))], true);
+  await ix.refresh();
+  d = conv.detail(sid);
+  assert.equal(d.now.text, null);
+  assert.deepEqual(d.messages, []);
+  fs.rmSync(dir, { recursive: true });
+});

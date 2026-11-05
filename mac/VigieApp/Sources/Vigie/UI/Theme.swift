@@ -7,6 +7,7 @@ import SwiftUI
 /// - orange (`warn`) : à surveiller, sans urgence (s'emballe, limite proche, MCP à connecter) ;
 /// - rouge (`alert`) : t'attend ou bloqué, limite atteinte ;
 /// - bleu (`action`) : ce sur quoi on clique (boutons principaux, liens) ;
+/// - violet (`you`) : ce que tu as écrit, dans l'Échange d'une conversation ;
 /// - le reste en neutres ; atténué (`dim`) ce qui est fermé, pas connecté ou coupé.
 /// Les icônes sont des SF Symbols monochromes, sans tuile colorée.
 enum Theme {
@@ -16,6 +17,8 @@ enum Theme {
     static let warn = Color.orange
     static let alert = Color.red
     static let action = Color.blue
+    /// Ce que tu as écrit (l'Échange d'une conversation) : réservé, jamais un état.
+    static let you = Color.purple
     /// Opacité de ce qui est fermé, pas connecté ou désactivé.
     static let dim: Double = 0.45
 

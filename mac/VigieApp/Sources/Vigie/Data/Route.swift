@@ -14,6 +14,25 @@ enum Route: Hashable, Sendable {
     case background
 }
 
+/// Le détail ouvert à droite de la page d'une conversation (inspecteur).
+enum ConversationPanel: Hashable, Sendable {
+    /// Ta demande entière.
+    case request
+    /// Un message de Claude en entier (indice dans `messages`).
+    case message(Int)
+    /// Tous les échanges : une paire Toi / Claude par demande.
+    case thread
+    case agent(String)
+    case workflow(String)
+    case plan
+    case tests
+    case files
+    case journal
+    case mcp
+    case background
+    case answers
+}
+
 /// Les onglets du détail d'une conversation.
 enum ConversationTab: String, CaseIterable, Identifiable, Sendable {
     case fil, files, agents, tests, mcp

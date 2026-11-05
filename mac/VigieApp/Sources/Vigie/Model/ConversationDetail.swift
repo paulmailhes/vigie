@@ -21,6 +21,14 @@ struct ConversationDetail: Decodable, Equatable, Sendable {
     @Lossy var milestones: [Milestone]
     /// Le document d'état qu'elle tient à jour (ETAT.md…), découpé en sections : sa feuille de route.
     @Tolerant var trackingDoc: TrackingDoc?
+    /// Les derniers messages de Claude depuis ta vraie demande (le plus récent en dernier).
+    @Lossy var messages: [ClaudeMessage]
+    /// Comment le dernier tour s'est terminé.
+    @Tolerant var ended: EndedEvent?
+    /// Commandes lancées en fond qui tournent encore (d'après le transcript).
+    @Lossy var background: [BackgroundCommand]
+    /// Ce qu'elle a laissé tourner (outil En fond).
+    @Lossy var processes: [BackgroundGroup]
     /// Facultatif : tokens relus si la conversation change de compte.
     var contextTokens: Int?
 }
@@ -40,6 +48,10 @@ struct NowState: Decodable, Equatable, Sendable {
 /// Dernière demande de l'utilisateur, depuis quand, et ce qui en est sorti.
 struct CurrentRequest: Decodable, Equatable, Sendable {
     var prompt: String?
+    /// Ta demande entière (2 000 caractères au plus).
+    var text: String?
+    /// Ta demande sans ses mots de remplissage (« ok, donc »), 110 caractères.
+    var brief: String?
     @FlexDate var start: Date?
     var workflows: Int?
     var agents: Int?
@@ -216,6 +228,14 @@ struct AgentsState: Decodable, Equatable, Sendable {
 struct AgentRun: Decodable, Equatable, Sendable, Identifiable {
     var id: String
     var title: String?
+    /// Nom lisible : l'étape du plan qu'il fait (« L2.24 Icônes de fin de partie »), sinon sa description.
+    var name: String?
+    var step: String?
+    /// Ce qu'on lui a demandé (300 caractères).
+    var prompt: String?
+    /// Ce qu'il a rendu, en une phrase.
+    var result: String?
+    @Tolerant var estimate: AgentEstimate?
     var type: String?
     var workflow: String?
     var phase: String?
@@ -239,6 +259,61 @@ struct Workflow: Decodable, Equatable, Sendable, Identifiable {
     var agents: Int?
     var tokens: Int?
     @Lossy var phases: [String]
+    @Tolerant var counts: RunCounts?
+    @Lossy var phaseProgress: [PhaseProgress]
+    var lastLog: String?
+    /// La 1re phrase de son résultat.
+    var result: String?
+}
+
+struct RunCounts: Decodable, Equatable, Sendable {
+    var running: Int?
+    var done: Int?
+    var failed: Int?
+}
+
+struct PhaseProgress: Decodable, Equatable, Sendable {
+    var title: String
+    var running: Int?
+    var done: Int?
+    var failed: Int?
+}
+
+/// Temps restant d'un agent de workflow : médiane des agents finis de sa phase (3 au moins), × 1,15.
+struct AgentEstimate: Decodable, Equatable, Sendable {
+    var medianMs: Double?
+    var basis: Int?
+    @FlexDate var endsAt: Date?
+    /// Plus long que les autres (au-delà de 1,8 fois la médiane).
+    var longer: Bool?
+}
+
+/// Un message de Claude : compte rendu (fin de tour) ou message en plein travail.
+struct ClaudeMessage: Decodable, Equatable, Sendable {
+    @FlexDate var ts: Date?
+    /// report | live
+    var kind: String?
+    var text: String?
+    var brief: String?
+    /// Il finit par cette question.
+    var ask: String?
+    /// Ce qu'il te laisse (« À toi : … »).
+    var toYou: String?
+
+    var isReport: Bool { kind == "report" }
+}
+
+struct EndedEvent: Decodable, Equatable, Sendable {
+    /// end | limit | error | interrupted
+    var kind: String?
+    @FlexDate var ts: Date?
+}
+
+struct BackgroundCommand: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var description: String?
+    var command: String?
+    @FlexDate var startedAt: Date?
 }
 
 struct Artifact: Decodable, Equatable, Sendable {

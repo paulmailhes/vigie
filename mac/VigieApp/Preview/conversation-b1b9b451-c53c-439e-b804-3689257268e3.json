@@ -468,7 +468,17 @@
         "files": 3,
         "tests": 2,
         "status": "running",
-        "lastAction": "Lance vitest sur IconeFin.test.tsx"
+        "lastAction": "Lance vitest sur IconeFin.test.tsx",
+        "name": "L2.24 Icônes de fin de partie",
+        "step": "L2.24",
+        "prompt": "Poser les 4 icônes de fin de partie selon la charte 1.4, avec leurs tests visuels.",
+        "result": null,
+        "estimate": {
+          "medianMs": 2760000,
+          "basis": 5,
+          "endsAt": "2026-10-19T23:54:44.000Z",
+          "longer": false
+        }
       },
       {
         "id": "ag-23r",
@@ -483,7 +493,12 @@
         "files": 0,
         "tests": 5,
         "status": "running",
-        "lastAction": "Relit Jauge.tsx"
+        "lastAction": "Relit Jauge.tsx",
+        "name": "L2.23 Jauge de la partie",
+        "step": "L2.23",
+        "prompt": "Relire la jauge de la partie et vérifier le contraste.",
+        "result": null,
+        "estimate": null
       }
     ],
     "done": [
@@ -607,7 +622,28 @@
       "phases": [
         "Faire",
         "Réfuter"
-      ]
+      ],
+      "counts": {
+        "running": 2,
+        "done": 6,
+        "failed": 1
+      },
+      "phaseProgress": [
+        {
+          "title": "Faire",
+          "running": 1,
+          "done": 5,
+          "failed": 0
+        },
+        {
+          "title": "Réfuter",
+          "running": 1,
+          "done": 1,
+          "failed": 1
+        }
+      ],
+      "lastLog": "L2.24 lancé",
+      "result": null
     }
   ],
   "artifacts": [
@@ -937,5 +973,48 @@
       "ts": "2026-10-19T21:41:00.000Z",
       "text": "You've hit your session limit · resets 3:40am"
     }
-  ]
+  ],
+  "current": {
+    "prompt": "Applique la charte 1.4 à tous les écrans, un agent par écran, puis une relecture de chaque écran par un autre agent",
+    "text": "Ok, donc là on passe à la charte 1.4.\n\nApplique la charte 1.4 à tous les écrans, un agent par écran, puis une relecture de chaque écran par un autre agent. Garde le grain de nuit comme on l'a validé, et ne publie rien avant que je relise la planche.",
+    "brief": "Applique la charte 1.4 à tous les écrans, un agent par écran, puis une relecture de chaque écran par un autre agent",
+    "start": "2026-10-19T15:18:00.000Z",
+    "workflows": 1,
+    "agents": 9,
+    "artifacts": 0,
+    "files": 38,
+    "commits": 4,
+    "pushes": 2,
+    "deploys": 0,
+    "testsOk": 412,
+    "testsFailed": 1,
+    "relaunch": {
+      "prompt": "continue",
+      "ts": "2026-10-19T23:02:00.000Z"
+    }
+  },
+  "messages": [
+    {
+      "ts": "2026-10-19T23:18:00.000Z",
+      "kind": "report",
+      "text": "En bref : L2.19 à L2.23 sont faites et vérifiées (245 tests).\n\n## Fait\n- L2.19 Menu principal\n- L2.20 Écran de chargement\n- L2.21 Écran d'accueil (contraste corrigé)\n- L2.22 Score\n- L2.23 Jauge de la partie\n\n## Ensuite\nL2.24, les icônes de fin de partie, est en cours.\n\nÀ toi : relire la planche avant publication.",
+      "brief": "L2.19 à L2.23 sont faites et vérifiées (245 tests).",
+      "ask": null,
+      "toYou": "relire la planche avant publication."
+    },
+    {
+      "ts": "2026-10-19T23:19:20.000Z",
+      "kind": "live",
+      "text": "Je relance vitest sur IconeFin.test.tsx : 2 captures à refaire.",
+      "brief": "Je relance vitest sur IconeFin.test.tsx : 2 captures à refaire.",
+      "ask": null,
+      "toYou": null
+    }
+  ],
+  "ended": {
+    "kind": "end",
+    "ts": "2026-10-19T23:18:00.000Z"
+  },
+  "background": [],
+  "processes": []
 }

@@ -1148,6 +1148,11 @@ function conversationV2(id) {
     current: d.current ?? null,
     milestones: d.milestones || [],
     trackingDoc: d.trackingDoc ?? null,
+    messages: d.messages || [],
+    ended: d.ended ?? null,
+    background: d.background || [],
+    // ce qu'elle a laissé tourner (outil En fond), d'après le dernier relevé
+    processes: processes.view().groups.filter((g) => g.conversationId === id),
   };
 }
 
