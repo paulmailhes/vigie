@@ -38,6 +38,8 @@ struct VigieApp: App {
                     .keyboardShortcut("4", modifiers: .command)
                 Button("Historique") { store.route = .history }
                     .keyboardShortcut("5", modifiers: .command)
+                Button("En fond") { store.route = .background }
+                    .keyboardShortcut("6", modifiers: .command)
                 Divider()
                 Button("Actualiser") { Task { await store.refreshOverview() } }
                     .keyboardShortcut("r", modifiers: .command)

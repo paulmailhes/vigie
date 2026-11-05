@@ -126,6 +126,25 @@ struct MenuBarPanel: View {
                 .accessibilityLabel("\(conversation.shortTitle), \(Theme.label(for: conversation.state))")
             }
 
+            if let background = store.backgroundSummary, let count = background.forgotten, count > 0 {
+                Button {
+                    open(.background)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "memorychip")
+                            .foregroundStyle(Theme.warn)
+                        Text("En fond : \(Fmt.count(count, "oublié")) · \(Fmt.memory(mb: background.forgottenMb))")
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Leurs conversations sont fermées : tu peux les arrêter dans En fond")
+            }
+
             Divider()
 
             HStack {

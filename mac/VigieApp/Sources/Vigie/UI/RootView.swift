@@ -89,6 +89,8 @@ struct DetailView: View {
             AgentsView()
         case .history:
             HistoryView()
+        case .background:
+            BackgroundView()
         }
     }
 }

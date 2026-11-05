@@ -22,6 +22,7 @@ import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { createAgents, folderConversations } from './lib/agents.mjs';
 import { createRuns } from './lib/agent-runs.mjs';
+import { createProcesses } from './lib/processes.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
 
@@ -92,6 +93,20 @@ function changesSince(url) {
 }
 // Passerelle MCP : une autorisation par service pour tous les comptes (lib/gateway.mjs). Port lu au moment voulu
 // (les tests lancent le moteur sur un port libre).
+// Ce que les conversations laissent tourner (outil « En fond », lib/processes.mjs). Jamais pendant les essais.
+const PROCESSES = !process.env.VIGIE_NO_PROCESSES;
+const processes = createProcesses({
+  dataDir: DATA,
+  live: () => indexer.live,
+  conversation: (sid) => {
+    const s = indexer.sessions.get(sid);
+    if (!s) return null;
+    return { title: s.title || indexer.live.get(sid)?.name || null, project: s.cwd ? path.basename(s.cwd) : null, cwd: s.cwd || null, lastTs: s.lastTs || null };
+  },
+  autoStop: () => PROCESSES && readState().stopForgotten,
+  log: (m) => console.error(`[vigie] ${m}`),
+  onChange: () => stateChanged(),
+});
 const gateway = createGateway({ dataDir: DATA, port: () => server.address()?.port || PORT, log: (m) => console.error(`[vigie] ${m}`), onChange: stateChanged });
 const HOME = accounts.paths.home;
 // Coffre des connexions : copie chiffrée de la connexion de chaque compte, remise si une app la perd (lib/vault.mjs).
@@ -534,6 +549,7 @@ function settingsView(state) {
     questionWaitMin: Math.round(state.questionWaitMin),
     connectorsDefault: state.connectorsDefault,
     autoUpdate: state.autoUpdate,
+    stopForgotten: state.stopForgotten,
     guard: {
       enabled: state.guard.enabled,
       waitMin: Math.round(state.guard.waitMin),
@@ -817,6 +833,7 @@ function decorate(sum, ctx, needs, accepted) {
     ...usageLive(ctx, sum, accountId),
     lastActivity: sum.lastActivity,
     needsYou: needs.get(sum.id) || 0,
+    background: processes.byConversation(sum.id),
     headline: sum.headline,
     contextTokens: sum.contextTokens ?? null,
     pendingAccountId: ctx.model.pendingSwitches[sum.id]?.to || null,
@@ -835,6 +852,14 @@ function decorate(sum, ctx, needs, accepted) {
   if ('branch' in sum) out.branch = sum.branch;
   if ('startedAt' in sum) out.startedAt = sum.startedAt;
   return out;
+}
+
+// Ce qui reste en fond, pour la barre latérale, la barre des menus et les notifications (dernier relevé, sans en refaire).
+function backgroundSummary() {
+  const v = processes.view();
+  return { scannedAt: v.scannedAt, forgotten: v.forgotten.groups, forgottenProcesses: v.forgotten.processes, forgottenMb: v.forgotten.memoryMb, groups: v.total.groups,
+    forgottenLabels: v.groups.filter((g) => g.state === 'forgotten').slice(0, 3).map((g) => `${g.label}${g.project ? ` (${g.project})` : ''}`),
+    autoStopped: v.autoStopped.slice(0, 5) };
 }
 
 function overviewV2() {
@@ -868,6 +893,7 @@ function overviewV2() {
     accounts: withCodexAccount(ctx.accSums),
     conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
+    background: backgroundSummary(),
     engine: { indexing: !indexer.progress.done, wrapperActive: ctx.wrapperActive, notices: [...healthNotices, ...connectionNotices(ctx.accSums)] },
     update: updater.status(),
   };
@@ -1152,6 +1178,7 @@ function postSettings(body) {
     s.connectorsDefault = body.connectorsDefault;
   }
   if ('autoUpdate' in body) { if (typeof body.autoUpdate !== 'boolean') return bad('Mises à jour automatiques : oui ou non.'); s.autoUpdate = body.autoUpdate; }
+  if ('stopForgotten' in body) { if (typeof body.stopForgotten !== 'boolean') return bad('Arrêt des Chrome oubliés : oui ou non.'); s.stopForgotten = body.stopForgotten; }
   if ('tools' in body) {
     const t = body.tools;
     const keys = ['claudeVSCode', 'claudeApp', 'codexVSCode', 'codexApp'];
@@ -1760,6 +1787,19 @@ function readBody(req) {
   });
 }
 
+// GET /api/v2/processes : ce que les conversations ont laissé tourner (relevé frais, vraie mémoire).
+async function processesView() {
+  if (!PROCESSES) return [200, processes.view()];
+  try { return [200, processes.view(await processes.snapshot({ fresh: true, withFootprint: true }))]; }
+  catch (e) { return bad(e.message || 'Relevé des processus impossible.', 500); }
+}
+// POST /api/v2/processes/stop { ids, confirm? } → { ok, results: [{ id, ok, gone?, needsConfirm?, error? }] }
+async function postProcessesStop(b) {
+  if (!PROCESSES) return bad('Relevé des processus coupé.', 409);
+  const r = await processes.stop(b?.ids, { confirm: b?.confirm === true });
+  return r.status ? bad(r.error, r.status) : [200, r];
+}
+
 const S = '([^/]{1,120})';
 const ROUTES = [
   // v2 : l'app Mac
@@ -1802,6 +1842,8 @@ const ROUTES = [
   ['POST', /^\/api\/v2\/approvals$/, (_, b) => postApprovals(b)],
   ['POST', /^\/api\/v2\/review\/([^/]{1,400})\/dismiss$/, ([id]) => postDismiss(id)],
   ['POST', /^\/api\/v2\/open$/, (_, b) => postOpen(b)],
+  ['GET', /^\/api\/v2\/processes$/, () => processesView()],
+  ['POST', /^\/api\/v2\/processes\/stop$/, (_, b) => postProcessesStop(b)],
 ];
 const STATIC = { '/': 'index.html', '/index.html': 'index.html' };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -1956,6 +1998,7 @@ server.listen(PORT, HOST, () => {
   setInterval(vaultTick, VAULT_EVERY_MS);
   tick();
   setInterval(tick, 4000);
+  if (PROCESSES) { setTimeout(() => processes.tick(), 5_000); setInterval(() => processes.tick(), processes.everyMs); }
   setTimeout(updateTick, 60_000);
   setInterval(updateTick, 30 * 60_000);
   if (!process.env.VIGIE_NO_MCP_SYNC) {

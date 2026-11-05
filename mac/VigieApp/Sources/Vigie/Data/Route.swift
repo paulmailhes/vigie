@@ -10,6 +10,8 @@ enum Route: Hashable, Sendable {
     case agents
     /// Toutes les demandes et leur issue (filtres dans le store : historyStatus, historyWindow…).
     case history
+    /// Ce que les conversations ont laissé tourner (Chrome sans fenêtre, serveurs…).
+    case background
 }
 
 /// Les onglets du détail d'une conversation.

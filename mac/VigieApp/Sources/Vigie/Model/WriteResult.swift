@@ -31,9 +31,11 @@ struct WriteResult: Decodable, Equatable, Sendable {
     /// Ce qui ne s'est pas passé comme prévu, sans faire échouer l'action (supprimer un compte : déconnexion pas
     /// confirmée, dossier laissé en place).
     var notices: [String]?
+    /// POST /api/v2/processes/stop : le sort de chaque chose à arrêter.
+    @Lossy var results: [StopResult]
 
     enum CodingKeys: String, CodingKey {
-        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt, opened, surface, copied, notices
+        case ok, error, correction, delivered, openUrl, message, account, folder, briefFile, prompt, opened, surface, copied, notices, results
         case switchInfo = "switch"
     }
 
@@ -48,7 +50,17 @@ struct WriteResult: Decodable, Equatable, Sendable {
         self.switchInfo = nil
         self.account = nil
         self.copied = []
+        self.results = []
     }
+}
+
+struct StopResult: Decodable, Equatable, Sendable {
+    var id: String
+    var ok: Bool?
+    var gone: Bool?
+    /// Sa conversation travaille encore : à confirmer.
+    var needsConfirm: Bool?
+    var error: String?
 }
 
 struct SwitchInfo: Decodable, Equatable, Sendable {

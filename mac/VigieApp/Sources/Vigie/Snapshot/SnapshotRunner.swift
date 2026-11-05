@@ -88,6 +88,11 @@ final class SnapshotRunner {
             await settle(0.9)
             await capture(window, "16-agents-\(theme)")
 
+            store.route = .background
+            _ = await waitUntil(seconds: 5) { self.store.background != nil }
+            await settle(0.9)
+            await capture(window, "17-en-fond-\(theme)")
+
             if let question {
                 store.route = .overview
                 await settle(0.5)

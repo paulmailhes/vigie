@@ -3,7 +3,7 @@ import UserNotifications
 
 /// Les types de notifications, chacun réglable (Réglages › Notifications).
 enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
-    case waiting, sensitive, failed, question, accountWeek, missionDone, stopped, runaway
+    case waiting, sensitive, failed, question, accountWeek, missionDone, stopped, runaway, background
 
     var id: String { rawValue }
 
@@ -17,6 +17,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .missionDone: "Une conversation ou un workflow a fini"
         case .stopped: "Une conversation s'arrête avant la fin"
         case .runaway: "Une conversation s'emballe"
+        case .background: "Des processus oubliés prennent de la mémoire"
         }
     }
 
@@ -30,6 +31,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .missionDone: Icon.mission
         case .stopped: "pause.circle"
         case .runaway: Icon.runaway
+        case .background: "memorychip"
         }
     }
 
@@ -43,7 +45,8 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .missionDone: 4
         case .runaway: 5
         case .question: 6
-        case .accountWeek: 7
+        case .background: 7
+        case .accountWeek: 8
         }
     }
 
@@ -69,6 +72,8 @@ final class Notifier {
         var reviewId: String?
         /// Heure de l'élément : une version plus récente du même élément remplace sa notification, sans bannière.
         var version: Double = 0
+        /// Toujours discrète : dans le centre de notifications, sans bannière.
+        var quiet = false
     }
 
     private static let seenKey = "notify.seen"
@@ -141,7 +146,7 @@ final class Notifier {
 
         let shown = fresh.filter(\.kind.isOn).sorted { $0.kind.priority < $1.kind.priority }
         for (index, candidate) in shown.enumerated() {
-            post(candidate, banner: index < Self.maxBanners && !isInFront(candidate, store))
+            post(candidate, banner: index < Self.maxBanners && !candidate.quiet && !isInFront(candidate, store))
         }
         for candidate in updated where candidate.kind.isOn { post(candidate, banner: false) }
 
@@ -236,6 +241,8 @@ final class Notifier {
             }
         }
 
+        list.append(contentsOf: background(store))
+
         for conversation in store.conversations {
             guard let alert = conversation.alert, alert.isRunaway else { continue }
             // Une seule notification par conversation et par tranche de 3 h : « since » glisse avec la fenêtre
@@ -245,6 +252,31 @@ final class Notifier {
                                   title: "\(conversation.shortTitle) s'emballe",
                                   body: alert.reason ?? "Consommation anormale",
                                   conversationId: conversation.id, reviewId: nil))
+        }
+        return list
+    }
+
+    /// Ce que les conversations ont laissé tourner : chaque arrêt automatique (discret), et une alerte par jour au plus
+    /// quand les oubliés pèsent (2 Go, ou 10 processus).
+    private func background(_ store: VigieStore) -> [Candidate] {
+        guard let summary = store.backgroundSummary else { return [] }
+        var list: [Candidate] = []
+        for stop in summary.autoStopped where recent(stop.ts) {
+            var parts: [String] = []
+            if let project = stop.project { parts.append(project) }
+            if let processes = stop.processes { parts.append(Fmt.count(processes, "processus", "processus")) }
+            parts.append("\(Fmt.memory(mb: stop.memoryMb)) libérés")
+            list.append(Candidate(key: "bg:auto:\(stop.id)", kind: .background,
+                                  title: "\(stop.label ?? "Chrome sans fenêtre") oublié, arrêté par Vigie",
+                                  body: parts.joined(separator: " · "), conversationId: nil, reviewId: nil, quiet: true))
+        }
+        let count = summary.forgotten ?? 0, mb = summary.forgottenMb ?? 0, processes = summary.forgottenProcesses ?? 0
+        if count > 0 && (mb >= 2048 || processes >= 10) {
+            let day = Date.now.formatted(.iso8601.year().month().day())
+            list.append(Candidate(key: "bg:day:\(day)", kind: .background,
+                                  title: "En fond : \(Fmt.count(count, "oublié")) · \(Fmt.memory(mb: mb))",
+                                  subtitle: "Leurs conversations sont fermées",
+                                  body: summary.forgottenLabels.joined(separator: ", "), conversationId: nil, reviewId: nil))
         }
         return list
     }
@@ -370,6 +402,8 @@ final class Notifier {
             }
         } else if kind == NotifyKind.accountWeek.rawValue {
             store.showAccounts(nil)
+        } else if kind == NotifyKind.background.rawValue {
+            store.route = .background
         } else if let conversationId, store.conversation(conversationId) != nil {
             store.route = .conversation(conversationId)
         } else {

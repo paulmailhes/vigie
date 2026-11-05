@@ -84,6 +84,26 @@ enum Fmt {
         return "~" + path.dropFirst(home.count)
     }
 
+    /// Mémoire : « 15 Mo », « 2,1 Go », « 16 Go ».
+    static func memory(mb: Double?) -> String {
+        guard let mb, mb > 0 else { return "—" }
+        if mb < 1000 { return "\(Int(mb.rounded())) Mo" }
+        let gb = mb / 1024
+        return gb < 10 ? gb.formatted(.number.precision(.fractionLength(1))) + " Go" : "\(Int(gb.rounded())) Go"
+    }
+
+    /// Âge court : « 40 s », « 9 min », « 2 h », « 3 j ».
+    static func age(since date: Date?, now: Date = .now) -> String {
+        guard let date else { return "" }
+        let seconds = max(0, now.timeIntervalSince(date))
+        switch seconds {
+        case ..<60: return "\(Int(seconds)) s"
+        case ..<3600: return "\(Int(seconds / 60)) min"
+        case ..<86_400: return "\(Int(seconds / 3600)) h"
+        default: return "\(Int(seconds / 86_400)) j"
+        }
+    }
+
     /// Accord simple : « 1 agent », « 3 agents ».
     static func count(_ value: Int, _ singular: String, _ plural: String? = nil) -> String {
         "\(int(value)) \(value > 1 ? (plural ?? singular + "s") : singular)"

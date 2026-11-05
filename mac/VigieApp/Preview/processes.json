@@ -1,0 +1,32 @@
+{
+  "scannedAt": "2026-10-20T01:14:00Z",
+  "total": { "groups": 5, "processes": 35, "memoryMb": 16180 },
+  "forgotten": { "groups": 2, "processes": 12, "memoryMb": 2165 },
+  "autoStop": true,
+  "autoStopped": [
+    { "id": "p:5120-1760900000:1760920000000", "ts": "2026-10-19T22:10:00Z", "label": "Chrome sans fenêtre", "project": "portail", "processes": 9, "memoryMb": 1480 }
+  ],
+  "groups": [
+    { "id": "p:68164-1760830000", "kind": "chrome", "label": "Chrome sans fenêtre", "detail": "11 processus · Playwright", "ports": [],
+      "processes": 11, "memoryMb": 2150, "memoryReal": true, "cpu": 0, "startedAt": "2026-10-18T01:00:00Z", "state": "forgotten",
+      "forgottenSince": "2026-10-18T03:00:00Z", "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60", "conversationTitle": "Captures de la boutique",
+      "project": "boutique", "cwd": "/Users/alex/Code/boutique", "command": "/Users/alex/Library/Caches/ms-playwright/chromium_headless_shell-1187/chrome-mac/headless_shell --headless --remote-debugging-pipe" },
+    { "id": "p:68170-1760840000", "kind": "server", "label": "Serveur web · port 8766", "detail": "python3 -m http.server", "ports": [8766],
+      "processes": 1, "memoryMb": 15, "memoryReal": true, "cpu": 0, "startedAt": "2026-10-17T01:00:00Z", "state": "forgotten",
+      "forgottenSince": "2026-10-17T02:00:00Z", "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e", "conversationTitle": "Maquette du portail",
+      "project": "portail", "cwd": "/Users/alex/Code/portail/maquette", "command": "/usr/bin/python3 -m http.server 8766" },
+    { "id": "a:4e0c8a7d:Docker", "kind": "app", "label": "Docker", "detail": "10 processus et sa machine virtuelle", "ports": [],
+      "processes": 10, "memoryMb": 8749, "memoryReal": true, "cpu": 2, "startedAt": "2026-10-10T01:00:00Z", "state": "app",
+      "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24", "conversationTitle": "Base de données locale", "project": "portail",
+      "cwd": "/Users/alex/Library/Containers/com.docker.docker/Data", "command": "/Applications/Docker.app/Contents/MacOS/com.docker.backend services",
+      "bundle": "/Applications/Docker.app" },
+    { "id": "p:70210-1760921000", "kind": "render", "label": "Rendu vidéo", "detail": "node render.mjs · 11 Chrome sans fenêtre", "ports": [],
+      "processes": 12, "memoryMb": 5420, "memoryReal": true, "cpu": 780, "startedAt": "2026-10-20T01:05:00Z", "state": "working",
+      "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3", "conversationTitle": "Refaire le site Horizon complet", "project": "atelier",
+      "cwd": "/Users/alex/Code/atelier/video", "command": "node render.mjs --composition Intro" },
+    { "id": "p:70400-1760914000", "kind": "server", "label": "Serveur de dev · port 5173", "detail": "npm run dev", "ports": [5173],
+      "processes": 1, "memoryMb": 182, "memoryReal": true, "cpu": 0, "startedAt": "2026-10-19T23:10:00Z", "state": "idle",
+      "conversationId": "e5f6a7b8-c9d0-4e1f-a2b3-c4d5e6f7a8b9", "conversationTitle": "Header de la boutique", "project": "boutique",
+      "cwd": "/Users/alex/Code/boutique", "command": "node /Users/alex/Code/boutique/node_modules/.bin/vite" }
+  ]
+}

@@ -81,6 +81,7 @@ struct OnboardingView: View {
                 if !store.questionsAuto { store.questionsAuto = true }
                 if !store.connectorsDefaultOn { store.connectorsDefaultOn = true }
                 if !store.autoUpdate { store.autoUpdate = true }
+                if !store.stopForgotten { store.stopForgotten = true }
             }
             if let index = steps.firstIndex(of: startAt) { step = index }
         }
@@ -346,6 +347,10 @@ struct OnboardingView: View {
                 setting("Mises à jour automatiques",
                         "Vigie installe tout seul ses nouvelles versions et te montre ce qui a changé.",
                         isOn: $store.autoUpdate)
+                Divider()
+                setting("Arrêter seuls les Chrome sans fenêtre oubliés",
+                        "Les agents en ouvrent pour des captures ou des tests, et les laissent souvent tourner. Vigie les arrête quand leur conversation est fermée depuis 6 h et qu'ils ne consomment plus rien. Le reste attend ton clic dans En fond.",
+                        isOn: $store.stopForgotten)
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {

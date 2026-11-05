@@ -88,6 +88,7 @@ struct DecodingTests {
             case "overview.json":
                 let overview = try decoder.decode(Overview.self, from: data)
                 #expect(!overview.conversations.isEmpty, "\(name)")
+                #expect(overview.background?.forgotten == 2, "\(name)")
             case "mcp.json":
                 let mcp = try decoder.decode(MCPState.self, from: data)
                 #expect(!mcp.user.isEmpty, "\(name)")
@@ -105,6 +106,12 @@ struct DecodingTests {
             case "agents-runs.json":
                 let runs = try decoder.decode(RecipeRunList.self, from: data)
                 #expect(runs.runs.contains { $0.report?.todo.isEmpty == false } && runs.runs.contains { $0.report?.isRunning == true }, "\(name)")
+            case "processes.json":
+                let list = try decoder.decode(BackgroundList.self, from: data)
+                let states = Set(list.groups.map(\.groupState))
+                #expect(states.isSuperset(of: [.forgotten, .app, .working, .idle]), "\(name)")
+                #expect(list.groups.contains { $0.bundle != nil && !$0.ports.isEmpty == false }, "\(name)")
+                #expect(list.forgotten?.groups == 2 && !list.autoStopped.isEmpty, "\(name)")
             case "agents-folder.json":
                 let folder = try decoder.decode(AgentFolderInfo.self, from: data)
                 #expect(folder.exists && folder.problem == nil, "\(name)")

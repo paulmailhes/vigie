@@ -95,7 +95,7 @@ extension VigieStore {
         }
     }
 
-    private func sendSettings(_ body: JSONValue) async {
+    func sendSettings(_ body: JSONValue) async {
         await write("/api/v2/settings", body)
         await reloadAfterWrite()
     }

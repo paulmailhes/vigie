@@ -33,6 +33,8 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     var weekPct: Double?
     @FlexDate var lastActivity: Date?
     var needsYou: Int?
+    /// Ce qu'elle a en fond (serveur, Chrome sans fenêtre…), d'après le dernier relevé.
+    @Tolerant var background: ConversationBackground?
     var headline: String?
     var branch: String?
     @FlexDate var startedAt: Date?

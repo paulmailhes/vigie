@@ -29,6 +29,8 @@ struct GeneralSettingsView: View {
                         isOn: $store.connectorsDefaultOn)
                 feature("Mises à jour automatiques", "Vigie installe tout seul ses nouvelles versions et te montre ce qui a changé.",
                         isOn: $store.autoUpdate)
+                feature("Arrêter seuls les Chrome sans fenêtre oubliés", "Ceux qu'une conversation a laissés derrière elle : arrêtés quand elle est fermée depuis 6 h et qu'ils ne consomment plus rien. Le reste attend ton clic dans En fond.",
+                        isOn: $store.stopForgotten)
                 LabeledContent {
                     if autoSend {
                         Label("Autorisé", systemImage: "checkmark")

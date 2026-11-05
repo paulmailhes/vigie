@@ -86,16 +86,18 @@ struct RowIcon: View {
 struct CountBadge: View {
     let count: Int
     var urgent = false
+    /// À surveiller, sans urgence (orange).
+    var warn = false
 
     var body: some View {
         Text(count, format: .number)
             .font(.caption.bold())
             .monospacedDigit()
-            .foregroundStyle(urgent ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .foregroundStyle(urgent || warn ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .frame(minWidth: 18)
-            .background(urgent ? AnyShapeStyle(Color.red) : AnyShapeStyle(.quaternary), in: .capsule)
+            .background(urgent ? AnyShapeStyle(Color.red) : warn ? AnyShapeStyle(Theme.warn) : AnyShapeStyle(.quaternary), in: .capsule)
             .accessibilityLabel(urgent ? "\(count) à regarder, dont ce qui t'attend" : "\(count) à regarder")
     }
 }

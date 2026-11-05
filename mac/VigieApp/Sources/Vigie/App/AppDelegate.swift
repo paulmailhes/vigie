@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "mcp": .mcp
             case "agents": .agents
             case "history": .history
+            case "background": .background
             default: .conversation(id)
             }
             store.start()

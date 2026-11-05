@@ -15,6 +15,8 @@ struct Overview: Decodable, Equatable, Sendable {
     @Lossy var recentAccepted: [RecentAccepted]
     /// Mise à jour de Vigie (dernière version publiée sur GitHub, installation en cours).
     @Tolerant var update: UpdateStatus?
+    /// Ce que les conversations ont laissé tourner (dernier relevé).
+    @Tolerant var background: BackgroundSummary?
 }
 
 struct UpdateStatus: Decodable, Equatable, Sendable {
@@ -57,10 +59,12 @@ struct EngineSettings: Decodable, Equatable, Sendable {
     var questionWaitMin: Int?
     var connectorsDefault: String?
     var autoUpdate: Bool?
+    /// Chrome sans fenêtre oubliés arrêtés seuls.
+    var stopForgotten: Bool?
     @Tolerant var guardRules: GuardSettings?
 
     enum CodingKeys: String, CodingKey {
-        case autoAccept, questionsAuto, questionWaitMin, connectorsDefault, autoUpdate
+        case autoAccept, questionsAuto, questionWaitMin, connectorsDefault, autoUpdate, stopForgotten
         case guardRules = "guard"
     }
 }

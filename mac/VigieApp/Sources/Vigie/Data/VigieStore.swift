@@ -93,6 +93,13 @@ final class VigieStore {
     var agentRuns: RecipeRunList?
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
+    /// Ce que les conversations ont laissé tourner (page En fond, GET /api/v2/processes).
+    var background: BackgroundList?
+    /// Le résumé du dernier relevé, venu avec la vue d'ensemble (barre latérale, barre des menus).
+    private(set) var backgroundSummary: BackgroundSummary?
+    var backgroundProblem: String?
+    /// Arrêtés depuis l'app : gardés hors de l'écran 20 s, le temps que le moteur ne les voie plus.
+    var stoppedBackground: [String: Date] = [:]
     /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
     private(set) var usageSeries: [Int: UsageSeries] = [:]
     /// Le moteur ne fournit pas (encore) GET /api/v2/usage/series.
@@ -431,6 +438,7 @@ final class VigieStore {
         if Self.screenKey(ordered) != Self.screenKey(conversations) { conversations = ordered }
         update(\.recentAccepted, overview.recentAccepted)
         update(\.engineInfo, overview.engine)
+        update(\.backgroundSummary, overview.background)
         if let status = overview.update { setUpdateStatus(status) }
         update(\.loadedOnce, true)
     }
@@ -505,7 +513,7 @@ final class VigieStore {
     }
 
     /// Une lecture partie avant ou pendant une écriture risque de remettre l'ancien état à l'écran.
-    private func isFresh(_ started: ContinuousClock.Instant) -> Bool {
+    func isFresh(_ started: ContinuousClock.Instant) -> Bool {
         if writesInFlight > 0 { return false }
         if let end = lastWriteEnd, end > started { return false }
         return true

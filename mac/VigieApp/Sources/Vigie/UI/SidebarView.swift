@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Barre latérale (verre automatique) : Vue d'ensemble, Conversations, Comptes, puis les outils (MCP, Agents,
-/// Historique).
+/// Historique, En fond).
 struct SidebarView: View {
     @Environment(VigieStore.self) private var store
     @State private var showClosed = false
@@ -69,6 +69,16 @@ struct SidebarView: View {
                 SidebarLabel("Historique", symbol: "clock.arrow.circlepath")
                     .tag(Route.history)
                     .standInHighlight(standIn && store.route == .history)
+                HStack {
+                    SidebarLabel("En fond", symbol: "memorychip")
+                    Spacer(minLength: 4)
+                    if store.forgottenCount > 0 {
+                        CountBadge(count: store.forgottenCount, warn: true)
+                            .help("Oubliés : leur conversation est fermée")
+                    }
+                }
+                .tag(Route.background)
+                .standInHighlight(standIn && store.route == .background)
             }
         }
         .listStyle(.sidebar)

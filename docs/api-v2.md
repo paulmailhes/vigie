@@ -649,3 +649,38 @@ suivante. Le brief nomme, sous « MCP à utiliser », le MCP retenu pour chaque 
 | 400 | `Champ manquant : <label>` (obligatoire vide ou fait d'espaces) ; `<label> : texte attendu.` ; `<label> : trop long (2 000 caractères au plus).` ; `Valeurs du formulaire illisibles.` ; dossier refusé (`Choisis le dossier du projet.`, `Dossier refusé : …`, `Dossier impossible à préparer : …`) ; fichier joint refusé (tableau plus haut) ; surface absente ou inconnue ; conversation à reprendre qui n'est plus dans ce dossier ; `Cet agent ne peut pas être lancé : <erreur de son AGENT.md>` |
 | 404 | `Agent introuvable.` (id invalide, dossier ou `AGENT.md` absent) |
 Comme toute écriture : `X-Vigie-Token` (401) et `X-Vigie: 1` (403) obligatoires.
+
+## En fond : ce que les conversations laissent tourner (2026-11-05, `lib/processes.mjs`)
+
+Claude Code pose dans l'environnement de chaque commande `CLAUDE_CODE_SESSION_ID` et `CLAUDE_PID`, et tous les descendants en héritent, même orphelins. Le moteur relève les processus toutes les 30 s (`ps`, son environnement, `lsof`), garde ces deux valeurs et jette le reste de l'environnement à la lecture. Les MCP portent la conversation mais pas `CLAUDE_PID` : jamais listés. Claude Code, Vigie et les processus d'un autre utilisateur non plus. La commande du moment d'une conversation qui travaille (moins d'1 min) n'est pas « en fond ». `VIGIE_NO_PROCESSES=1` coupe tout (essais).
+
+### GET /api/v2/processes
+Relevé frais (4 s au plus), vraie mémoire (`footprint`, 30 s au plus).
+```jsonc
+{ "scannedAt": "…",
+  "total": { "groups": 5, "processes": 35, "memoryMb": 16180 },
+  "forgotten": { "groups": 2, "processes": 12, "memoryMb": 2165 },  // conversation fermée, apps exclues
+  "autoStop": true,                                                // réglage stopForgotten
+  "autoStopped": [ { "id": "…", "ts": "…", "label": "Chrome sans fenêtre", "project": "portail", "processes": 9, "memoryMb": 1480 } ],
+  "groups": [ {
+    "id": "p:<pid racine>-<démarrage>",      // a:<conversation>:<app> pour une app
+    "kind": "chrome",                        // chrome | render | server | tests | watch | db | app | command
+    "label": "Chrome sans fenêtre", "detail": "11 processus · Playwright", "ports": [],
+    "processes": 11, "memoryMb": 2150, "memoryReal": true, "cpu": 0,   // cpu : % d'un cœur entre deux relevés (null au premier)
+    "quiet": true,                           // moins de 1 % de processeur sur 10 min
+    "startedAt": "…", "state": "forgotten",  // forgotten | app | working | waiting | idle
+    "forgottenSince": "…",                   // dernière activité de sa conversation
+    "conversationId": "…", "conversationTitle": "…", "project": "boutique", "cwd": "…",
+    "command": "…",                          // ligne de commande de la racine, masquée, 300 car.
+    "bundle": null } ] }                     // une app : son paquet .app (à quitter depuis l'app Mac, comme ⌘Q)
+```
+Un groupe = un processus et sa descendance listée (un Chrome et ses enfants = une ligne), ou tous les processus d'une app (paquet `.app` de /Applications) pour une conversation. La machine virtuelle d'une app (Docker…) lui est rattachée par la mémoire qu'elles partagent.
+
+### POST /api/v2/processes/stop `{ ids, confirm? }`
+→ `{ ok, results: [{ id, ok, gone?, needsConfirm?, error? }] }`. Relit chaque processus juste avant (numéro, heure de démarrage, conversation) ; signale le groupe de processus entier seulement s'il ne contient rien d'autre (jamais celui de VS Code), sinon processus par processus ; SIGTERM puis SIGKILL 5 s plus tard pour ceux qui restent. Une app est refusée (elle se quitte depuis l'app Mac). Une conversation qui travaille demande `confirm: true`. Journal sans commande ni environnement : `data/processes-log.jsonl`.
+
+### Ménage automatique
+Réglage `stopForgotten` (POST /api/v2/settings, vrai d'office) : un groupe `chrome` oublié depuis 6 h et calme depuis 10 min est arrêté seul, noté dans `autoStopped` et le journal. Rien d'autre ne s'arrête tout seul.
+
+### Vue d'ensemble et conversations
+`overview.background` : `{ scannedAt, forgotten, forgottenProcesses, forgottenMb, groups, forgottenLabels[3], autoStopped[5] }` (dernier relevé, sans en refaire). `ConversationSummary.background` : `{ count, memoryMb, label, state }` ou `null`.

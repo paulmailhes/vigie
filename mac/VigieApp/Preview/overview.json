@@ -787,5 +787,17 @@
       "agent": null,
       "service": null
     }
-  ]
+  ],
+  "background": {
+    "scannedAt": "2026-10-20T01:14:00Z",
+    "forgotten": 2,
+    "forgottenProcesses": 12,
+    "forgottenMb": 2165,
+    "groups": 5,
+    "forgottenLabels": [
+      "Chrome sans fenêtre (boutique)",
+      "Serveur web · port 8766 (portail)"
+    ],
+    "autoStopped": []
+  }
 }
