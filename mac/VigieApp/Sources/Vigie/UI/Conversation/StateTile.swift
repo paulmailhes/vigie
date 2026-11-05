@@ -2,7 +2,7 @@ import SwiftUI
 
 /// La tuile d'État, toujours en haut : le verdict en un mot et une couleur, ce qu'elle fait ou attend en une ligne,
 /// depuis quand, deux ou trois puces quand il y a lieu, et les boutons seulement quand c'est à toi d'agir.
-/// Les réglages de la conversation (compte, auto-accept, MCP du compte, dossier) sont dans le menu « ⋯ ».
+/// Les réglages de la conversation (compte, auto-accept, MCP du compte) sont dans la barre d'outils.
 struct StateTile: View {
     @Environment(VigieStore.self) private var store
     let summary: ConversationSummary
@@ -10,9 +10,6 @@ struct StateTile: View {
     let verdict: ConversationVerdict
     let open: (ConversationPanel) -> Void
 
-    @State private var pendingAccount: Account?
-    @State private var confirmSwitch = false
-    @State private var busy = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -32,7 +29,6 @@ struct StateTile: View {
                 }
                 Spacer(minLength: 8)
                 meta
-                settingsMenu
             }
             if let line = verdict.line, !line.isEmpty {
                 Text(line)
@@ -70,20 +66,6 @@ struct StateTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(background, in: .rect(cornerRadius: Theme.corner))
         .accessibilityElement(children: .contain)
-        .confirmationDialog(pendingAccount.map { "Passer sur \($0.displayName) ?" } ?? "",
-                            isPresented: $confirmSwitch, titleVisibility: .visible, presenting: pendingAccount) { account in
-            Button(summary.state == .working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
-                Task { await store.switchAccount(of: summary.id, to: account.id) }
-            }
-            if summary.state == .working {
-                Button("Tout de suite (l'interrompt)") {
-                    Task { await store.switchAccount(of: summary.id, to: account.id, now: true) }
-                }
-            }
-            Button("Annuler", role: .cancel) {}
-        } message: { account in
-            Text(switchMessage(account))
-        }
     }
 
     private var color: Color {
@@ -103,7 +85,7 @@ struct StateTile: View {
         }
     }
 
-    // MARK: À droite : compte, débit, menu
+    // MARK: À droite : compte, débit
 
     private var meta: some View {
         HStack(spacing: 8) {
@@ -115,80 +97,6 @@ struct StateTile: View {
         }
         .font(.callout)
         .lineLimit(1)
-    }
-
-    private var settingsMenu: some View {
-        Menu {
-            if !summary.isCodex {
-                Menu("Compte : \(store.account(summary.accountId)?.displayName ?? "?")") {
-                    ForEach(store.accounts) { account in
-                        Button {
-                            guard account.id != summary.accountId else { return }
-                            pendingAccount = account
-                            confirmSwitch = true
-                        } label: {
-                            choice(account.isConnected ? account.displayName : "\(account.displayName) (pas connecté)",
-                                   selected: account.id == summary.accountId)
-                        }
-                        .disabled(!account.isConnected && account.id != summary.accountId)
-                    }
-                }
-            }
-            Menu("Auto-accept : \(autoAcceptText)") {
-                Button { Task { await store.setAutoAccept(nil, for: summary.id) } } label: {
-                    choice("Comme le réglage général (\(store.autoAccept ? "oui" : "non"))", selected: summary.autoAcceptOverride == nil)
-                }
-                Button { Task { await store.setAutoAccept(true, for: summary.id) } } label: {
-                    choice("Toujours", selected: summary.autoAcceptOverride == true)
-                }
-                Button { Task { await store.setAutoAccept(false, for: summary.id) } } label: {
-                    choice("Jamais", selected: summary.autoAcceptOverride == false)
-                }
-            }
-            if !summary.isCodex {
-                let on = summary.connectors == "on"
-                Menu("MCP du compte : \(on ? "activés" : "coupés")") {
-                    Button { Task { await store.setConnectors(false, for: summary.id) } } label: { choice("Coupés (recommandé)", selected: !on) }
-                    Button { Task { await store.setConnectors(true, for: summary.id) } } label: { choice("Activés", selected: on) }
-                }
-            }
-            Divider()
-            AsyncButton(summary.openLabel) { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
-            if let cwd = summary.cwd {
-                Button("Ouvrir le dossier dans VS Code") { SystemActions.openInVSCode(path: cwd) }
-                Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .accessibilityLabel("Réglages de cette conversation")
-        }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .glassButton()
-        .fixedSize()
-        .help("Compte, auto-accept et MCP de cette conversation")
-    }
-
-    @ViewBuilder
-    private func choice(_ text: String, selected: Bool) -> some View {
-        if selected { Label(text, systemImage: "checkmark") } else { Text(text) }
-    }
-
-    private var autoAcceptText: String {
-        switch summary.autoAcceptOverride {
-        case true?: "toujours"
-        case false?: "jamais"
-        case nil: (summary.autoAccept ?? store.autoAccept) ? "oui" : "non"
-        }
-    }
-
-    private func switchMessage(_ account: Account) -> String {
-        var text = summary.state == .working
-            ? "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
-            : "Elle reprend sur \(account.displayName) avec tout son historique."
-        let tokens = model?.raw.contextTokens ?? summary.contextTokens
-        if let tokens, tokens > 0 { text += " ≈ \(Fmt.tokens(tokens)) tokens relus sur le nouveau compte." }
-        return text
     }
 
     // MARK: Ligne 3 : depuis quand, et les puces

@@ -9,22 +9,59 @@ struct ConversationInspector: View {
     let model: ConversationDetailModel?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let model {
-                    content(model)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity)
+        VStack(spacing: 0) {
+            // En tête du panneau : ce qu'il montre, et de quoi le fermer.
+            HStack(spacing: 8) {
+                Text(kindLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    store.conversationPanel = nil
+                } label: {
+                    Label("Fermer", systemImage: "xmark")
+                        .labelStyle(.iconOnly)
+                        .font(.body.weight(.semibold))
+                        .frame(width: 26, height: 26)
+                        .background(.quinary, in: .circle)
+                        .contentShape(.circle)
                 }
+                .buttonStyle(.plain)
+                .help("Fermer (Échap)")
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let model {
+                        content(model)
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .toolbar {
-            ToolbarItem {
-                Button("Fermer", systemImage: "xmark") { store.conversationPanel = nil }
-                    .help("Fermer le détail (Échap)")
-            }
+    }
+
+    /// « Message », « Agent »… : ce que montre le panneau.
+    private var kindLabel: String {
+        switch panel {
+        case .request: "Ta demande"
+        case .message: "Message"
+        case .thread: "Échanges"
+        case .agent: "Agent"
+        case .workflow: "Workflow"
+        case .plan: "Plan"
+        case .tests: "Tests"
+        case .files: "Fichiers"
+        case .journal: "Journal"
+        case .mcp: "MCP"
+        case .background: "En fond"
+        case .answers: "Pour toi"
         }
     }
 

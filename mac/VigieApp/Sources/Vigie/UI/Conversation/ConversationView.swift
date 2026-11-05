@@ -35,15 +35,26 @@ struct ConversationView: View {
         .navigationSubtitle(summary?.title ?? "")
         .toolbar {
             if let summary {
+                // Ses réglages, juste après son titre : compte, auto-accept de cette conversation, MCP du compte.
+                ToolbarItem(placement: .navigation) {
+                    ConversationControls(summary: summary, contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
+                }
                 ToolbarItem {
                     if summary.surface == "terminal", let cwd = summary.cwd {
                         // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
                         Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
                     } else {
-                        AsyncButton(summary.openLabel, systemImage: "arrow.up.forward.app") {
-                            await store.openConversationInVSCode(summary.id, cwd: summary.cwd)
+                        Menu {
+                            if let cwd = summary.cwd {
+                                Button("Ouvrir le dossier dans VS Code") { SystemActions.openInVSCode(path: cwd) }
+                                Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
+                            }
+                        } label: {
+                            Label(summary.openLabel, systemImage: "arrow.up.forward.app")
+                        } primaryAction: {
+                            Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
                         }
-                        .help("Ouvrir cette conversation là où elle tourne")
+                        .help("Ouvrir cette conversation là où elle tourne (la flèche : son dossier)")
                     }
                 }
             }
