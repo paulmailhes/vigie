@@ -15,6 +15,30 @@ cd "$ROOT"
 APP="$ROOT/mac/Vigie.app"
 ENGINE_FILES=(VERSION hook.mjs server.mjs lib bin scripts public agents README.md LICENSE)
 
+# Notarise un fichier. `notarytool --timeout` ne couvre que l'attente de la réponse d'Apple : un envoi bloqué ne s'arrête
+# jamais. Chaque essai a donc sa limite (NOTARY_TRY_SECONDS, 10 min), et un essai sans réponse recommence, deux fois au
+# plus. Un refus d'Apple ne se réessaie pas.
+notarize() {
+  local file="$1" log pid watcher try
+  log="$(mktemp)"
+  for try in 1 2 3; do
+    xcrun notarytool submit "$file" --keychain-profile "$PROFILE" --wait --timeout 8m >"$log" 2>&1 &
+    pid=$!
+    ( sleep "${NOTARY_TRY_SECONDS:-600}"; kill "$pid" 2>/dev/null ) &
+    watcher=$!
+    wait "$pid" || true
+    pkill -P "$watcher" 2>/dev/null || true
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    tail -2 "$log"
+    if grep -q "status: Accepted" "$log"; then rm -f "$log"; return 0; fi
+    grep -Eq "status: (Invalid|Rejected)" "$log" && break
+    echo "  ! essai $try sans réponse d'Apple pour $(basename "$file")" >&2
+  done
+  rm -f "$log"
+  return 1
+}
+
 echo "1/6 Tests du moteur"
 node --test test/ >/dev/null || { echo "Des tests échouent : rien n'est publié." >&2; exit 1; }
 echo "$VERSION" > VERSION
@@ -53,9 +77,7 @@ fi
 mkdir -p dist
 if [ -n "$NOTARIZE" ]; then
   ditto -c -k --keepParent "$APP" dist/Vigie-notarisation.zip
-  OUT="$(xcrun notarytool submit dist/Vigie-notarisation.zip --keychain-profile "$PROFILE" --wait --timeout 30m 2>&1)"
-  echo "$OUT" | tail -2
-  echo "$OUT" | grep -q "status: Accepted" || { echo "Notarisation refusée : voir xcrun notarytool log <id> --keychain-profile $PROFILE" >&2; exit 1; }
+  notarize dist/Vigie-notarisation.zip || { echo "Notarisation refusée : voir xcrun notarytool log <id> --keychain-profile $PROFILE" >&2; exit 1; }
   xcrun stapler staple "$APP" >/dev/null
   rm -f dist/Vigie-notarisation.zip
 fi
@@ -80,10 +102,12 @@ rm -f dist/Vigie.dmg
 hdiutil create -volname "Vigie" -srcfolder "$STAGE" -ov -format ULFO dist/Vigie.dmg >/dev/null
 find "$STAGE" -delete 2>/dev/null || true
 if [ -n "$SIGN_ID" ]; then codesign --force --timestamp --sign "$SIGN_ID" dist/Vigie.dmg; fi
+# Une image restée attachée au système (vu après hdiutil create, sans disque visible dans le Finder) reste verrouillée :
+# notarytool se bloque à son ouverture, sans rien envoyer et sans jamais s'arrêter.
+ATTACHED="$(hdiutil info 2>/dev/null | awk -v f="$ROOT/dist/Vigie.dmg" '/^image-path/{on=(index($0,f)>0)} on&&/^\/dev\/disk[0-9]+[ \t]/{print $1; exit}')"
+if [ -n "$ATTACHED" ]; then hdiutil detach "$ATTACHED" >/dev/null 2>&1 || hdiutil detach -force "$ATTACHED" >/dev/null 2>&1 || true; fi
 if [ -n "$NOTARIZE" ]; then
-  OUT="$(xcrun notarytool submit dist/Vigie.dmg --keychain-profile "$PROFILE" --wait --timeout 30m 2>&1)"
-  echo "$OUT" | tail -2
-  echo "$OUT" | grep -q "status: Accepted" || { echo "Notarisation du DMG refusée" >&2; exit 1; }
+  notarize dist/Vigie.dmg || { echo "Notarisation du DMG refusée" >&2; exit 1; }
   xcrun stapler staple dist/Vigie.dmg >/dev/null
   spctl --assess --type open --context context:primary-signature -v dist/Vigie.dmg 2>&1 | tail -1
 fi
