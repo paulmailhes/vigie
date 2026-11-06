@@ -11,6 +11,7 @@ struct RootView: View {
             SidebarView()
         } detail: {
             DetailView()
+                .splitColumn(minWidth: 340)
                 .overlay(alignment: .top) {
                     if store.setup != .idle {
                         SetupBanner(setup: store.setup) { Task { await store.runSetup() } }

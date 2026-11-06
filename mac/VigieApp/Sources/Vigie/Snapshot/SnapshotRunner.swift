@@ -39,6 +39,11 @@ final class SnapshotRunner {
         if let frameView = window.contentView?.superview, let rect = sidebarRect(window, frameView) {
             _ = renderSidebar(size: rect.size, behind: window)
         }
+        if ProcessInfo.processInfo.environment["VIGIE_STRESS"] != nil {
+            await stressLayout(window)
+            finish(code: 0, message: "Mise en page : aucun plantage")
+            return
+        }
 
         let conversationID = store.conversations.first(where: \.isOpen)?.id
         let secondID = store.conversations.first { $0.project == "boutique" && $0.id != conversationID }?.id
@@ -148,6 +153,38 @@ final class SnapshotRunner {
         let origin = NSPoint(x: visible.minX + max(0, (visible.width - size.width) / 2),
                              y: visible.minY + max(0, (visible.height - size.height) / 2))
         window.setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+
+    /// Essai de mise en page (VIGIE_STRESS=1) : chaque panneau de chaque conversation, à plusieurs largeurs de fenêtre.
+    /// Une boucle de mise en page fait planter l'app (exception d'AppKit) : le code de sortie le dit, et release.sh
+    /// s'arrête. La page et son détail ne doivent jamais se renvoyer leurs tailles.
+    private func stressLayout(_ window: NSWindow) async {
+        let ids = store.conversations.filter(\.isOpen).map(\.id)
+        let sizes = [NSSize(width: 1700, height: 950), NSSize(width: 1280, height: 820), NSSize(width: 1100, height: 760),
+                     NSSize(width: 1024, height: 700), NSSize(width: 960, height: 620)]
+        for size in sizes {
+            window.setFrame(NSRect(origin: window.frame.origin, size: size), display: true)
+            await settle(0.2)
+            for id in ids {
+                store.conversationPanel = nil
+                store.route = .conversation(id)
+                _ = await waitUntil(seconds: 5) { self.store.details[id] != nil }
+                await settle(0.2)
+                guard let model = store.details[id] else { continue }
+                var panels: [ConversationPanel] = [.request, .thread, .plan, .tests, .files, .journal, .mcp, .background, .answers]
+                panels += model.raw.messages.indices.map { .message($0) }
+                panels += model.raw.workflows.prefix(3).map { .workflow($0.id) }
+                panels += (model.runningAgents + model.doneAgents).prefix(3).map { .agent($0.id) }
+                for panel in panels {
+                    store.conversationPanelOwner = id
+                    store.conversationPanel = panel
+                    await settle(0.3)
+                }
+                store.conversationPanel = nil
+                await settle(0.2)
+            }
+            FileHandle.standardError.write(Data("largeur \(Int(size.width)) : tenue\n".utf8))
+        }
     }
 
     // MARK: Capture

@@ -71,7 +71,13 @@ struct ConversationListSection: View {
     var body: some View {
         let open = store.conversations.filter(\.isOpen)
         VStack(alignment: .leading, spacing: 8) {
-            BlockTitle(title: "Conversations", detail: Fmt.count(open.count, "ouverte", "ouvertes"))
+            HStack(alignment: .firstTextBaseline) {
+                BlockTitle(title: "Conversations", detail: Fmt.count(open.count, "ouverte", "ouvertes"))
+                Spacer(minLength: 8)
+                if open.filter({ !$0.isCodex }).count > 1 {
+                    SwitchAllMenu()
+                }
+            }
             if open.isEmpty {
                 Label("Aucune conversation ouverte", systemImage: "moon.zzz")
                     .foregroundStyle(.secondary)
@@ -111,6 +117,69 @@ struct ConversationListSection: View {
     private func sensitiveItem(for id: String) -> ReviewItem? {
         let items = store.toReview.filter { $0.conversationId == id && $0.reviewKind == .blocked }
         return items.first(where: \.needsDecision) ?? items.first
+    }
+}
+
+/// Passer toutes les conversations ouvertes sur un même compte, en une fois (par exemple celui qui a encore des crédits).
+struct SwitchAllMenu: View {
+    @Environment(VigieStore.self) private var store
+    @State private var target: Account?
+    @State private var busy = false
+
+    var body: some View {
+        Menu {
+            Text("Passer les conversations ouvertes sur")
+            ForEach(store.accounts.filter(\.isConnected)) { account in
+                let count = store.conversationsToSwitch(to: account.id).count
+                Button(count > 0 ? "\(account.displayName) (\(Fmt.count(count, "conversation")))" : "\(account.displayName) (toutes y sont)") {
+                    target = account
+                }
+                .disabled(count == 0)
+            }
+        } label: {
+            BusyLabel(busy: busy) { Label("Tout passer sur…", systemImage: "arrow.left.arrow.right") }
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .glassButton()
+        .help("Change le compte Claude de toutes les conversations ouvertes en une fois")
+        .confirmationDialog(title, isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+                            titleVisibility: .visible, presenting: target) { account in
+            if working(account) > 0 {
+                Button("À la fin de leur travail") { run(account, now: false) }
+                Button("Tout de suite (interrompt celles qui travaillent)") { run(account, now: true) }
+            } else {
+                Button("Passer sur \(account.displayName)") { run(account, now: false) }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: { account in
+            Text(message(account))
+        }
+    }
+
+    private var title: String {
+        guard let target else { return "" }
+        let count = store.conversationsToSwitch(to: target.id).count
+        return "Passer \(Fmt.count(count, "conversation")) sur \(target.displayName) ?"
+    }
+
+    private func working(_ account: Account) -> Int {
+        store.conversationsToSwitch(to: account.id).count { $0.state == .working }
+    }
+
+    private func message(_ account: Account) -> String {
+        let count = working(account)
+        var text = "Chacune garde tout son historique. Celles au repos repartent sur ce compte à ton prochain message."
+        if count > 0 { text += " \(Fmt.count(count, "travaille", "travaillent")) en ce moment." }
+        return text
+    }
+
+    private func run(_ account: Account, now: Bool) {
+        busy = true
+        Task { @MainActor in
+            await store.switchAllConversations(to: account.id, now: now)
+            busy = false
+        }
     }
 }
 

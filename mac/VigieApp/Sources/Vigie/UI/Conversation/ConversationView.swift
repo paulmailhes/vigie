@@ -12,6 +12,12 @@ struct ConversationView: View {
 
     /// Sous cette largeur (inspecteur ouvert ou petite fenêtre), tout passe sur une colonne.
     private static let twoColumns: CGFloat = 860
+    /// Largeur minimale de la page, détail ouvert, dans la plus petite fenêtre (960 pt).
+    private static let pageMinWidth: CGFloat = 340
+    /// La colonne de côté (tests, plan, publié).
+    private static let sideWidth: CGFloat = 300
+    /// Marges de `Page` : la largeur des tuiles se déduit de celle de la page, sans dépendre de son contenu.
+    private static let pageMargins: CGFloat = 56
 
     var body: some View {
         let summary = store.conversation(conversationID)
@@ -31,12 +37,14 @@ struct ConversationView: View {
                 LoadingView()
             }
         }
+        .splitColumn(minWidth: Self.pageMinWidth)
         .navigationTitle(summary?.shortTitle ?? "Conversation")
         .navigationSubtitle(summary?.title ?? "")
         .inspector(isPresented: Binding(get: { shownPanel != nil },
                                         set: { if !$0 { store.conversationPanel = nil } })) {
             if let panel = shownPanel, let summary {
                 ConversationInspector(panel: panel, summary: summary, model: model)
+                    .splitColumn()
                     .inspectorColumnWidth(min: 300, ideal: 380, max: 480)
             }
         }
@@ -80,7 +88,7 @@ struct ConversationView: View {
                             ExchangeTile(summary: summary, model: model, verdict: verdict, open: open)
                                 .frame(maxWidth: .infinity)
                             SideTiles(model: model, open: open)
-                                .frame(width: min(320, width * 0.32))
+                                .frame(width: Self.sideWidth)
                         }
                     } else {
                         ExchangeTile(summary: summary, model: model, verdict: verdict, open: open)
@@ -97,8 +105,9 @@ struct ConversationView: View {
                         .padding(.top, 30)
                 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+        // mesurée sur la page elle-même, pas dans ce qui défile : le contenu ne peut pas changer cette mesure
+        .onGeometryChange(for: CGFloat.self) { $0.size.width - Self.pageMargins } action: { width = $0 }
     }
 
     /// Au travail : les workflows (une tuile mère avec ses agents) et les agents seuls. Absent si rien ne tourne.

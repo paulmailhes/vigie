@@ -80,6 +80,7 @@ struct ConversationBar: View {
     private func accountMenu(_ compact: Bool) -> some View {
         Menu {
             Text("Compte de cette conversation")
+            Text("Commencée, elle garde son compte : celui des nouvelles conversations ne vaut que pour les nouvelles.")
             ForEach(store.accounts) { account in
                 Button {
                     guard account.id != currentAccount?.id else { return }

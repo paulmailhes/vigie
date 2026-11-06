@@ -17,11 +17,13 @@ struct HistoryView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
+        .splitColumn(minWidth: 340)
         .navigationTitle("Historique")
         .navigationSubtitle(subtitle)
         .inspector(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selection = nil } })) {
             if let selected {
                 HistoryDetail(item: selected)
+                    .splitColumn()
                     .inspectorColumnWidth(min: 300, ideal: 360, max: 480)
             }
         }

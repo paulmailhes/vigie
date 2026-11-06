@@ -28,6 +28,15 @@ rm -rf "$ENGINE"
 mkdir -p "$ENGINE"
 rsync -a --exclude '.DS_Store' "${ENGINE_FILES[@]}" "$ENGINE/"
 
+# Chaque panneau de chaque conversation, à plusieurs largeurs de fenêtre : une boucle de mise en page fait planter
+# l'app (exception d'AppKit), et une telle version ne sort pas. VIGIE_NO_STRESS=1 pour s'en passer.
+if [ -z "${VIGIE_NO_STRESS:-}" ]; then
+  echo "    Essai de mise en page (fenêtre de Vigie à l'écran, environ 2 min)"
+  STRESS="$(mktemp -d)"
+  VIGIE_STRESS=1 VIGIE_FIXTURES="$ROOT/mac/VigieApp/Preview" "$APP/Contents/MacOS/Vigie" --snapshot "$STRESS" >"$STRESS/journal.txt" 2>&1 \
+    || { grep -m1 'Terminating app' "$STRESS/journal.txt" >&2 || true; echo "L'app plante à l'ouverture d'un panneau : rien n'est publié." >&2; exit 1; }
+fi
+
 echo "4/6 Signature et notarisation de l'app"
 SIGN_ID="${VIGIE_SIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}"
 NOTARIZE=

@@ -245,6 +245,44 @@ extension VigieStore {
         await reloadAfterWrite(conversation: id)
     }
 
+    /// Les conversations ouvertes à passer sur ce compte (Codex a son propre compte ChatGPT : jamais).
+    func conversationsToSwitch(to accountID: String) -> [ConversationSummary] {
+        conversations.filter { $0.isOpen && !$0.isCodex && ($0.accountId != accountID || runningAccountId(of: $0) != accountID) }
+    }
+
+    /// Passe en une fois les conversations ouvertes sur ce compte. Chacune suit la règle d'une bascule seule : au repos,
+    /// elle repart dessus à ton prochain message ; au travail, à la fin de son tour, ou tout de suite avec `now`.
+    /// Le compte change tout de suite à l'écran, et revient si le moteur refuse.
+    func switchAllConversations(to accountID: String, now: Bool = false) async {
+        let list = conversationsToSwitch(to: accountID)
+        let label = accounts.first(where: { $0.id == accountID })?.displayName ?? accountID
+        guard !list.isEmpty else { return }
+        var done = 0
+        var refused: [String] = []
+        for conversation in list {
+            let before = conversation.accountId
+            patchConversation(conversation.id) { $0.accountId = accountID }
+            var body: [String: JSONValue] = ["accountId": .string(accountID)]
+            if now { body["now"] = .bool(true) }
+            switch await send("/api/v2/conversation/\(encode(conversation.id))/settings", .object(body)) {
+            case .success(let result) where result.ok != false:
+                done += 1
+            case .success(let result):
+                patchConversation(conversation.id) { $0.accountId = before }
+                refused.append(result.error ?? conversation.shortTitle)
+            case .failure(let error):
+                patchConversation(conversation.id) { $0.accountId = before }
+                refused.append(error.message)
+            }
+        }
+        if let first = refused.first {
+            show(error: "\(Fmt.count(refused.count, "conversation n'a", "conversations n'ont")) pas pu changer de compte : \(first)")
+        } else {
+            show(info: "\(Fmt.count(done, "conversation passe", "conversations passent")) sur \(label)")
+        }
+        await reloadAfterWrite(accounts: true)
+    }
+
     // MARK: Comptes
 
     func createAccount(label: String) async {
