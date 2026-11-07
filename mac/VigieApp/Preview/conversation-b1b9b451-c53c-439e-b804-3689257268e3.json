@@ -532,7 +532,11 @@
         "files": 4,
         "tests": 3,
         "status": "done",
-        "lastAction": "Jauge affinée, 52 tests réussis"
+        "lastAction": "Jauge affinée, 52 tests réussis",
+        "name": "L2.23 Jauge de la partie",
+        "step": "L2.23",
+        "prompt": "Appliquer la charte 1.4 à la jauge de la partie, avec ses tests visuels.",
+        "result": "Jauge affinée aux couleurs de nuit, 52 tests réussis."
       },
       {
         "id": "ag-22r",
@@ -547,7 +551,11 @@
         "files": 0,
         "tests": 4,
         "status": "done",
-        "lastAction": "245 tests réussis, rien à reprendre"
+        "lastAction": "245 tests réussis, rien à reprendre",
+        "name": "L2.22 Pastilles et boutons",
+        "step": "L2.22",
+        "prompt": "Relire les pastilles et les boutons, et vérifier le contraste.",
+        "result": "Rien à reprendre, 245 tests réussis."
       },
       {
         "id": "ag-22",
@@ -562,7 +570,11 @@
         "files": 6,
         "tests": 3,
         "status": "done",
-        "lastAction": "Pastilles et boutons faits"
+        "lastAction": "Pastilles et boutons faits",
+        "name": "L2.22 Pastilles et boutons",
+        "step": "L2.22",
+        "prompt": "Appliquer la charte 1.4 aux pastilles et aux boutons de tous les écrans.",
+        "result": "Pastilles et boutons passés à la charte 1.4."
       },
       {
         "id": "ag-21r",
@@ -577,7 +589,11 @@
         "files": 0,
         "tests": 4,
         "status": "failed",
-        "lastAction": "3 tests en échec sur l'écran d'accueil"
+        "lastAction": "3 tests en échec sur l'écran d'accueil",
+        "name": "L2.21 Écran d'accueil",
+        "step": "L2.21",
+        "prompt": "Relire l'écran d'accueil et vérifier le contraste.",
+        "result": "3 tests en échec sur l'écran d'accueil : contraste des boutons trop faible."
       },
       {
         "id": "ag-21",
@@ -592,7 +608,11 @@
         "files": 5,
         "tests": 2,
         "status": "done",
-        "lastAction": "Écran d'accueil fait"
+        "lastAction": "Écran d'accueil fait",
+        "name": "L2.21 Écran d'accueil",
+        "step": "L2.21",
+        "prompt": "Appliquer la charte 1.4 à l'écran d'accueil.",
+        "result": "Écran d'accueil passé à la charte 1.4."
       },
       {
         "id": "ag-20",
@@ -607,7 +627,11 @@
         "files": 7,
         "tests": 3,
         "status": "done",
-        "lastAction": "Titres et typographie faits"
+        "lastAction": "Titres et typographie faits",
+        "name": "L2.20 Titres et typographie",
+        "step": "L2.20",
+        "prompt": "Appliquer la typographie de la charte 1.4 aux titres de tous les écrans.",
+        "result": "Titres et typographie passés à la charte 1.4."
       },
       {
         "id": "ag-19",
@@ -622,7 +646,11 @@
         "files": 9,
         "tests": 4,
         "status": "done",
-        "lastAction": "Couleurs du thème de nuit faites"
+        "lastAction": "Couleurs du thème de nuit faites",
+        "name": "L2.19 Couleurs du thème de nuit",
+        "step": "L2.19",
+        "prompt": "Appliquer les couleurs du thème de nuit de la charte 1.4 à tous les écrans.",
+        "result": "Couleurs du thème de nuit posées sur tous les écrans."
       }
     ]
   },
@@ -634,7 +662,7 @@
       "status": "running",
       "startedAt": "2026-10-19T15:20:00.000Z",
       "durationMs": 28800000,
-      "agents": 11,
+      "agents": 9,
       "tokens": 387955,
       "phases": [
         "Faire",

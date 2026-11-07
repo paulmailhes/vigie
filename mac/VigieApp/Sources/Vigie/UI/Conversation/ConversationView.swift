@@ -116,8 +116,8 @@ struct ConversationView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width - PageMetrics.margin * 2 } action: { width = $0 }
     }
 
-    /// Au travail : les workflows (une tuile mère avec ses agents) et les agents seuls, sous un titre de section qui
-    /// compte les agents en cours. Absent si rien ne tourne.
+    /// Au travail : les workflows (une tuile chacun, avec la liste de son avancée) et les agents seuls, sous un titre
+    /// de section qui compte les agents en cours. Absent si rien ne tourne.
     @ViewBuilder
     private func work(_ model: ConversationDetailModel) -> some View {
         let now = store.now
@@ -136,9 +136,11 @@ struct ConversationView: View {
                     AgentReportTile(run: run, summary: summary)
                 }
                 ForEach(workflows) { workflow in
+                    // tous ses agents, finis compris : sa tuile en fait la liste d'avancée
                     WorkflowTile(workflow: workflow,
-                                 agents: model.runningAgents.filter { $0.workflow == (workflow.name ?? workflow.id) },
-                                 planSteps: steps,
+                                 agents: WorkflowProgress.agents(of: workflow, among: model.raw.workflows,
+                                                                 in: model.runningAgents + model.doneAgents),
+                                 plan: model.raw.now?.plan,
                                  open: open)
                 }
                 if !solo.isEmpty {

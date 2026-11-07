@@ -230,7 +230,7 @@ struct AgentTile: View {
     enum Look: Sendable {
         /// Un agent seul, posé sur la page : une carte.
         case card
-        /// Un agent d'un workflow, dans la tuile du workflow : ni fond ni contour, la barre seule.
+        /// Dans une liste déjà posée sur un fond : ni fond ni contour, la barre seule.
         case row
     }
 
@@ -315,16 +315,8 @@ struct AgentTile: View {
         if running {
             guard let start = agent.startedAt else { return "En cours" }
             if silent, let last = agent.lastAt { return "Rien écrit depuis \(Fmt.age(since: last, now: store.now))" }
-            var text = "Depuis \(Fmt.age(since: start, now: store.now))"
-            if let estimate = agent.estimate, let ends = estimate.endsAt {
-                if estimate.longer == true || ends <= store.now {
-                    text += " · plus long que les autres"
-                } else {
-                    let minutes = max(5, Int((ends.timeIntervalSince(store.now) / 60 / 5).rounded()) * 5)
-                    text += " · reste ≈ \(Fmt.duration(ms: Double(minutes) * 60_000))"
-                }
-            }
-            return text
+            let text = "Depuis \(Fmt.age(since: start, now: store.now))"
+            return WorkflowProgress.remaining(agent, now: store.now).map { "\(text) · \($0)" } ?? text
         }
         if failed { return "En échec\(agent.lastAt.map { " \(ConversationVerdict.at($0, now: store.now))" } ?? "")" }
         let duration = Fmt.duration(ms: agent.durationMs)
@@ -332,21 +324,26 @@ struct AgentTile: View {
     }
 }
 
-/// Un workflow : son nom lisible et ses phases, l'avancée de ses agents (une barre, un segment par agent), puis ses
-/// agents en cours ; fini, la 1re phrase de son résultat.
+/// Un workflow : son nom lisible, où il en est (« 3 sur 7 finis · 1 en échec · 2 en cours »), puis la liste de son
+/// avancée, une ligne par étape (ou par agent) avec un repère d'état à gauche : fini, en cours (ce qu'il fait, depuis
+/// quand, ce qu'il reste), en échec, arrêté, à faire. Longue, la liste garde les derniers finis, ce qui tourne et les
+/// prochains à faire, et « Tout afficher » la déplie. Fini, il se replie sur son résultat ; en échec ou arrêté, il
+/// garde aussi les lignes qui ont mal fini. La règle : `WorkflowProgress`.
 struct WorkflowTile: View {
     @Environment(VigieStore.self) private var store
     let workflow: Workflow
+    /// Tous ses agents, en cours et finis (`WorkflowProgress.agents(of:among:in:)`).
     let agents: [AgentRun]
-    /// Les étapes du plan de sa conversation, pour nommer ses agents.
-    var planSteps: [PlanStep] = []
+    /// Le plan de la conversation : nomme ses étapes et dit celles qui restent à faire.
+    var plan: WorkPlan?
     let open: (ConversationPanel) -> Void
 
-    private static let shownAgents = 3
+    @State private var showAll = false
 
     var body: some View {
         let raw = workflow.name ?? workflow.id
-        VStack(alignment: .leading, spacing: 8) {
+        let progress = WorkflowProgress.make(agents: agents, plan: plan, running: running)
+        VStack(alignment: .leading, spacing: 6) {
             Button { open(.workflow(workflow.id)) } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     CardTitle("Workflow", trailing: trailing, alert: failed)
@@ -355,20 +352,13 @@ struct WorkflowTile: View {
                             .textRole(.item)
                             .lineLimit(1)
                             .help(raw)
-                        if !InfoLine.text(infoParts).isEmpty {
-                            InfoLine(parts: infoParts)
+                        let parts = summary(progress)
+                        if !InfoLine.text(parts).isEmpty {
+                            InfoLine(parts: parts)
                         }
                     }
                     if running {
-                        ViewThatFits(in: .horizontal) {
-                            HStack {
-                                Text(countLine).monospacedDigit()
-                                Spacer(minLength: 8)
-                                segments
-                            }
-                            Text(countLine).monospacedDigit()
-                        }
-                        if agents.isEmpty, let log = workflow.lastLog {
+                        if progress.items.isEmpty, let log = workflow.lastLog {
                             Text(log).foregroundStyle(.secondary).lineLimit(1)
                         }
                     } else if let result = workflow.result ?? workflow.summary {
@@ -381,17 +371,11 @@ struct WorkflowTile: View {
             }
             .buttonStyle(TileButtonStyle())
             .padding(-6)
-            if running && !agents.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], alignment: .leading, spacing: 8) {
-                    ForEach(agents.prefix(Self.shownAgents)) { agent in
-                        AgentTile(agent: agent, planSteps: planSteps, look: .row, open: open)
-                    }
-                }
-                if agents.count > Self.shownAgents {
-                    Text("+\(agents.count - Self.shownAgents) agents\(oldest.map { " · le plus ancien depuis \($0)" } ?? "")")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
+            if running {
+                list(progress)
+            } else if failed {
+                // en échec ou arrêté : ce qui a mal fini, à ouvrir
+                rows(progress.items.filter { $0.state == .failed || $0.state == .stopped }.prefix(3))
             }
         }
         .font(.callout)
@@ -411,40 +395,193 @@ struct WorkflowTile: View {
         return duration.isEmpty ? outcome : "\(outcome) · \(duration)"
     }
 
-    /// Sous le nom : ses phases ; fini, combien d'agents et d'échecs.
-    private var infoParts: [String?] {
-        let phases = workflow.phases.isEmpty ? nil : workflow.phases.joined(separator: " → ")
-        guard !running, let count = workflow.agents else { return [phases] }
-        let failedCount = workflow.counts?.failed ?? 0
-        return [phases, "\(Fmt.count(count, "agent"))\(failedCount > 0 ? ", \(failedCount) en échec" : "")"]
+    /// Sous le nom : où il en est, d'après sa liste ; sans agent connu (lancé à l'instant, ou ses agents trop anciens
+    /// pour le détail), les compteurs du moteur.
+    private func summary(_ progress: WorkflowProgress) -> [String?] {
+        let parts = progress.summary(running: running)
+        if !parts.isEmpty { return parts }
+        guard !running else { return [] }
+        if let c = workflow.counts, (c.done ?? 0) + (c.failed ?? 0) > 0 {
+            return [(c.done ?? 0) > 0 ? Fmt.count(c.done ?? 0, "fini", "finis") : nil,
+                    (c.failed ?? 0) > 0 ? "\(Fmt.int(c.failed)) en échec" : nil]
+        }
+        return [workflow.agents.map { Fmt.count($0, "agent") }]
     }
 
-    /// « 7 finis (1 en échec) · 2 en cours ».
-    private var countLine: String {
-        let c = workflow.counts
-        let done = (c?.done ?? 0) + (c?.failed ?? 0)
-        var text = "\(Fmt.count(done, "fini", "finis"))"
-        if let failedCount = c?.failed, failedCount > 0 { text += " (\(failedCount) en échec)" }
-        if let runningCount = c?.running, runningCount > 0 { text += " · \(runningCount) en cours" }
-        return ConversationVerdict.sentence(text)
-    }
-
-    private var segments: some View {
-        let c = workflow.counts
-        let done = c?.done ?? 0, failedCount = c?.failed ?? 0, runningCount = c?.running ?? 0
-        let total = min(done + failedCount + runningCount, 40)
-        return HStack(spacing: 2) {
-            ForEach(0..<total, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(index < done ? AnyShapeStyle(.tertiary) : index < done + failedCount ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(Theme.live))
-                    .frame(width: 9, height: 7)
+    /// La liste d'avancée : coupée quand elle est longue, ce qui est caché compté au-dessus et au-dessous.
+    @ViewBuilder
+    private func list(_ progress: WorkflowProgress) -> some View {
+        let shown = progress.shown(all: showAll)
+        if !shown.items.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if shown.earlierFinished > 0 {
+                    let more = shown.earlierFailed > 0 ? ", dont \(Fmt.int(shown.earlierFailed)) en échec" : ""
+                    countRow("\(Fmt.int(shown.earlierFinished)) \(shown.earlierFinished > 1 ? "autres finis" : "autre fini")\(more)",
+                             symbol: "checkmark.circle")
+                }
+                rows(shown.items)
+                if shown.laterTodo > 0 {
+                    countRow("\(Fmt.int(shown.laterTodo)) \(shown.laterTodo > 1 ? "autres" : "autre") à venir", symbol: "circle.dotted")
+                }
+            }
+            if shown.hidden > 0 {
+                ShowAllButton(count: progress.items.count) {
+                    withAnimation(.smooth) { showAll = true }
+                }
+                .padding(.top, 2)
             }
         }
-        .accessibilityLabel(countLine)
     }
 
-    private var oldest: String? {
-        agents.compactMap(\.startedAt).min().map { Fmt.age(since: $0, now: store.now) }
+    private func rows<Items: RandomAccessCollection>(_ items: Items) -> some View where Items.Element == WorkflowProgress.Item {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(items) { item in
+                WorkflowProgressRow(item: item, now: store.now, open: open)
+            }
+        }
+        // le repère d'état tombe au bord du texte de la tuile, le fond de survol déborde de 6 pt
+        .padding(.horizontal, -6)
+    }
+
+    /// Une ligne qui compte ce qui n'est pas montré (« 12 autres finis », « 5 autres à venir »).
+    private func countRow(_ text: String, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.body)
+                .foregroundStyle(.tertiary)
+                .frame(width: WorkflowProgressRow.markWidth)
+                .accessibilityHidden(true)
+            Text(text)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Une ligne de l'avancée d'un workflow : son repère d'état à gauche (coche grise, point vert, croix rouge, carré
+/// d'arrêt, cercle vide), son nom, « en échec » en puce, et à droite depuis quand elle tourne ; dessous, pour ce qui
+/// tourne ou a mal fini, la phase et ce que fait (ou a rendu) son agent. Avec « Différencier sans couleur », le point
+/// vert devient un symbole : chaque état a sa forme. Un clic ouvre son agent ; une étape à faire ne s'ouvre pas.
+struct WorkflowProgressRow: View {
+    let item: WorkflowProgress.Item
+    let now: Date
+    let open: (ConversationPanel) -> Void
+
+    /// La colonne des repères d'état.
+    static let markWidth: CGFloat = 16
+
+    var body: some View {
+        if let agent = item.agent {
+            Button { open(.agent(agent.id)) } label: { content }
+                .buttonStyle(TileButtonStyle())
+                .help(agent.title ?? agent.id)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 8) {
+                mark
+                    .frame(width: Self.markWidth)
+                    .accessibilityHidden(true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    title
+                    if item.state == .failed {
+                        Chip("en échec", tone: .alert)
+                    }
+                    Spacer(minLength: 6)
+                    if let trailing {
+                        Text(trailing)
+                            .foregroundStyle(silent ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+            }
+            if !InfoLine.text(detail).isEmpty {
+                InfoLine(parts: detail)
+                    .padding(.leading, Self.markWidth + 8)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(InfoLine.text([item.title, stateLabel, trailing] + detail))
+    }
+
+    private var agent: AgentRun? { item.agent }
+
+    /// Rien écrit depuis 6 min : orange, comme la carte d'un agent.
+    private var silent: Bool {
+        item.state == .running && now.timeIntervalSince(agent?.lastAt ?? now) > AgentTile.quiet
+    }
+
+    @ViewBuilder
+    private var mark: some View {
+        switch item.state {
+        case .done:
+            Image(systemName: "checkmark.circle").font(.body).foregroundStyle(.secondary)
+        case .failed:
+            Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(Theme.alert)
+        case .stopped:
+            Image(systemName: "stop.circle").font(.body).foregroundStyle(.secondary)
+        case .running:
+            // repère fixe, comme `RunningMark` : la durée à droite dit déjà que ça avance
+            StateDot(style: AnyShapeStyle(silent ? Theme.warn : Theme.live),
+                     symbol: silent ? "hourglass.circle.fill" : Theme.symbol(for: .working), size: 9)
+        case .todo:
+            Image(systemName: "circle").font(.body).foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Fini : gris ; en cours ou en échec : un objet qu'on ouvre, en semi-gras ; à faire : texte normal.
+    @ViewBuilder
+    private var title: some View {
+        let text = Text(item.title).lineLimit(1).truncationMode(.tail)
+        switch item.state {
+        case .running, .failed: text.textRole(.item)
+        case .done, .stopped: text.font(.body).foregroundStyle(.secondary)
+        case .todo: text.font(.body)
+        }
+    }
+
+    /// À droite, seulement pour ce qui tourne : « depuis 16 min », ou « rien écrit depuis 8 min ».
+    private var trailing: String? {
+        guard item.state == .running, let agent else { return nil }
+        if silent, let last = agent.lastAt { return "rien écrit depuis \(Fmt.age(since: last, now: now))" }
+        return agent.startedAt.map { "depuis \(Fmt.age(since: $0, now: now))" }
+    }
+
+    /// Dessous : sa phase et ce que fait son agent (et ce qu'il lui reste), ou ce qu'il a rendu en échec.
+    private var detail: [String?] {
+        guard let agent else { return [] }
+        switch item.state {
+        case .running:
+            return [agent.phase, ConversationVerdict.sentence(agent.lastAction ?? "démarre"), WorkflowProgress.remaining(agent, now: now)]
+        case .failed:
+            return [agent.phase, ConversationVerdict.sentence(agent.result ?? agent.lastAction ?? "en échec")]
+        case .stopped:
+            return [agent.phase, "Arrêté avant la fin"]
+        case .done, .todo:
+            return []
+        }
+    }
+
+    private var stateLabel: String {
+        switch item.state {
+        case .done: "fini"
+        case .failed: "en échec"
+        case .stopped: "arrêté"
+        case .running: "en cours"
+        case .todo: "à faire"
+        }
     }
 }
 
