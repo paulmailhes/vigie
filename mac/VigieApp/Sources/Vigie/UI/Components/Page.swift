@@ -11,24 +11,30 @@ extension View {
     }
 }
 
-/// Le gabarit commun des pages de la fenêtre : toutes ont le même bord gauche. `Page` pour les tableaux de bord ;
-/// `Form` aligné à gauche pour les pages d'outils (Comptes, MCP, Agents) ; l'Historique (table et panneau) à part.
+/// Le gabarit commun des pages de la fenêtre : ce qui défile occupe toute la largeur du détail (la barre de défilement
+/// reste collée au bord droit de la fenêtre) et le contenu se centre dedans. `Page` pour les tableaux de bord (Vue
+/// d'ensemble, page d'une conversation, En fond) ; `pageForm()` pour les pages d'outils (Comptes, MCP, Agents), dont le
+/// Form centre lui-même ses cartes, plus étroites ; l'Historique (table et panneau) à part, sa table jusqu'au bord droit.
 /// Constantes hors de toute vue : utilisables dans une fermeture `Sendable` (`onGeometryChange`).
 enum PageMetrics {
-    /// Marge à gauche et à droite du contenu d'une page.
+    /// Marge à gauche et à droite du contenu d'une page (au plus étroit ; plus large, le contenu se centre).
     static let margin: CGFloat = 28
     /// Marge en haut et en bas.
     static let verticalMargin: CGFloat = 20
-    /// Largeur maximale du contenu (au-delà, le contenu se centre dans la fenêtre).
+    /// Largeur maximale du contenu d'une `Page` : au-delà, il se centre dans la largeur du détail.
     static let maxWidth: CGFloat = 1080
     /// Entre deux sections d'une page.
     static let sectionSpacing: CGFloat = 24
+    /// Retrait natif des lignes d'une `Table` en style `.inset`, entre le bord de la table et le fond d'une ligne
+    /// (mesuré sur une capture) : l'Historique s'en sert pour poser ses lignes sur la marge des pages.
+    static let tableRowInset: CGFloat = 10
     /// Retrait d'un `SectionHeader` dans l'en-tête d'une Section de Form (MCP, Agents) : l'en-tête natif ajoute 4 pt,
     /// retirés ici pour que le titre tombe au même bord que ceux d'une `Page` (6 pt du bord de la carte).
     static let formHeaderInset: CGFloat = -4
 }
 
-/// Page de tableau de bord : défile, occupe la largeur du détail (le Form groupé se limite à ~700 pt).
+/// Page de tableau de bord : la vue qui défile occupe toute la largeur du détail (barre de défilement au bord droit de
+/// la fenêtre) ; le contenu, 1080 pt au plus, se centre dedans (le Form groupé, lui, se limite à 704 pt).
 struct Page<Content: View>: View {
     @ViewBuilder var content: Content
 
