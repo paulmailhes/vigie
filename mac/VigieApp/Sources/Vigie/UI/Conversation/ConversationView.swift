@@ -58,7 +58,7 @@ struct ConversationView: View {
     }
 
     /// Son identité (le titre de VS Code) ; quand plusieurs conversations attendent une décision et qu'elle en est,
-    /// sa place devant (« 1 sur 3 à décider · … », ⌘J passe à la suivante) : le titre peut être coupé, pas la place.
+    /// sa place devant (« 2e des 3 à décider · … », ⌘J passe à la suivante) : le titre peut être coupé, pas la place.
     private func subtitle(_ summary: ConversationSummary?) -> String {
         let position = store.waitingPosition(of: conversationID).map { "\($0) à décider" }
         return InfoLine.text([position, summary?.title])

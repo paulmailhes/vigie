@@ -134,7 +134,7 @@
         "workflows": 1,
         "agents": 6,
         "artifacts": 0,
-        "files": 41,
+        "files": 2,
         "tests": 0,
         "testsFailed": 0,
         "commits": 3
@@ -271,7 +271,7 @@
     "workflows": 1,
     "agents": 6,
     "artifacts": 0,
-    "files": 41,
+    "files": 2,
     "commits": 3,
     "pushes": 0,
     "deploys": 0,

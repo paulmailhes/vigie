@@ -40,6 +40,10 @@ final class VigieStore {
     private(set) var windowVisible = true
     @ObservationIgnored var menuPanelOpen = false { didSet { pollingChanged() } }
     @ObservationIgnored private var windowShown = true
+    /// Fenêtre ouverte, même recouverte ou sur un autre bureau (présence, `isPresent`).
+    @ObservationIgnored private var windowPresent = true
+    /// Session verrouillée (écran de verrouillage) : absent.
+    @ObservationIgnored private var screenLocked = false
     @ObservationIgnored private var screensAsleep = false
 
     /// « Pendant ton absence » : début de la période que résume la bande « Depuis… » (30 min après un retour d'une
@@ -62,6 +66,11 @@ final class VigieStore {
         var trend: String?
     }
 
+    /// Une heure à la minute près, comme à l'écran (`Fmt.when`).
+    private static func minute(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded(.down) * 60)
+    }
+
     static func screenKey(_ list: [ConversationSummary]) -> [ScreenRow] {
         list.map { conversation in
             var c = conversation
@@ -70,6 +79,12 @@ final class VigieStore {
             c.weekPct = c.weekPct.map { $0 <= 0 ? 0 : $0 < 1 ? 0.5 : $0.rounded() }
             c.contextTokens = nil
             c.accepted = nil
+            // les heures du verdict changent à chaque écriture de code ; elles ne se lisent qu'au survol, à la minute
+            if var checks = c.checks {
+                checks.lastCodeAt = checks.lastCodeAt.map(minute)
+                checks.lastTestAt = checks.lastTestAt.map(minute)
+                c.checks = checks
+            }
             let rate = c.rate
             c.rate = nil
             return ScreenRow(conversation: c, rate: rate?.weekPctPerHour.map(Fmt.rate) ?? "",
@@ -218,10 +233,23 @@ final class VigieStore {
 
     private var pollSeconds: Int { windowVisible || menuPanelOpen ? 3 : screensAsleep ? 60 : 15 }
 
-    /// Fenêtre principale à l'écran ou non (WindowVisibility) ; écran en veille : comme cachée.
-    func setWindowVisible(_ shown: Bool) {
+    /// Fenêtre principale à l'écran ou non (WindowVisibility) ; écran en veille : comme cachée. `present` : ouverte,
+    /// même recouverte (la présence ne dépend pas de ce qui est devant).
+    func setWindowVisible(_ shown: Bool, present: Bool? = nil) {
         windowShown = shown
+        windowPresent = present ?? shown
         pollingChanged()
+    }
+
+    func setScreenLocked(_ locked: Bool) {
+        screenLocked = locked
+        pollingChanged()
+    }
+
+    /// Tu es là : la fenêtre est ouverte (même derrière VS Code ou sur un autre bureau) ou le panneau de la barre des
+    /// menus est ouvert, écrans allumés et session déverrouillée. Un rendez-vous, la nuit, l'app cachée : absent.
+    nonisolated static func isPresent(windowPresent: Bool, menuPanelOpen: Bool, screensAsleep: Bool, screenLocked: Bool) -> Bool {
+        (windowPresent || menuPanelOpen) && !screensAsleep && !screenLocked
     }
 
     func setScreensAsleep(_ asleep: Bool) {
@@ -235,7 +263,8 @@ final class VigieStore {
     @ObservationIgnored private var lastPollSeconds = 3
     private func pollingChanged() {
         let visible = windowShown && !screensAsleep
-        let returned = noteAbsence(visible: visible)
+        let returned = noteAbsence(visible: Self.isPresent(windowPresent: windowPresent, menuPanelOpen: menuPanelOpen,
+                                                           screensAsleep: screensAsleep, screenLocked: screenLocked))
         if visible != windowVisible { windowVisible = visible }
         let seconds = pollSeconds
         let faster = seconds < lastPollSeconds
@@ -246,8 +275,8 @@ final class VigieStore {
         start()
     }
 
-    /// Note le début d'une absence (fenêtre cachée, écrans en veille) ou le retour. Rend vrai au retour d'une
-    /// absence de plus de 2 h : « Depuis… » la résume dès la prochaine lecture.
+    /// Note le début d'une absence (écrans en veille, session verrouillée, fenêtre fermée ou app cachée) ou le retour.
+    /// Rend vrai au retour d'une absence de plus de 2 h : « Pendant ton absence » la résume dès la prochaine lecture.
     @discardableResult
     private func noteAbsence(visible: Bool) -> Bool {
         guard !isDemo else { return false }
@@ -839,12 +868,13 @@ final class VigieStore {
         route = .conversation(next)
     }
 
-    /// « 1 sur 3 » : la place de cette conversation parmi celles qui attendent une décision (nil si elle n'en est pas,
-    /// ou si elle est seule). Pour le sous-titre de sa page.
+    /// « 1re des 3 », « 2e des 3 » : la place de cette conversation parmi celles qui attendent une décision (nil si
+    /// elle n'en est pas, ou si elle est seule). Pour le sous-titre de sa page (« 2e des 3 à décider ») : un rang, pas
+    /// « 2 sur 3 », qui se lirait « 2 des 3 décisions sont ici ».
     func waitingPosition(of conversationID: String) -> String? {
         let ids = waitingConversationIDs
         guard ids.count > 1, let index = ids.firstIndex(of: conversationID) else { return nil }
-        return "\(index + 1) sur \(ids.count)"
+        return "\(index == 0 ? "1re" : "\(index + 1)e") des \(ids.count)"
     }
 
     /// Ouvre un élément là où il se traite : la page de sa conversation, puis sa fiche (action sensible, réponse

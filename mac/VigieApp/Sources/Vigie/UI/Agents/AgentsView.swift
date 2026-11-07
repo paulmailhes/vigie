@@ -68,7 +68,7 @@ struct AgentsView: View {
                 } header: {
                     SectionHeader("Prêts à lancer", count: state.agents.count,
                                   note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.",
-                                  inset: 0)
+                                  inset: PageMetrics.formHeaderInset)
                 } footer: {
                     footer(state)
                 }
@@ -128,6 +128,9 @@ struct AgentsView: View {
 struct AgentAccountWarning: View {
     @Environment(VigieStore.self) private var store
     let accountID: String?
+    /// Propose « Mettre les nouvelles conversations sur… » : seulement quand l'agent part sur le compte des nouvelles
+    /// conversations (une conversation continuée garde le sien).
+    var offerDefault = true
 
     var body: some View {
         if let warning = Self.warning(accountID: accountID, accounts: store.accounts, now: store.now) {
@@ -140,7 +143,11 @@ struct AgentAccountWarning: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Theme.warn)
                 }
-                if let roomiest = warning.roomiest {
+                if !offerDefault {
+                    Text("Une conversation commencée garde son compte : pour partir sur un autre, choisis « Nouvelle conversation ».")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let roomiest = warning.roomiest {
                     AsyncButton("Mettre les nouvelles conversations sur \(roomiest.displayName)") {
                         await store.setDefaultAccount(roomiest.id)
                     }

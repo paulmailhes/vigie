@@ -33,8 +33,7 @@ struct MCPEditorSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                SheetIcon(symbol: "puzzlepiece.extension")
-                Text(title).font(.title3.bold())
+                ObjectHeader(title, icon: "puzzlepiece.extension")
                 Spacer()
                 if !isEditing {
                     Picker("Mode", selection: $mode) {
@@ -111,7 +110,7 @@ struct MCPEditorSheet: View {
                 .font(.body.monospaced())
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(.quinary, in: .rect(cornerRadius: 10))
+                .background(.quinary, in: .rect(cornerRadius: 8))
                 .frame(minHeight: 140)
                 .overlay(alignment: .topLeading) {
                     if pasted.isEmpty {
@@ -296,6 +295,6 @@ struct PairsEditor: View {
         Button(addTitle, systemImage: "plus.circle") {
             pairs.append(MCPDraft.Pair())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.link)
     }
 }

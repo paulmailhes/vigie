@@ -101,7 +101,7 @@ struct Chip: View {
         case .warn: AnyShapeStyle(Theme.warn.opacity(0.12))
         case .alert: AnyShapeStyle(Theme.alert.opacity(0.12))
         case .you: AnyShapeStyle(Theme.you.opacity(0.12))
-        case .selected: AnyShapeStyle(Theme.action)
+        case .selected: AnyShapeStyle(Theme.actionFill)
         }
     }
 }

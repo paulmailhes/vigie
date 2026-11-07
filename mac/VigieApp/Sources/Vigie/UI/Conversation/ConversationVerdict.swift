@@ -8,7 +8,7 @@ struct ConversationVerdict: Equatable {
 
     var tone: Tone
     var title: String
-    /// « depuis 6 min », « il y a 3 min » : à côté du mot.
+    /// « depuis 6 min » (ce qui dure), « hier 23:35 » (ce qui est fini) : à côté du mot.
     var since: String?
     /// Ligne 2 : ce qu'elle fait, ce qu'elle attend, pourquoi elle s'est arrêtée, ce qu'elle a fait.
     var line: String?
@@ -18,7 +18,8 @@ struct ConversationVerdict: Equatable {
     var openButton = false
     /// Le bouton dit « Répondre dans… » (elle attend un message de toi) ; sinon « Ouvrir dans… ».
     var reply = true
-    /// Une tuile orange porte aussi de quoi comprendre : « Voir les tests » (un test en échec), sinon « Journal ».
+    /// Une tuile orange porte aussi de quoi comprendre : « Voir les tests » (un test en échec ; le Journal est dans la
+    /// ligne juste dessous).
     var showCause = false
     /// Elle a fini ta demande (« Finie ») : la tuile dit si c'est vérifié, commité et envoyé.
     var finished = false
@@ -53,7 +54,7 @@ struct ConversationVerdict: Equatable {
         let busy = agents > 0 || workflows > 0 || commands > 0
         if s.state != .working, !busy, let ended = detail?.ended, ended.kind == "limit" || ended.kind == "error" {
             return .init(tone: .alert, title: ended.kind == "limit" ? "Arrêtée : limite atteinte" : "Arrêtée : Claude n'a pas répondu",
-                         since: ago(ended.ts, now: now), line: unfinishedLine(detail), openButton: true)
+                         since: when(ended.ts, now: now), line: unfinishedLine(detail), openButton: true)
         }
         // une tuile orange porte son action : de quoi rouvrir la conversation, et de quoi comprendre
         if let alert = s.alert, alert.isRunaway {
@@ -77,15 +78,19 @@ struct ConversationVerdict: Equatable {
             let verb = agents + workflows + commands > 1 ? "tournent" : "tourne"
             return .init(tone: .live, title: "En pause", line: "Au repos, mais \(parts.joined(separator: " et ")) \(verb) : elle reprendra seule.")
         }
-        let report = messages.last(where: \.isReport)
+        let reportIndex = messages.lastIndex(where: \.isReport)
+        let report = reportIndex.map { messages[$0] }
+        // le compte rendu a sa bulle dans l'Échange juste dessous : la tuile ne répète pas sa première phrase
+        let reportShown = reportIndex.map { ExchangeTile.isVisible($0, of: messages.count) } ?? false
         if s.state == .closed {
-            return .init(tone: .calm, title: "Fermée", since: ago(s.lastActivity, now: now), line: report?.brief ?? s.headline)
+            return .init(tone: .calm, title: "Fermée", since: when(s.lastActivity, now: now),
+                         line: reportShown ? nil : report?.brief ?? s.headline)
         }
         if let report {
-            return .init(tone: .calm, title: "Finie", since: ago(report.ts, now: now), line: report.brief ?? s.headline,
-                         finished: true)
+            return .init(tone: .calm, title: "Finie", since: when(report.ts, now: now),
+                         line: reportShown ? nil : report.brief ?? s.headline, finished: true)
         }
-        return .init(tone: .calm, title: "Au repos", since: ago(s.lastActivity, now: now), line: s.headline)
+        return .init(tone: .calm, title: "Au repos", since: when(s.lastActivity, now: now), line: s.headline)
     }
 
     /// Ce qu'elle fait : l'étape du plan et ses agents, sinon son dernier message, sinon son résumé.
@@ -112,8 +117,9 @@ struct ConversationVerdict: Equatable {
         return text
     }
 
-    private static func ago(_ date: Date?, now: Date) -> String? {
-        date.map { Fmt.ago($0, now: now) }
+    /// Un fait fini : « 01:17 », « hier 23:35 » (jamais « il y a 1 h », réservé à ce qui est en direct).
+    private static func when(_ date: Date?, now: Date) -> String? {
+        date.map { Fmt.when($0, now: now) }
     }
 
     private static func since(_ date: Date?, now: Date) -> String? {

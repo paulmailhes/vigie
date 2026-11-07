@@ -64,9 +64,14 @@ struct MCPView: View {
                     Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { showLibrary = true }
                     Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { editor = .addUser }
                 } label: {
-                    Label("Ajouter un MCP", systemImage: "plus")
-                        .labelStyle(.titleAndIcon)
+                    // une image et un texte : un Label dans une barre d'outils n'y garde que son icône
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                        Text("Ajouter un MCP")
+                    }
+                    .fixedSize()
                 }
+                .accessibilityLabel("Ajouter un MCP")
                 .help("Depuis la bibliothèque des MCP officiels, ou à la main")
             }
         }
@@ -137,7 +142,7 @@ struct MCPView: View {
                 } header: {
                     SectionHeader("À régler", count: fixes.count,
                                   note: lastCheck.map { Freshness.text(prefix: "État mis à jour", date: $0, now: store.now) },
-                                  inset: 0)
+                                  inset: PageMetrics.formHeaderInset)
                 }
             }
 
@@ -150,7 +155,7 @@ struct MCPView: View {
                 if mcp.user.isEmpty { EmptyRow(text: "Aucun MCP sur ton Mac") }
             } header: {
                 SectionHeader(Theme.title(for: .mac), count: mcp.user.count,
-                              note: "Dans toutes tes conversations, sur tous tes comptes Claude.", inset: 0)
+                              note: "Dans toutes tes conversations, sur tous tes comptes Claude.", inset: PageMetrics.formHeaderInset)
             }
 
             Section {
@@ -171,7 +176,7 @@ struct MCPView: View {
                 if projects.isEmpty { EmptyRow(text: "Aucun projet de ~/Code n'a de MCP à lui") }
             } header: {
                 SectionHeader("MCP des projets", count: projects.reduce(0) { $0 + $1.servers.count },
-                              note: "Seulement quand Claude travaille dans le dossier du projet.", inset: 0)
+                              note: "Seulement quand Claude travaille dans le dossier du projet.", inset: PageMetrics.formHeaderInset)
                     .help("Déclarés dans le fichier .mcp.json du projet")
             }
 
@@ -186,7 +191,7 @@ struct MCPView: View {
             } header: {
                 SectionHeader(Theme.title(for: .connector), count: mcp.connectors.count,
                               note: "Branchés à ton compte sur claude.ai (Gmail, Drive…), partagés par toutes ses conversations. Coupés par défaut, réglables par conversation.",
-                              inset: 0)
+                              inset: PageMetrics.formHeaderInset)
             }
         }
         .pageForm()
@@ -248,7 +253,6 @@ struct UsesLabel: View {
             .lineLimit(1)
             .help(here ? "Appels dans cette conversation" : "Appels de ce MCP ces 7 derniers jours")
             .frame(minWidth: 62, alignment: .trailing)
-            .opacity((count ?? 0) == 0 ? 0.6 : 1)
             .accessibilityLabel(here ? "\(Fmt.count(count ?? 0, "appel")) dans cette conversation" : "\(Fmt.count(count ?? 0, "appel")) en 7 jours")
     }
 }
@@ -269,8 +273,9 @@ struct UserMCPRow: View {
         // Par Vigie, l'état se lit sur la passerelle (une autorisation pour tous) ; en direct, compte par compte.
         let summary = gateway == nil ? MCPAccountSummary(accounts: accounts, health: server.health, declaredIn: server.accounts) : MCPAccountSummary(accounts: [], health: [])
         let switchCount = server.accounts.count
-        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !active,
-                     status: status(summary), uses: server.uses7d) {
+        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle,
+                     subtitleHelp: gateway == nil ? MCPHelp.fullCommand(type: server.type, target: server.target) : nil,
+                     dimmed: !active, status: status(summary), uses: server.uses7d) {
             Toggle("Activer \(server.name)", isOn: everywhere)
                 .toggleStyle(.switch)
                 .labelsHidden()
@@ -453,7 +458,8 @@ struct ProjectServerRow: View {
         let summary = MCPAccountSummary(accounts: store.accounts, health: server.health)
         let subtitle = [enabled ? nil : "Coupé dans ce projet", MCPHelp.origin(type: server.type, target: server.target)]
             .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
-        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle, dimmed: !enabled,
+        MCPRowLayout(service: server.service, name: server.name, subtitle: subtitle,
+                     subtitleHelp: MCPHelp.fullCommand(type: server.type, target: server.target), dimmed: !enabled,
                      status: summary.status, uses: server.uses7d) {
             Toggle("Activer \(server.name) dans ce projet", isOn: enabledBinding(enabled))
                 .toggleStyle(.switch)
@@ -534,7 +540,7 @@ enum MCPHelp {
     }
 
     /// D'où vient un MCP, en mots simples : « Par Vigie · mcp.webflow.com », « En ligne · mcp.figma.com »,
-    /// « Programme · python3 ~/Code/… ».
+    /// « Programme · node server.mjs ».
     static func origin(type: String?, target: String?) -> String {
         let place = shortTarget(target)
         let kind = switch type {
@@ -545,12 +551,22 @@ enum MCPHelp {
         return place.isEmpty ? kind : "\(kind) · \(place)"
     }
 
-    /// « https://mcp.figma.com/mcp » → « mcp.figma.com » ; une commande reste telle quelle.
+    /// « https://mcp.figma.com/mcp » → « mcp.figma.com » ; une commande sans ses chemins complets :
+    /// « node /Users/alex/Code/notes-mcp/server.mjs » → « node server.mjs » (la commande entière au survol, `fullCommand`).
     static func shortTarget(_ target: String?) -> String {
         guard let target, !target.isEmpty else { return "" }
         if let url = URL(string: target), let host = url.host(), url.scheme?.hasPrefix("http") == true {
             return host
         }
+        return target.split(separator: " ", omittingEmptySubsequences: true)
+            .map { $0.hasPrefix("/") || $0.hasPrefix("~") ? ($0 as NSString).lastPathComponent : String($0) }
+            .joined(separator: " ")
+    }
+
+    /// La commande entière d'un MCP programme, quand la ligne l'a raccourcie ; nil sinon (adresse web, rien à dire).
+    static func fullCommand(type: String?, target: String?) -> String? {
+        guard let target, !target.isEmpty, shortTarget(target) != target else { return nil }
+        if type == "http" || type == "sse" || type == "vigie" { return nil }
         return target
     }
 }

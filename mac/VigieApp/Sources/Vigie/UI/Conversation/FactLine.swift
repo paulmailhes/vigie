@@ -70,12 +70,12 @@ struct FactLine: Equatable {
 // MARK: Fini, mais pas vérifié
 
 extension RequestChecks {
-    /// Le verdict sur les tests, avec le libellé du moteur (sinon le nôtre) : tests verts après la dernière
+    /// Le verdict sur les tests, avec le libellé du moteur (sinon le nôtre) : tests réussis après la dernière
     /// modification (coche grise), modifié après les tests (orange), tests en échec (rouge), aucun test lancé (gris).
     var verdictFact: FactLine.Fact? {
         let text = label?.trimmingCharacters(in: .whitespacesAndNewlines)
         switch verdictKind {
-        case .verified: return .init(text.nonEmpty ?? "tests verts après la dernière modification", tone: .checked, kept: true)
+        case .verified: return .init(text.nonEmpty ?? "tests réussis après la dernière modification", tone: .checked, kept: true)
         case .changedAfterTests: return .init(text.nonEmpty ?? "modifié après les tests", tone: .warn, kept: true)
         case .testsFailed: return .init(text.nonEmpty ?? "tests en échec", tone: .alert, kept: true)
         case .noTests: return .init(text.nonEmpty ?? "aucun test lancé", kept: true)
@@ -109,7 +109,7 @@ extension RequestChecks {
         let times = [lastTestAt.map { "dernier test \(Fmt.when($0, now: now))" },
                      lastCodeAt.map { "dernière modification \(Fmt.when($0, now: now))" }].compactMap { $0 }
         if !times.isEmpty { parts.append(ConversationVerdict.sentence(times.joined(separator: ", ")) + ".") }
-        if verdictKind == .verified { parts.append("Des tests verts ne prouvent pas que tout est juste.") }
+        if verdictKind == .verified { parts.append("Des tests réussis ne prouvent pas que tout est juste.") }
         return parts.joined(separator: " ")
     }
 }

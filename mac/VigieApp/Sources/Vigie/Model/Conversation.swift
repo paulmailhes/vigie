@@ -179,7 +179,7 @@ struct CardArtifact: Decodable, Equatable, Sendable {
 /// « Fini, mais pas vérifié » : ce que le moteur sait d'une demande, par règles, sans lire le code.
 struct RequestChecks: Decodable, Equatable, Sendable {
     enum Verdict: String, Sendable {
-        /// Tests verts après la dernière modification.
+        /// Tests réussis après la dernière modification.
         case verified
         /// Du code écrit après le dernier test.
         case changedAfterTests
@@ -209,7 +209,10 @@ struct RequestChecks: Decodable, Equatable, Sendable {
 /// Contexte résumé par Claude Code : combien de fois, dont combien automatiquement, et le dernier.
 struct ContextCompactions: Decodable, Equatable, Sendable {
     var count: Int?
+    /// Combien quand le contexte débordait.
     var auto: Int?
+    /// Combien sur `/compact` (nil : moteur plus ancien, on ne sait pas).
+    var manual: Int?
     @FlexDate var lastAt: Date?
 }
 

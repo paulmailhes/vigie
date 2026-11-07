@@ -13,7 +13,7 @@ process.env.HOME = path.join(TMP, 'home');
 process.env.VIGIE_DATA = path.join(TMP, 'data');
 process.env.VIGIE_CLAUDE_DIR = CLAUDE;
 const { Indexer, testKind, actionKind, segments, fileLocation, weightOf, mcpServer, maskSecrets, CLAUDE_DIR,
-  isExpectedFail, isPlanFile, parsePlan, parseLedger } = await import('../lib/indexer.mjs');
+  isExpectedFail, isPlanFile, parsePlan, parseLedger, label } = await import('../lib/indexer.mjs');
 const { createConversations, isTempPath } = await import('../lib/conversations.mjs');
 assert.equal(CLAUDE_DIR, CLAUDE, 'les tests doivent lire le faux ~/.claude');
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -227,8 +227,20 @@ test('conversation : résumé, où ça en est, tâches, contexte', async () => {
   assert.equal(d.now.plan, null);
   assert.equal(d.summary.branch, 'main');
   // l'énorme ligne technique n'a rien cassé, le gros Read est passé (réussi)
-  assert.ok(d.activity.find((a) => a.title === 'Lit big.txt' && a.ok === true));
+  assert.ok(d.activity.find((a) => a.title === 'Lire big.txt' && a.ok === true));
   assert.equal(ix.sessions.get(SID).perms.auto, 1);
+  assert.ok(d.activity.find((a) => a.title === 'Lancer l\'agent « Vérifier la charte » (en fond)'));
+});
+
+test('titres du Journal : à l\'infinitif, jamais un identifiant technique ni un « · » dans un titre', () => {
+  assert.equal(label('Agent', { description: 'faire:L2.24' }), 'Lancer l\'agent L2.24');
+  assert.equal(label('Task', { description: 'explore:C7', run_in_background: true }), 'Lancer l\'agent C7 (en fond)');
+  assert.equal(label('Agent', { description: 'Relire : la charte' }), 'Lancer l\'agent « Relire : la charte »');
+  // à l'infinitif, comme les descriptions de Claude
+  assert.equal(label('Edit', { file_path: '/x/IconeFin.tsx' }), 'Modifier IconeFin.tsx');
+  assert.equal(label('Read', { file_path: '/x/a.ts' }), 'Lire a.ts');
+  assert.equal(label('mcp__figma-perso__use_figma', {}), 'figma-perso : use_figma');
+  assert.equal(label('mcp__claude_ai_Gmail__search_threads', {}), 'Gmail : search_threads');
 });
 
 test('conversation : chapitres, tests, fichiers, agents, workflows, artefacts, MCP', async () => {
@@ -873,7 +885,12 @@ test('fini, mais pas vérifié : verdict par règles, fichiers pas commités, co
   assert.deepEqual([c.verdict, c.label, c.lastTestAt, c.lastCodeAt], ['changedAfterTests', 'modifié après les tests', T(2), T(8)]);
   assert.deepEqual([c.uncommitted, c.unpushed], [1, 1]);
   assert.deepEqual(c.notes, ['1 fichier modifié après le dernier commit', '1 commit pas envoyé']);
-  assert.deepEqual(sum().compactions, { count: 1, auto: 1, lastAt: T(9) }, 'la ligne système et son message de résumé : un seul résumé');
+  assert.deepEqual(sum().compactions, { count: 1, auto: 1, manual: 0, lastAt: T(9) }, 'la ligne système et son message de résumé : un seul résumé');
+  // un message de plus ne refait pas le calcul (gardé tant qu'aucun test, commit ou écriture n'arrive)
+  const cached = sum().checks;
+  write(p, [F.say('Je relis.', T(9.7))], true);
+  await ix.refresh();
+  assert.equal(sum().checks, cached, 'même verdict, gardé tel quel');
 
   // tests en échec, puis verts après la dernière modification ; un build vert ne compte pas comme des tests
   write(p, [F.call('Bash', { command: 'npx vitest run' }, { ts: T(10), content: 'Tests 1 failed | 2 passed', isError: true })], true);
@@ -884,14 +901,14 @@ test('fini, mais pas vérifié : verdict par règles, fichiers pas commités, co
     F.asst([{ type: 'text', text: 'You\'ve hit your session limit · resets 3:40am' }], T(12), { stop: 'stop_sequence', usage: U(0, 0, 0, 0), more: { isApiErrorMessage: true, error: 'rate_limit' } }),
     F.human('Autre chose maintenant, merci', T(30)), F.say('Ok.', T(31))], true);
   await ix.refresh();
-  assert.deepEqual(sum().compactions, { count: 3, auto: 1, lastAt: T(45) });
+  assert.deepEqual(sum().compactions, { count: 3, auto: 1, manual: 1, lastAt: T(45) }, 'le résumé vu par son seul message : ni automatique ni à ta demande');
   // la demande en cours n'a rien écrit ni testé : pas de verdict, mais le commit et le push manquent encore
   c = sum().checks;
   assert.deepEqual([c.verdict, c.uncommitted, c.unpushed], [null, 1, 1]);
   // la fin de la première demande : ses faits commencent par le verdict
   const r = conv.reports(new Date(BASE - 60_000).toISOString()).find((x) => x.conversationId === sid && x.kind === 'missionDone');
   assert.equal(r.checks.verdict, 'verified');
-  assert.equal(r.detail, '2 commits · tests verts après la dernière modification · 1 fichier modifié après le dernier commit · 1 commit pas envoyé');
+  assert.equal(r.detail, '2 commits · tests réussis après la dernière modification · 1 fichier modifié après le dernier commit · 1 commit pas envoyé');
 
   // la limite, en français dans le fil et le détail (le texte brut reste à part, pas à montrer)
   const d = conv.detail(sid);

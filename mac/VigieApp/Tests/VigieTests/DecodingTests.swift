@@ -119,7 +119,7 @@ struct DecodingTests {
             case "history.json":
                 let page = try decoder.decode(HistoryPage.self, from: data)
                 // une ligne par issue que l'Historique sait dire, et des compteurs justes (aucune ligne écartée)
-                let statuses: Set<HistoryStatus> = [.accepted, .refused, .blocked, .failed, .waiting, .question]
+                let statuses: Set<HistoryStatus> = [.accepted, .allowed, .refused, .blocked, .failed, .waiting, .question]
                 #expect(Set(page.items.map(\.historyStatus)).isSuperset(of: statuses), "\(name)")
                 #expect(page.counts?.values.reduce(0, +) == page.items.count, "\(name)")
                 #expect(page.items.allSatisfy { $0.ts != nil && $0.conversationId != nil && $0.reason != nil }, "\(name)")
@@ -179,7 +179,7 @@ struct DecodingTests {
         let json = """
         { "since": "2026-10-19T15:40:00.000Z",
           "sinceWindow": { "from": "2026-10-19T15:40:00.000Z", "to": "2026-10-19T23:20:00.000Z", "capped": true },
-          "toReview": [ { "id": "l:c1:1", "kind": "limit", "title": "Limite de session atteinte · Travail 1",
+          "toReview": [ { "id": "l:c1:1", "kind": "limit", "title": "Limite de session atteinte sur Travail 1",
                           "detail": "Remise à zéro à 03:40", "scope": "session", "resetsAt": "2026-10-20T01:40:00.000Z",
                           "accountId": "travail1" } ],
           "reports": [ { "kind": "missionDone", "id": "fin:c1:d1",
@@ -190,7 +190,7 @@ struct DecodingTests {
                                                                   "fullAt": "2026-10-24T14:00:00.000Z" } } },
                         { "id": "perso", "usage": { "week": { "pct": 8, "fullAt": null } } } ],
           "conversations": [
-            { "id": "c1", "checks": { "verdict": "verified", "label": "tests verts après la dernière modification",
+            { "id": "c1", "checks": { "verdict": "verified", "label": "tests réussis après la dernière modification",
                                       "lastTestAt": "2026-10-19T23:09:00Z", "lastCodeAt": "2026-10-19T23:02:00Z",
                                       "uncommitted": 0, "unpushed": 1, "notes": ["1 commit pas envoyé"] },
               "compactions": { "count": 2, "auto": 2, "lastAt": "2026-10-19T19:12:00.000Z" } },
@@ -219,7 +219,7 @@ struct DecodingTests {
 
         let first = try #require(overview.conversations.first)
         #expect(first.checks?.verdictKind == .verified)
-        #expect(first.checks?.label == "tests verts après la dernière modification")
+        #expect(first.checks?.label == "tests réussis après la dernière modification")
         #expect(first.checks?.lastTestAt != nil && first.checks?.lastCodeAt != nil)
         #expect(first.checks?.notes == ["1 commit pas envoyé"])
         #expect(first.compactions?.count == 2 && first.compactions?.auto == 2 && first.compactions?.lastAt != nil)
@@ -330,7 +330,7 @@ struct DecodingTests {
         #expect(agents[2].mcpNeeds.map(\.name) == ["figma", "Gmail"])
         #expect(agents.map(\.mcpReady) == [false, false, true])
         #expect(agents.map(\.canVerifyMCP) == [true, false, true])
-        #expect(AgentMCPState.ready.color == Theme.live && AgentMCPState.toConnect.color == Theme.warn)
+        #expect(AgentMCPState.ready.color == .secondary && AgentMCPState.toConnect.color == Theme.warn)
 
         // la passerelle : ses espaces (Webflow) et l'actif
         let webflow = try JSONDecoder().decode(AgentMCPServer.self, from: Data("""
@@ -370,7 +370,8 @@ struct DecodingTests {
         var clean = a.report
         clean?.todo = []
         clean?.level = "ok"
-        #expect(RecipeRunState(clean) == .ready && RecipeRunState.ready.color == Theme.live)
+        // « Tout est bon » : gris avec sa coche, le vert veut dire « travaille »
+        #expect(RecipeRunState(clean) == .ready && RecipeRunState.ready.color == .secondary && RecipeRunState.running.color == Theme.live)
     }
 
     /// Un compte en double (même compte claude.ai qu'un autre) et la réponse d'une suppression avec ses remarques.
@@ -541,10 +542,16 @@ struct VerdictTests {
         // au repos mais un agent tourne : en pause
         v = make(try summary(#"{"id":"c","status":"idle","agentsRunning":1}"#), nil)
         #expect(v.title == "En pause" && v.tone == .live)
-        // au repos, dernier compte rendu : finie, avec sa phrase utile
+        // au repos, dernier compte rendu : finie, à son heure ; sa phrase utile est dans sa bulle de l'Échange, juste
+        // dessous : la tuile ne la répète pas
         let finished = try detail(#"{"messages":[{"ts":"\#(iso(-180))","kind":"report","text":"x","brief":"Les 29 étapes sont faites."}],"ended":{"kind":"end","ts":"\#(iso(-180))"}}"#)
         v = make(try summary(#"{"id":"c","status":"idle"}"#), finished)
-        #expect(v.title == "Finie" && v.line == "Les 29 étapes sont faites." && v.tone == .calm)
+        #expect(v.title == "Finie" && v.line == nil && v.tone == .calm && v.finished)
+        #expect(v.since == Fmt.when(Date(timeIntervalSince1970: 1_793_900_000 - 180), now: now), "une heure fixe, pas « il y a 3 min »")
+        // le compte rendu n'est plus parmi les 3 bulles montrées : la tuile dit sa phrase
+        let older = try detail(#"{"messages":[{"ts":"\#(iso(-600))","kind":"report","text":"x","brief":"Les 29 étapes sont faites."},{"ts":"\#(iso(-500))","text":"a"},{"ts":"\#(iso(-400))","text":"b"},{"ts":"\#(iso(-300))","text":"c"}]}"#)
+        v = make(try summary(#"{"id":"c","status":"idle"}"#), older)
+        #expect(v.title == "Finie" && v.line == "Les 29 étapes sont faites.")
         // arrêtée par une limite : rouge, pas finie
         let limited = try detail(#"{"ended":{"kind":"limit","ts":"\#(iso(-60))"}}"#)
         v = make(try summary(#"{"id":"c","status":"idle"}"#), limited)

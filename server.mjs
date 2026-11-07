@@ -617,7 +617,8 @@ const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 // « À regarder » : un compte à reconnecter (sa connexion a disparu sans copie à remettre, ou Anthropic l'a refusée,
 // ou la remise traîne), le compte du Mac déconnecté (VS Code dit « déconnecté » partout sans lui), une conversation
-// ouverte partie sur un autre compte parce que le sien ne marchait pas.
+// ouverte partie sur un autre compte parce que le sien ne marchait pas. Sorte « notice » : un avis, rien à décider
+// dans une conversation (le badge rouge ne le compte pas).
 function connectionItems(ctx, title) {
   const out = [];
   const label = (id) => ctx.accSums.find((a) => a.id === id)?.label || id;
@@ -631,7 +632,7 @@ function connectionItems(ctx, title) {
       : st === 'restoring' && ctx.now - Date.parse(since) > 2 * 60_000 ? 'Sa connexion a disparu et Vigie n\'arrive pas à la remettre'
       : st === 'logged-out' && main ? 'Il n\'est pas connecté' : null;
     if (!why) continue;
-    out.push({ id: `cx:${a.id}:${st}`, kind: 'waiting', conversationId: null, conversationTitle: a.label,
+    out.push({ id: `cx:${a.id}:${st}`, kind: 'notice', conversationId: null, conversationTitle: a.label, accountId: a.id,
       title: `${a.label} : à reconnecter`,
       detail: `${why}. ${main ? 'C\'est le compte que VS Code utilise de base : sans lui, VS Code affiche « déconnecté » dans toutes ses fenêtres.' : 'Ses conversations partent sur un autre compte en attendant.'} ${fix}`,
       ts: since });
@@ -639,7 +640,7 @@ function connectionItems(ctx, title) {
   let falls = [];
   try { falls = accounts.fallbacks(indexer.live); } catch { /* journal du lanceur illisible */ }
   for (const f of falls) {
-    out.push({ id: `cf:${f.sessionId}:${f.running}`, kind: 'waiting', conversationId: f.sessionId, conversationTitle: title(f.sessionId),
+    out.push({ id: `cf:${f.sessionId}:${f.running}`, kind: 'notice', conversationId: f.sessionId, conversationTitle: title(f.sessionId),
       title: `Lancée sur ${label(f.running)} au lieu de ${label(f.wanted)}`,
       detail: `${label(f.wanted)} ${f.why === 'non-connecte' ? 'n\'était pas connecté' : 'ne pouvait pas servir'} quand elle a démarré. Elle reprendra sur ${label(f.wanted)} quand il sera reconnecté (au prochain démarrage de la conversation).`,
       ts: new Date(Number(indexer.live.get(f.sessionId)?.startedAt) || ctx.now).toISOString() });
@@ -660,7 +661,9 @@ function connectionNotices(sums) {
 
 // « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui a mal tourné ces dernières 24 h.
 // Chaque garde-fou porte de quoi décider ou refaire l'action : state, pendingId, expiresAt, rule, command
-// (masquée, 4000 caractères au plus), byAgent, cwd, needsPassword.
+// (masquée, 4000 caractères au plus), byAgent, cwd, needsPassword. Son titre dit ce que fait l'action (« Pousser en
+// force », sa description, sinon la commande) ; la règle reste à part (rule), le délai dans expiresAt, et le détail
+// ne dit que ce qui manque ailleurs (pourquoi elle a été refusée).
 function reviewItems(ctx, sums) {
   const titles = new Map(sums.map((s) => [s.id, s.title]));
   const title = (sid) => titles.get(sid) ?? null;
@@ -684,7 +687,7 @@ function reviewItems(ctx, sums) {
           conversationId: sid, conversationTitle: title(sid), cwd: w.cwd ?? null,
           rule: w.rule || 'Action sensible', ruleId: w.ruleId ?? null, command: mask(w.command).slice(0, MAX_COMMAND),
           byAgent: agentName(sid, w.agentId), needsPassword: !!w.needsPassword,
-          title: short(w.rule || 'Action sensible', 120), detail: `${what(w)} · décide ici ou dans ${where(sid)}, sinon refusée ${when}.`, ts: w.ts });
+          title: what(w), detail: null, ts: w.ts });
       }
     }
   }
@@ -702,21 +705,17 @@ function reviewItems(ctx, sums) {
       conversationId: a.sessionId, conversationTitle: title(a.sessionId), cwd: a.cwd,
       rule: a.rule || 'Action sensible', ruleId: a.ruleId, command: mask(a.command).slice(0, MAX_COMMAND),
       byAgent: agentName(a.sessionId, a.agentId), needsPassword: a.needsPassword,
-      title: short(a.rule || 'Action sensible', 120),
-      detail: a.holding ? `${what(a)} · en pause, elle attend ton accord ici (rien ne s'affiche dans VS Code)`
-        : a.approved ? `${what(a)} · autorisée : elle peut la relancer à l'identique.`
-        : `${what(a)} · elle a continué sans cette action : autorise-la ici, elle pourra la relancer.`,
-      ts: a.ts });
+      title: what(a), detail: null, ts: a.ts });
   }
   const cx = safeCodex(() => codex.account(), null);
   if (cx?.connected && cx.hook?.installed && !cx.hook.trusted) {
-    live.push({ id: 'codex-hook', kind: 'waiting', conversationId: null, conversationTitle: 'Codex',
+    live.push({ id: 'codex-hook', kind: 'notice', conversationId: null, conversationTitle: 'Codex',
       title: 'Codex : accepte le module de Vigie',
       detail: 'Sans lui, Vigie ne peut rien accepter pour Codex. Dans Codex (panneau de VS Code ou app ChatGPT) : « Review hooks », puis accepte les deux lignes « Vigie ».',
       ts: new Date(ctx.now).toISOString() });
   }
   for (const n of switchNotices) {
-    live.push({ id: `s:${n.sessionId}:${n.ts}`, kind: 'waiting', conversationId: n.sessionId, conversationTitle: title(n.sessionId),
+    live.push({ id: `s:${n.sessionId}:${n.ts}`, kind: 'notice', conversationId: n.sessionId, conversationTitle: title(n.sessionId),
       title: 'Compte changé', detail: n.message, ts: n.ts });
   }
   for (const item of connectionItems(ctx, title)) live.push(item);
@@ -728,14 +727,14 @@ function reviewItems(ctx, sums) {
       conversationId: b.sessionId ?? null, conversationTitle: title(b.sessionId), cwd: b.cwd ?? null,
       rule: b.rule || 'Action sensible', ruleId: b.ruleId ?? null, command: mask(b.command).slice(0, MAX_COMMAND),
       byAgent: agentName(b.sessionId, b.agentId), needsPassword: !!b.needsPassword,
-      title: short(b.rule || 'Action sensible', 120),
+      title: what(b),
       detail: b.by === 'echec'
-        ? `${BLOCKED_WHY.echec} : ${what(b)}${b.extrait ? ` · « ${short(mask(b.extrait.replace(/^Exit code \d+\n?/, '')), 160)} »` : ''}.`
-        : `${BLOCKED_WHY[b.by] || 'Refusée'} : ${what(b)}. À faire toi-même.`, ts: b.ts });
+        ? `${BLOCKED_WHY.echec}${b.extrait ? ` : « ${short(mask(b.extrait.replace(/^Exit code \d+\n?/, '')), 160)} »` : ''}.`
+        : `${BLOCKED_WHY[b.by] || 'Refusée'}. À faire toi-même.`, ts: b.ts });
   }
   // Limite atteinte ces dernières 24 h, tant qu'elle n'est pas remise à zéro.
   // (conversations ouvertes seulement : une conversation fermée n'attend rien, la carte du compte dit déjà la limite)
-  // Texte en français (lib/limits.mjs), jamais le message anglais de Claude Code : « Limite de session atteinte ·
+  // Texte en français (lib/limits.mjs), jamais le message anglais de Claude Code : « Limite de session atteinte sur
   // Travail 1 », « Remise à zéro à 03:40 ». Le compte : celui de l'organisation de la conversation, sinon le sien.
   let byOrg = null;
   const accountOf = (s) => {
@@ -969,8 +968,15 @@ function heldDecision(h, ctx) {
   const d = ctx.heldDecided[h.approvalId]?.decision;
   return d === 'deny' ? 'denied' : d === 'allow' ? 'you' : 'blocked';
 }
+// Le délai d'une action retenue dans Vigie (« garde-fou-delai-vigie ») ne la retire pas de « À décider » : elle a
+// continué sans, et reste à autoriser 24 h (lib/approvals.mjs). Tant qu'elle l'est, le Journal dit « waiting », comme
+// le badge rouge, et non « refusée d'office ». null : la décision habituelle.
+function heldTimeout(h, ctx) {
+  return h.event === 'garde-fou-delai-vigie' && h.approvalId && heldDecision(h, ctx) === 'waiting' ? 'waiting' : null;
+}
 const SHELL = new Set(['Bash', 'PowerShell', 'Monitor']);
-const VERBS = { Write: 'Écrit', Edit: 'Modifie', MultiEdit: 'Modifie', NotebookEdit: 'Modifie', Read: 'Lit' };
+// À l'infinitif, comme les descriptions de Claude et les titres du Journal (lib/indexer.mjs, label).
+const VERBS = { Write: 'Écrire', Edit: 'Modifier', MultiEdit: 'Modifier', NotebookEdit: 'Modifier', Read: 'Lire' };
 const AUTO_SUFFIX = / — choisi automatiquement par Vigie \(utilisateur absent\)$/;
 
 function acceptedTitle(h) {
@@ -981,7 +987,7 @@ function acceptedTitle(h) {
   if (VERBS[tool]) return `${VERBS[tool]} ${path.basename(String(h.action || ''))}`;
   if (tool.startsWith('mcp__')) {
     const [, srv = '', name = ''] = tool.split('__');
-    return short(`${name.replace(/[_-]+/g, ' ')} · ${srv.startsWith('claude_ai_') ? connectorName(srv) : srv}`, 120);
+    return short(`${srv.startsWith('claude_ai_') ? connectorName(srv) : srv} : ${name.replace(/[_-]+/g, ' ')}`, 120);
   }
   if (SHELL.has(tool)) return short(mask(firstLine(h.action)), 120) || 'Commande';
   return tool || 'Action';
@@ -1018,7 +1024,7 @@ function acceptedFor(sid, ctx) {
     const h = history[i];
     if (h.sessionId !== sid) continue;
     if (HELD_FOLLOW.has(h.event) && h.approvalId) followed.add(h.approvalId);
-    let decision = DECISIONS[h.event];
+    let decision = heldTimeout(h, ctx) ?? DECISIONS[h.event];
     if (!decision) continue;
     if (WAIT_EVENTS.has(h.event) && !pending.has(`${sid}\u0000${h.ts}`)) continue;
     if (h.event === 'garde-fou-en-attente-vigie') {
@@ -1040,7 +1046,7 @@ function recentAccepted(ctx, sums) {
   for (let i = history.length - 1; i >= 0 && out.length < MAX_RECENT_ACCEPTED; i--) {
     const h = history[i];
     if (HELD_FOLLOW.has(h.event) && h.approvalId) followed.add(h.approvalId);
-    let decision = DECISIONS[h.event];
+    let decision = heldTimeout(h, ctx) ?? DECISIONS[h.event];
     if (!decision || !h.ts) continue;
     const sid = typeof h.sessionId === 'string' ? h.sessionId : null;
     if (WAIT_EVENTS.has(h.event) && !pending.has(`${sid}\u0000${h.ts}`)) continue;
@@ -1065,12 +1071,13 @@ function recentAccepted(ctx, sums) {
 // ---------- historique : toutes les demandes, avec leur issue ----------
 // GET /api/v2/history?window=60|1440|10080&status=…&conversation=…&q=… : une ligne par issue (le début d'une attente
 // n'en est pas une, sauf si elle attend encore), la plus récente d'abord, et le nombre de lignes par statut.
-// status : accepted (autorisée, par Vigie ou par toi) · refused (par toi, ou par le mode auto de Claude) · blocked
+// status : accepted (acceptée par Vigie) · allowed (autorisée par toi) · refused (par toi, ou par le mode auto de Claude) · blocked
 // (personne n'a répondu à temps, ou jamais validée à ta place) · failed (autorisée mais en échec) · question ·
 // vscode (laissée à ta fenêtre VS Code) · waiting (attend encore).
 const HISTORY_WINDOWS = new Set([60, 1440, 10080]);
 const HISTORY_STATUS = {
-  'auto-accepte': 'accepted', 'garde-fou-autorise-app': 'accepted', 'garde-fou-autorise-vigie': 'accepted',
+  // « accepter », c'est Vigie seule ; « autoriser », c'est toi (le chiffre « acceptées » de la vue d'ensemble ne compte que Vigie)
+  'auto-accepte': 'accepted', 'garde-fou-autorise-app': 'allowed', 'garde-fou-autorise-vigie': 'allowed',
   'garde-fou-tu-as-repondu': 'vscode', 'demande-pour-toi': 'vscode', 'garde-fou-pour-toi': 'vscode', 'refus-classifieur-pour-toi': 'vscode',
   'garde-fou-rendu': 'vscode', 'reponse-perdue': 'vscode',
   'garde-fou-refuse-app': 'refused', 'garde-fou-refuse-vigie': 'refused', 'refuse-mode-auto': 'refused',
@@ -1092,7 +1099,7 @@ function historyReason(h) {
     case 'refuse-mode-auto': return `Refusée par le mode automatique de Claude${h.reason ? ` : ${short(String(h.reason), 200)}` : ''}`;
     case 'garde-fou-bloque': case 'garde-fou-delai-vigie': return `${BLOCKED_WHY[h.raison] || BLOCKED_WHY.delai}${rule}`;
     case 'garde-fou-echec': return `Autorisée, mais elle a échoué${h.extrait ? ` : « ${short(mask(String(h.extrait).replace(/^Exit code \d+\n?/, '')), 200)} »` : ''}`;
-    case 'question-auto': return 'Réponse choisie à ta place (option recommandée)';
+    case 'question-auto': return 'Réponse choisie pour toi (option recommandée)';
     case 'question-repondue-app': return 'Répondue par toi dans Vigie';
     case 'question-tu-as-repondu': return 'Répondue par toi dans VS Code';
     default: return WAIT_EVENTS.has(h.event) || h.event === 'garde-fou-en-attente-vigie' ? `Attend ta décision${rule}` : null;
@@ -1364,7 +1371,7 @@ function postApprovals(body) {
 
 // POST /api/v2/review/:id/dismiss : retire l'élément de « À regarder » (noté dans data/ui.json).
 // Une question écartée est aussi notée relue (comme « Ça me va »).
-const REVIEW_ID = /^(?:[gwsbl]:[\w.:-]{1,200}|c:[0-9a-f-]{36}|q:[\w-]{1,100}|v:[0-9a-f]{16})$/i;
+const REVIEW_ID = /^(?:(?:[gwsbl]|cf):[\w.:-]{1,200}|c:[0-9a-f-]{36}|q:[\w-]{1,100}|v:[0-9a-f]{16})$/i;
 function postDismiss(raw) {
   let id;
   try { id = decodeURIComponent(raw); } catch { return bad('Cet élément n\'existe plus.', 404); }

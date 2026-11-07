@@ -95,11 +95,12 @@ struct PlanView: View {
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)
                     if let file = plan.file, !file.isEmpty {
-                        Button("Ouvrir le plan", systemImage: "doc.text") {
+                        // on sort de Vigie : « Ouvrir dans … », en lien (un texte bleu nu n'est pas un bouton du jeu)
+                        Button("Ouvrir dans VS Code", systemImage: "doc.text") {
                             SystemActions.openInVSCode(path: file)
                         }
-                        .buttonStyle(.borderless)
-                        .help("Ouvrir dans VS Code : \(Fmt.shortPath(file))")
+                        .buttonStyle(.link)
+                        .help("Le plan dans VS Code : \(Fmt.shortPath(file))")
                     }
                 }
                 ProgressView(value: Double(min(done, total)), total: Double(max(total, 1)))

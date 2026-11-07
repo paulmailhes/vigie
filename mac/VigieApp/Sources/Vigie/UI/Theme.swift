@@ -18,7 +18,8 @@ import SwiftUI
 /// - TEXTE : `liveText`, `warnText`, `alertText`, `youText`. Pour tout mot écrit en couleur (verdict, « à connecter »,
 ///   « rien écrit depuis 10 min », titre d'une alerte). Mode clair : un ton plus foncé, au moins 4,5:1 sur fond blanc
 ///   et sur le gris d'une carte (et sur une puce teintée) ; contraste élevé : plus foncé encore ; mode sombre : la
-///   couleur système, déjà lisible.
+///   couleur système pour le vert et l'orange, un ton plus clair pour le rouge et le violet (le rouge et le violet
+///   système ne font que 3,5 à 3,9:1 sur une puce, une tuile ou une bulle teintée en sombre).
 /// Le texte coloré reste réservé aux mots courts : une phrase longue s'écrit en `.primary` ou `.secondary`, avec
 /// seulement son icône en couleur. Un texte qui informe ne descend jamais sous `.secondary` (`.tertiary` : les « · »
 /// décoratifs et les chevrons seulement).
@@ -36,6 +37,9 @@ enum Theme {
     static let warn = Color.orange
     static let alert = Color.red
     static let action = Color.blue
+    /// Fond plein sous un texte blanc (filtre choisi) : le bleu système ne fait que 3,2 à 3,5:1 avec le blanc ; celui-ci
+    /// 5,6:1, dans les deux modes. Les liens et boutons gardent `action`.
+    static let actionFill = Color(red: 0, green: 0.4, blue: 0.8)
     /// Ce que tu as écrit (l'Échange d'une conversation) : réservé, jamais un état.
     static let you = Color.purple
     /// Opacité de ce qui est fermé, pas connecté ou désactivé.
@@ -48,9 +52,9 @@ enum Theme {
     /// Orange pour un mot : « rien écrit depuis 10 min », « à connecter », « S'emballe ».
     static let warnText = textColor(light: 0x9E4800, highContrast: 0x8A3F00, dark: .systemOrange)
     /// Rouge pour un mot : « À autoriser », « en échec », titre d'une alerte.
-    static let alertText = textColor(light: 0xB8141A, highContrast: 0x9E1116, dark: .systemRed)
+    static let alertText = textColor(light: 0xB8141A, highContrast: 0x9E1116, dark: rgb(0xFF7A73))
     /// Violet pour un mot : « Toi · hier 17:18 ».
-    static let youText = textColor(light: 0x8E24AA, highContrast: 0x6F1C85, dark: .systemPurple)
+    static let youText = textColor(light: 0x8E24AA, highContrast: 0x6F1C85, dark: rgb(0xE88AF7))
 
     /// Le chiffre écrit sur un fond `warnText` (compteur orange) : blanc en clair (6,2:1), noir à 85 % en sombre (sur
     /// l'orange système, le blanc ne fait que 2,3:1).
@@ -67,8 +71,8 @@ enum Theme {
         isDark(appearance) ? NSColor.white.withAlphaComponent(0.06) : NSColor.white.withAlphaComponent(0.7)
     })
 
-    /// Couleur de texte dynamique : un ton foncé fixe en clair (plus foncé encore en contraste élevé), la couleur
-    /// système en sombre (elle suit d'elle-même le contraste élevé).
+    /// Couleur de texte dynamique : un ton foncé fixe en clair (plus foncé encore en contraste élevé) ; en sombre, la
+    /// couleur donnée (système, ou un ton clair fixe quand le système est trop sombre sur un fond teinté).
     private static func textColor(light: UInt32, highContrast: UInt32, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             switch appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua]) {

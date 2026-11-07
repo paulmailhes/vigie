@@ -100,7 +100,7 @@ test('relevé : seuls les processus lancés par une commande de Claude Code, reg
   assert.equal(chrome.forgottenSince, '2026-11-05T05:00:00.000Z', 'oublié depuis la dernière activité de sa conversation');
   assert.match(chrome.detail, /Playwright/);
   const server = byKind.server;
-  assert.equal(server.label, 'Serveur de dev · port 5173');
+  assert.equal(server.label, 'Serveur de dev sur le port 5173');
   assert.equal(server.state, 'idle');
   assert.equal(server.conversationTitle, 'Accueil');
   assert.equal(byKind.app.label, 'Docker');

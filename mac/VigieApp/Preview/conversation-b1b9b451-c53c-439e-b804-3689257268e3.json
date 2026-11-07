@@ -20,7 +20,7 @@
     "startedAt": "2026-10-19T08:41:00.000Z",
     "checks": {
       "verdict": "verified",
-      "label": "tests verts après la dernière modification",
+      "label": "tests réussis après la dernière modification",
       "lastTestAt": "2026-10-19T23:09:00.000Z",
       "lastCodeAt": "2026-10-19T23:02:00.000Z",
       "uncommitted": 0,
@@ -32,6 +32,7 @@
     "compactions": {
       "count": 2,
       "auto": 2,
+      "manual": 0,
       "lastAt": "2026-10-19T19:12:00.000Z"
     }
   },
@@ -328,14 +329,14 @@
     {
       "ts": "2026-10-19T23:12:00.000Z",
       "kind": "file",
-      "title": "Modifie IconeFin.tsx",
+      "title": "Modifier IconeFin.tsx",
       "detail": "apps/web/src/components/IconeFin.tsx",
       "decision": "auto"
     },
     {
       "ts": "2026-10-19T23:09:00.000Z",
       "kind": "agent",
-      "title": "Lance l'agent « faire:L2.24 »",
+      "title": "Lancer l'agent L2.24",
       "detail": "Icônes de fin de partie",
       "decision": "auto"
     },
@@ -349,7 +350,7 @@
     {
       "ts": "2026-10-19T22:40:00.000Z",
       "kind": "mcp",
-      "title": "Figma · use_figma",
+      "title": "figma-pro : use_figma",
       "detail": "Ranger les captures de la page 2",
       "decision": "auto"
     },
@@ -1002,7 +1003,7 @@
     "workflows": 1,
     "agents": 9,
     "artifacts": 0,
-    "files": 38,
+    "files": 9,
     "commits": 4,
     "pushes": 2,
     "deploys": 0,

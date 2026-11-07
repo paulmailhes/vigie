@@ -490,9 +490,10 @@ struct DetailsBar: View {
                 Chip("En fond \(Fmt.int(model.raw.processes.count + model.raw.background.count))", size: .regular) { open(.background) }
                     .help(backgroundHelp)
             }
-            if looks > 0 {
-                Chip("À regarder \(Fmt.int(looks))", size: .regular) { open(.answers) }
-                    .help("Ce qui a mal tourné ou que tu dois faire toi-même")
+            // la tuile d'État montre déjà les premiers : la puce dit seulement le reste
+            if looks > StateTile.shownLooks {
+                Chip("\(Fmt.int(looks - StateTile.shownLooks)) de plus à regarder", size: .regular) { open(.answers) }
+                    .help("Ce qui a mal tourné ou que tu dois faire toi-même : la liste entière")
             }
             if rereads > 0 {
                 Chip("À relire \(Fmt.int(rereads))", size: .regular) { open(.answers) }

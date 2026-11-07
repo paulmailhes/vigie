@@ -327,7 +327,7 @@ const Overview = {
   sinceWindow: { from: ISO, to: ISO, capped: 'bool' },
   sinceSummary: { accepted: 'int', questionsAuto: 'int', blocked: 'int', reports: 'int', testsFailed: 'int', limits: 'int' },
   toReview: arr({
-    id: 'string', kind: oneOf('question', 'blocked', 'waiting', 'limit'), conversationId: opt('string'), conversationTitle: opt('string'),
+    id: 'string', kind: oneOf('question', 'blocked', 'waiting', 'limit', 'notice'), conversationId: opt('string'), conversationTitle: opt('string'),
     title: 'string', detail: opt('string'), ts: ISO,
     question: opt({ id: 'string', items: arr({ question: 'string', header: opt('string'), multiSelect: 'bool', options: arr({ label: 'string', description: opt('string') }), chosen: opt('string') }) }),
     // garde-fou (kind = blocked)
@@ -410,8 +410,8 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   assert.equal(o.toReview[0], pending[0], 'ce qui attend maintenant passe en premier');
   const g = pending[0];
   assert.equal(g.kind, 'blocked');
-  assert.equal(g.title, 'git push forcé ou suppression de branche distante');
-  assert.match(g.detail, /^Pousser en force · décide ici ou dans VS Code, sinon refusée dans (8|9) min\.$/);
+  assert.equal(g.title, 'Pousser en force', 'ce que fait l\'action, pas la règle (elle est dans rule)');
+  assert.equal(g.detail, null, 'le délai est dans expiresAt, le « où » dans les boutons');
   assert.deepEqual([g.state, g.pendingId, g.command, g.rule, g.cwd, g.byAgent, g.needsPassword],
     ['waiting', String(HOOK_PUSH), 'git push --force origin main', 'git push forcé ou suppression de branche distante', CWD, null, false]);
   assert.ok(Math.abs(Date.parse(g.expiresAt) - (NOW + 8 * 60_000)) < 5000, 'échéance : début de l\'attente + guard.waitMin');
@@ -426,7 +426,8 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   const withKey = blocked.find((x) => x.ts === iso(-58));
   assert.equal(withKey.command, 'sudo curl -H "Authorization: Bearer ••••" https://api.example.com/y');
   assert.equal(withKey.byAgent, 'agent-verif');
-  assert.match(withKey.detail, /^Refusée faute de réponse : /);
+  assert.equal(withKey.detail, 'Refusée faute de réponse. À faire toi-même.');
+  assert.ok(withKey.title && withKey.title !== withKey.rule, 'le titre dit ce que fait l\'action');
   // limites : celle de A court encore, celle de B est déjà remise à zéro
   const limits = o.toReview.filter((x) => x.kind === 'limit');
   assert.deepEqual(limits.map((x) => x.conversationId), [SID_A]);
@@ -435,7 +436,7 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   const hhmm = `${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`;
   const label = o.accounts.find((x) => x.id === 'travail1').label;
   assert.deepEqual([limits[0].title, limits[0].detail, limits[0].scope, limits[0].accountId],
-    [`Limite de session atteinte · ${label}`, `Remise à zéro à ${hhmm}`, 'session', 'travail1']);
+    [`Limite de session atteinte sur ${label}`, `Remise à zéro à ${hhmm}`, 'session', 'travail1']);
   assert.ok(Math.abs(Date.parse(limits[0].resetsAt) - (NOW + 120 * 60_000)) < 60_000);
   assert.ok(!r.text.includes('hit your session limit'), 'le message anglais ne sort plus dans la vue d\'ensemble');
   assert.equal(a.needsYou, o.toReview.filter((x) => x.conversationId === SID_A).length);
@@ -503,7 +504,7 @@ test('détail : acceptées avec type et décision, MCP par étage, secrets masqu
   const by = (t) => acc.find((x) => x.title === t);
   assert.equal(by('Lancer les tests').kind, 'command');
   assert.equal(by('Lancer les tests').decision, 'auto');
-  assert.equal(by('Modifie accueil.tsx').kind, 'file');
+  assert.equal(by('Modifier accueil.tsx').kind, 'file');
   assert.equal(by('Quel fond ?').kind, 'question');
   assert.equal(by('Quel fond ?').detail, 'Choisi : Fond B (recommandé)');
   assert.equal(by('Quelle couleur ?').detail, 'Quelle couleur ? [Bleu / Vert]', 'ancienne ligne en JSON : la question, lisible');
@@ -953,7 +954,7 @@ const Series = {
 const total = (pts, k) => pts.reduce((x, p) => x + (p[k] || 0), 0);
 
 test('historique : une ligne par issue, filtres par statut, conversation et texte ; période invalide refusée', async () => {
-  const STATUSES = new Set(['accepted', 'refused', 'blocked', 'failed', 'question', 'vscode', 'waiting']);
+  const STATUSES = new Set(['accepted', 'allowed', 'refused', 'blocked', 'failed', 'question', 'vscode', 'waiting']);
   const all = (await get('/api/v2/history?window=1440')).body;
   assert.ok(all.items.length > 0);
   for (const it of all.items) {
@@ -1081,6 +1082,21 @@ test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à aut
   const after = await held();
   assert.deepEqual(after.filter((x) => x.title === va.command).map((x) => x.decision), ['you']);
   assert.equal(after.filter((x) => x.decision === 'waiting').length, 0);
+  // sans réponse à temps (délai du hook), elle a continué sans et reste à autoriser : le Journal dit « waiting » comme
+  // « À décider », pas « refusée d'office »
+  const C_ID = 'cccccccccccccccc', C_CMD = 'publier-maquette --site essai';
+  const rule = { rule: 'Règle d\'essai', ruleId: 'essai' };
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), `${line(C_ID, C_CMD, rule)}\n${JSON.stringify({ ts: new Date().toISOString(),
+    event: 'garde-fou-delai-vigie', sessionId: SID_A, cwd: CWD, tool: 'Bash', action: C_CMD, ...rule, approvalId: C_ID, hash: C_ID.repeat(4), pid: deadPid })}\n`);
+  v = [];
+  for (let i = 0; i < 80 && !v.length; i++) { await new Promise((res) => setTimeout(res, 100)); v = await items(); }
+  assert.deepEqual(v.map((x) => x.approvalId), [C_ID], 'toujours à autoriser après le délai');
+  const lines = async () => (await get(`/api/v2/conversation/${SID_A}`)).body.accepted.filter((x) => x.title === C_CMD).map((x) => x.decision);
+  assert.deepEqual(await lines(), ['waiting'], 'une seule ligne, en attente');
+  // refusée par toi : plus rien à décider, la ligne du délai redevient un refus
+  assert.equal((await post('/api/v2/approvals', { approvalId: C_ID, decision: 'deny' })).body.ok, true);
+  assert.deepEqual(await items(), []);
+  assert.deepEqual(await lines(), ['blocked']);
 });
 
 // ---------- connexions vues par le coffre (lib/vault.mjs : data/connexions.json) ----------
@@ -1094,7 +1110,8 @@ test('connexions : compte du Mac refusé = « à reconnecter » ; connexion remi
   assert.match(item.title, /à reconnecter$/);
   assert.match(item.detail, /Anthropic a refusé sa connexion/);
   assert.match(item.detail, /VS Code affiche « déconnecté »/);
-  assert.equal(item.kind, 'waiting');
+  assert.equal(item.kind, 'notice', 'un avis : rien à décider, le badge rouge ne le compte pas');
+  assert.equal(item.accountId, 'travail1');
   assert.equal(o.accounts.find((a) => a.id === 'travail1').connected, false);
   // remise en cours depuis peu : rien à montrer encore
   wj(CX, { v: 1, checkedAtEpoch: epoch, accounts: { travail1: { connected: false, state: 'restoring', since: new Date().toISOString() } } });

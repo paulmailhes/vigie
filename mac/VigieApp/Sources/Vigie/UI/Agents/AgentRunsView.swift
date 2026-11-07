@@ -33,7 +33,7 @@ struct RecipeRunsSection: View {
         } header: {
             SectionHeader("Tes lancements", count: runs.count,
                           note: "Le rapport de chaque agent : où il en est, ce qu'il a fait, ce qui te reste à faire.",
-                          inset: 0)
+                          inset: PageMetrics.formHeaderInset)
         }
     }
 }
@@ -72,10 +72,12 @@ enum RecipeRunState: Equatable {
         }
     }
 
-    /// Couleur de remplissage (rond, icône).
+    /// Couleur de remplissage (rond, icône). Le vert veut dire « travaille » : « Tout est bon » est gris avec sa coche,
+    /// comme les tests réussis.
     var color: Color {
         switch self {
-        case .running, .ready: Theme.live
+        case .running: Theme.live
+        case .ready: .secondary
         case .todo, .stopped: Theme.warn
         case .blocked: Theme.alert
         }
@@ -84,7 +86,8 @@ enum RecipeRunState: Equatable {
     /// Le ton de sa puce.
     var tone: Chip.Tone {
         switch self {
-        case .running, .ready: .live
+        case .running: .live
+        case .ready: .neutral
         case .todo, .stopped: .warn
         case .blocked: .alert
         }
@@ -160,7 +163,7 @@ struct RecipeRunRow: View {
         VStack(alignment: .leading, spacing: 12) {
             if let counts = report?.counts, (counts.ok ?? 0) + (counts.warn ?? 0) + (counts.block ?? 0) > 0 {
                 HStack(spacing: 8) {
-                    Chip(Fmt.count(counts.ok ?? 0, "conforme"), symbol: "checkmark.circle.fill", tone: .live)
+                    Chip(Fmt.count(counts.ok ?? 0, "conforme"), symbol: "checkmark.circle.fill", tone: .neutral)
                     Chip(Fmt.count(counts.warn ?? 0, "à corriger", "à corriger"), symbol: "exclamationmark.circle.fill", tone: .warn)
                     Chip(Fmt.count(counts.block ?? 0, "bloquant"), symbol: "xmark.octagon.fill", tone: .alert)
                 }
@@ -177,7 +180,7 @@ struct RecipeRunRow: View {
             }
             if let todo = report?.todo, !todo.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    CardTitle("À faire de ton côté")
+                    CardTitle("À toi")
                     ForEach(todo) { item in todoRow(item) }
                 }
             }
@@ -206,8 +209,9 @@ struct RecipeRunRow: View {
             Button {
                 Task { await store.setAgentTodo(run, item, done: !item.done) }
             } label: {
+                // la case pleine suffit : pas de vert (il veut dire « travaille »)
                 Image(systemName: item.done ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(item.done ? Theme.live : .secondary)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(item.done ? "Fait : \(item.text)" : "À faire : \(item.text)")
@@ -261,7 +265,7 @@ struct RecipeRunRow: View {
     private var links: some View {
         Group {
             if let path = run.report?.report {
-                Button("Rapport détaillé", systemImage: "doc.text") {
+                Button("Ouvrir le rapport", systemImage: "doc.text") {
                     NSWorkspace.shared.open(URL(filePath: (run.folder as NSString).appendingPathComponent(path)))
                 }
                 .help("Ouvre le rapport dans son app")

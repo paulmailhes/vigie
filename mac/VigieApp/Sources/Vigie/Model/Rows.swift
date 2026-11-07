@@ -82,7 +82,10 @@ struct ConversationDetailModel: Equatable, Sendable {
     }
 
     private static func feed(accepted: [Row<AcceptedItem>], activity: [ActivityItem]) -> [Row<AcceptedItem>] {
-        let skip = ["Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
+        // lectures et tâches de fond, pas des actions à montrer : les titres du moteur, à l'infinitif (et ceux d'un
+        // moteur plus ancien, au présent)
+        let skip = ["Lire ", "Chercher « ", "Lister ", "Mettre à jour", "Charger la compétence", "Ajouter une tâche", "Te poser une question",
+                    "Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
         // décisions de Vigie, par sorte d'action et par seconde : une action vue à ±4 s y est déjà
         var decided = Set<String>()
         for row in accepted { if let ts = row.value.ts { decided.insert("\(row.value.itemKind)|\(Int(ts.timeIntervalSince1970))") } }

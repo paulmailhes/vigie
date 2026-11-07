@@ -48,10 +48,10 @@ enum AgentMCPState: Equatable {
         }
     }
 
-    /// Couleur de remplissage (fond de la pastille).
+    /// Couleur de remplissage (fond de la pastille). Prêt : gris avec sa coche (le vert veut dire « travaille »).
     var color: Color {
         switch self {
-        case .ready: Theme.live
+        case .ready: .secondary
         case .toConnect, .toAdd, .toApprove: Theme.warn
         case .failed: Theme.alert
         case .off, .unchecked, .checking: .secondary
@@ -61,7 +61,7 @@ enum AgentMCPState: Equatable {
     /// Couleur du mot (lisible en mode clair).
     var textColor: Color {
         switch self {
-        case .ready: Theme.liveText
+        case .ready: .secondary
         case .toConnect, .toAdd, .toApprove: Theme.warnText
         case .failed: Theme.alertText
         case .off, .unchecked, .checking: .secondary
@@ -187,7 +187,7 @@ struct AgentMCPVerifyButton: View {
                 } label: {
                     Label("Vérifier", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.borderless)
+                .glassButton()
                 .controlSize(.small)
                 .help(help)
                 .accessibilityLabel("Vérifier ses MCP")
@@ -325,7 +325,8 @@ struct AgentMCPPanel: View {
                 if mcp.servers.count > 1 {
                     Picker("MCP utilisé", selection: Binding { mcp.chosen ?? mcp.servers.first?.name ?? "" } set: { picks[mcp.key] = $0 }) {
                         ForEach(mcp.servers) { server in
-                            Text("\(server.name) — \(AgentMCPState(mcp.picking(server.name), checking: false).label)").tag(server.name)
+                            // « — » est réservé à une valeur absente
+                            Text("\(server.name) · \(AgentMCPState(mcp.picking(server.name), checking: false).label)").tag(server.name)
                         }
                     }
                     .labelsHidden()

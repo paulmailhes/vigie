@@ -23,6 +23,8 @@ struct MCPRowLayout<Controls: View, Details: View>: View {
     let service: String?
     let name: String
     let subtitle: String
+    /// Au survol de la provenance : la commande entière (la ligne la montre sans ses chemins).
+    var subtitleHelp: String? = nil
     var dimmed = false
     var status: MCPRowStatus? = nil
     var uses: Int?
@@ -48,7 +50,7 @@ struct MCPRowLayout<Controls: View, Details: View>: View {
                             }
                         }
                         if !subtitle.isEmpty {
-                            InfoLine(parts: [subtitle])
+                            InfoLine(parts: [subtitle], help: subtitleHelp.map { "\(subtitle)\n\($0)" })
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -65,9 +67,9 @@ struct MCPRowLayout<Controls: View, Details: View>: View {
 }
 
 extension MCPRowLayout where Details == EmptyView {
-    init(service: String?, name: String, subtitle: String, dimmed: Bool = false, status: MCPRowStatus? = nil, uses: Int?,
-         @ViewBuilder controls: @escaping () -> Controls) {
-        self.init(service: service, name: name, subtitle: subtitle, dimmed: dimmed, status: status, uses: uses,
-                  controls: controls) { EmptyView() }
+    init(service: String?, name: String, subtitle: String, subtitleHelp: String? = nil, dimmed: Bool = false,
+         status: MCPRowStatus? = nil, uses: Int?, @ViewBuilder controls: @escaping () -> Controls) {
+        self.init(service: service, name: name, subtitle: subtitle, subtitleHelp: subtitleHelp, dimmed: dimmed, status: status,
+                  uses: uses, controls: controls) { EmptyView() }
     }
 }

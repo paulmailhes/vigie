@@ -102,18 +102,7 @@ struct AgentLaunchSheet: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SheetIcon(symbol: AgentIcon.resolved(agent.icon))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agent.displayName)
-                    .font(.title3.bold())
-                if let description = agent.description, !description.isEmpty {
-                    Text(description)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
+        ObjectHeader(agent.displayName, note: agent.description, icon: AgentIcon.resolved(agent.icon))
     }
 
     // MARK: Projet
@@ -548,8 +537,12 @@ struct AgentLaunchSheet: View {
     /// leur bloc, « Outils »).
     @ViewBuilder
     private var notes: some View {
-        // le compte des nouvelles conversations : changé d'ici (avertissement), il se voit tout de suite
-        let launchAccount = AgentAccountWarning.launchAccount(store)
+        // une conversation à continuer garde son compte (attaché dès son premier lancement) ; sinon, le compte des
+        // nouvelles conversations : changé d'ici (avertissement), il se voit tout de suite
+        let continued = session.flatMap { store.conversation($0) }
+        let continuedID = continued.flatMap { store.runningAccountId(of: $0) }
+        let launchAccount = continuedID.map { id in (id: id, name: store.account(id)?.displayName ?? id) }
+            ?? AgentAccountWarning.launchAccount(store)
         let account = launchAccount?.name
         let accountID = launchAccount?.id
         if !autoSend {
@@ -575,6 +568,11 @@ struct AgentLaunchSheet: View {
                 if chosenSurface == .claudeApp {
                     Label("Partira sur le compte connecté dans l'app Claude.", systemImage: Icon.account)
                         .foregroundStyle(.secondary)
+                } else if let account, continuedID != nil {
+                    Label("Continuera sur le compte \(account) (celui de cette conversation).", systemImage: Icon.account)
+                        .foregroundStyle(.secondary)
+                    // changer le compte des nouvelles conversations ne changerait rien à ce lancement
+                    AgentAccountWarning(accountID: accountID, offerDefault: false)
                 } else if let account {
                     Label("Partira sur le compte \(account) (celui des nouvelles conversations).", systemImage: Icon.account)
                         .foregroundStyle(.secondary)

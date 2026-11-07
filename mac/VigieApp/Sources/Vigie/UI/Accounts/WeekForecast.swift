@@ -15,11 +15,12 @@ enum WeekForecast {
         return full
     }
 
-    /// « À ce rythme : pleine vers jeu. 14 h, avant la remise à zéro de lun. 20:00 » ; nil s'il n'y a rien à dire.
-    static func text(_ week: UsageWindow?, now: Date) -> String? {
+    /// « À ce rythme : semaine pleine vers jeu. 14 h, avant la remise à zéro de lun. 20:00 » ; nil s'il n'y a rien à
+    /// dire. `withReset: false` sous une jauge qui écrit déjà sa remise à zéro (page Comptes) : « … vers jeu. 14 h ».
+    static func text(_ week: UsageWindow?, now: Date, withReset: Bool = true) -> String? {
         guard let full = fullAt(week, now: now) else { return nil }
-        let head = "À ce rythme : pleine \(approx(full, now: now))"
-        guard let reset = week?.resetsAt else { return head }
+        let head = "À ce rythme : semaine pleine \(approx(full, now: now))"
+        guard withReset, let reset = week?.resetsAt else { return head }
         return "\(head), avant la remise à zéro \(resetDay(reset, now: now))"
     }
 
@@ -39,7 +40,8 @@ enum WeekForecast {
         }
         let calendar = Calendar.current
         let rounded = roundedHour(date, calendar: calendar)
-        let hour = "\(calendar.component(.hour, from: rounded)) h"
+        // espace insécable : « 14 h » ne se coupe jamais en fin de ligne
+        let hour = "\(calendar.component(.hour, from: rounded))\u{00A0}h"
         switch daysApart(now, rounded, calendar: calendar) {
         case 0: return "vers \(hour)"
         case 1: return "demain vers \(hour)"
@@ -53,7 +55,7 @@ enum WeekForecast {
         switch daysApart(now, date, calendar: calendar) {
         case ...0: return "à \(Fmt.time(date))"
         case 1: return "de demain \(Fmt.time(date))"
-        case let days: return "de \(day(date, long: days >= 7)) \(Fmt.time(date))"
+        case let days: return "de \(day(date, long: days >= 7))\u{00A0}\(Fmt.time(date))"
         }
     }
 

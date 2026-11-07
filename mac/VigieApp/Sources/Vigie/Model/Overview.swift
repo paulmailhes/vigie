@@ -205,7 +205,7 @@ struct Report: Decodable, Equatable, Sendable {
     var conversationTitle: String?
     /// Ce que Claude a fait (fin de demande) ou le nom du workflow.
     var title: String?
-    /// Fin de demande : ses faits (« 8 commits · tests verts ») ; workflow : la 1re phrase de son résultat.
+    /// Fin de demande : ses faits (« 8 commits · tests réussis après la dernière modification ») ; workflow : la 1re phrase de son résultat.
     var detail: String?
     /// Fin de demande : la vraie demande, sans « continue ».
     var prompt: String?

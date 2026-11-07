@@ -142,7 +142,8 @@ struct WindowNavigationTests {
         #expect(store.route == .conversation(back))
         store.showNextWaiting()
         #expect(store.route == .conversation(atelier))
-        #expect(store.waitingPosition(of: atelier) == "2 sur 3")
+        #expect(store.waitingPosition(of: atelier) == "2e des 3")
+        #expect(store.waitingPosition(of: back) == "1re des 3")
         store.showNextWaiting()
         store.showNextWaiting()
         #expect(store.route == .conversation(back))
@@ -158,7 +159,7 @@ struct WindowNavigationTests {
 
         // « t'attend » : la conversation seule
         store.blockedRequest = nil
-        let waiting = try #require(store.toReview.first { $0.id.hasPrefix("w:") })
+        let waiting = try #require(store.toReview.first { $0.reviewKind == .waiting })
         store.open(review: waiting)
         #expect(store.route == .conversation("c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e"))
         #expect(store.blockedRequest == nil)

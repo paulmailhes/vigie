@@ -21,7 +21,7 @@ struct GeneralSettingsView: View {
             }
 
             Section("Fonctionnalités de Vigie") {
-                feature("Auto-accept", "Accepte pour toi les demandes d'autorisation de Claude, dans toutes tes conversations. Les actions sensibles (garde-fous) attendent toujours ton accord.",
+                feature("Auto-accept", "Accepte pour toi les demandes d'autorisation de Claude, dans toutes tes conversations. Les actions sensibles, retenues par les garde-fous, attendent toujours ton accord.",
                         isOn: $store.autoAccept)
                 feature("Répondre aux questions quand tu n'es pas là", "Si Claude te pose une question et que tu ne réponds pas en \(store.questionWaitMin) min, Vigie choisit l'option que Claude recommande.",
                         isOn: $store.questionsAuto)
@@ -40,7 +40,7 @@ struct GeneralSettingsView: View {
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Agents qui démarrent tout seuls")
+                        Text("Agents Vigie qui démarrent tout seuls")
                         Text("Avec l'accès Accessibilité, Vigie envoie le message d'un agent dans le champ de Claude et fait confiance au dossier du projet dans VS Code.")
                             .font(.callout)
                             .foregroundStyle(.secondary)

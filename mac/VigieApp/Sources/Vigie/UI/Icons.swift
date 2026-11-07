@@ -14,8 +14,8 @@ enum Icon {
     static let workflow = "point.3.connected.trianglepath.dotted"
     static let test = "checkmark.seal"
     static let testFailed = "xmark.octagon"
-    /// Verdict d'une demande finie : tests réussis après la dernière modification (coche), ou à revoir (modifié après
-    /// les tests, aucun test lancé).
+    /// Verdict d'une demande finie : tests réussis après la dernière modification (coche), ou modifié après les tests
+    /// (triangle). « Aucun test lancé » n'a pas d'icône : rien de prouvé, pas un défaut.
     static let verified = "checkmark"
     static let unverified = "exclamationmark.triangle"
     static let testExpectedFail = "flask"

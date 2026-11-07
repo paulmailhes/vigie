@@ -216,24 +216,29 @@ final class Notifier {
                 list.append(Candidate(key: "r:" + item.id, kind: .stopped, title: "\(conversation) s'est arrêtée, pas finie",
                                       subtitle: item.title ?? "Limite atteinte", body: item.detail ?? "Limite atteinte",
                                       conversationId: item.conversationId, reviewId: nil))
-            case .blocked, .other:
+            case .other:
+                // un avis du moteur (compte à reconnecter, compte changé, module Codex) : son propre titre, jamais
+                // « … t'attend » (rien à décider dans une conversation)
+                list.append(Candidate(key: "r:" + item.id, kind: .waiting, title: item.title ?? "Vigie",
+                                      body: item.detail ?? "", conversationId: item.conversationId, reviewId: nil,
+                                      accountId: item.accountId))
+            case .blocked:
                 continue
             }
         }
 
         for account in store.accounts {
             guard let week = account.usage?.week, let pct = week.pct else { continue }
-            let period = week.resetsAt.map { String(Int($0.timeIntervalSince1970)) } ?? "?"
             let crossed = [90, 80].filter { pct >= Double($0) }
             guard let top = crossed.first else { continue }
             // Le seuil le plus haut passé ; les seuils inférieurs sont marqués vus en même temps.
             for threshold in crossed.dropFirst() {
-                let key = "a:\(account.id):\(threshold):\(period)"
+                let key = Self.weekKey(accountId: account.id, threshold: threshold, reset: week.resetsAt)
                 if seen[key] == nil { seen[key] = Date.now.timeIntervalSince1970 }
             }
             var body = "\(Fmt.pct(pct)) de la semaine utilisés"
             if let reset = week.resetsAt { body += " · remise à zéro \(Fmt.reset(reset, now: store.now))" }
-            list.append(Candidate(key: "a:\(account.id):\(top):\(period)", kind: .accountWeek,
+            list.append(Candidate(key: Self.weekKey(accountId: account.id, threshold: top, reset: week.resetsAt), kind: .accountWeek,
                                   title: "\(account.displayName) passe \(top) % de sa semaine", body: body,
                                   conversationId: nil, reviewId: nil, accountId: account.id))
         }
@@ -344,9 +349,24 @@ final class Notifier {
     /// Clé de la prévision : le compte et la remise à zéro arrondie à l'heure (le relevé dit 18:59 ou 19:00) ; sans
     /// remise à zéro connue, la tranche de 7 jours.
     static func forecastKey(accountId: String, reset: Date?, now: Date) -> String {
-        let period = reset.map { String(Int(($0.timeIntervalSince1970 / 3600).rounded())) }
-            ?? "w\(Int(now.timeIntervalSince1970 / 604_800))"
-        return "f:\(accountId):\(period)"
+        "f:\(accountId):\(period(reset, step: 3600) ?? "w\(Int(now.timeIntervalSince1970 / 604_800))")"
+    }
+
+    /// Clé des alertes 80 % / 90 % de la semaine : une fois par seuil et par semaine, la remise à zéro arrondie à
+    /// l'heure la plus proche (comme la prévision : 19:59:59 et 20:00:00 font la même semaine).
+    static func weekKey(accountId: String, threshold: Int, reset: Date?) -> String {
+        "a:\(accountId):\(threshold):\(period(reset, step: 3600) ?? "?")"
+    }
+
+    /// Clé de l'alerte 90 % de la session : la remise à zéro aux 10 min les plus proches (le relevé dit 03:59:59 ou
+    /// 04:00:00 : arrondi vers le bas, deux tranches et deux bannières) ; sans elle, la tranche de 5 h.
+    static func sessionKey(accountId: String, reset: Date?, now: Date) -> String {
+        "s:\(accountId):\(period(reset, step: 600) ?? "t\(Int(now.timeIntervalSince1970 / 18_000))")"
+    }
+
+    /// Une remise à zéro arrondie au pas le plus proche, pour une clé qui ne bouge pas avec le relevé.
+    private static func period(_ reset: Date?, step: TimeInterval) -> String? {
+        reset.map { String(Int(($0.timeIntervalSince1970 / step).rounded())) }
     }
 
     /// « 62 % de la semaine utilisés · remise à zéro lun. 26 oct. à 20:00 ».
@@ -364,10 +384,7 @@ final class Notifier {
                   pct >= AccountGauge.sessionAlert, pct < 100 else { return nil }
             let running = store.working(on: account.id)
             guard !running.isEmpty else { return nil }
-            // la remise à zéro à 10 min près (le relevé peut bouger de quelques secondes) ; sans elle, la tranche de 5 h
-            let period = session.resetsAt.map { String(Int($0.timeIntervalSince1970 / 600)) }
-                ?? "t\(Int(Date.now.timeIntervalSince1970 / 18_000))"
-            return Candidate(key: "s:\(account.id):\(period)", kind: .accountSession,
+            return Candidate(key: Self.sessionKey(accountId: account.id, reset: session.resetsAt, now: Date.now), kind: .accountSession,
                              title: "\(account.displayName) à \(Fmt.pct(pct)) de sa session",
                              body: Self.sessionBody(running.map(\.shortTitle), reset: session.resetsAt),
                              conversationId: nil, reviewId: nil, accountId: account.id,

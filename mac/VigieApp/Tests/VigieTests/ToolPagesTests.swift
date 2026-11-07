@@ -50,7 +50,7 @@ struct ToolPagesTests {
           { "id": "d", "wrongAccount": true, "connected": true },
           { "id": "e", "email": "alex.durand@gmail.com", "expectedEmail": "alex.durand@gmail.com", "connected": true } ]
         """)
-        #expect(AccountCard.wrongAddressText(list[0]) == "Connecté avec bob@autre.fr au lieu de alex.durand@gmail.com.")
+        #expect(AccountCard.wrongAddressText(list[0]) == "Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com.")
         #expect(AccountCard.address(list[0]) == "bob@autre.fr")
         // l'adresse prévue recopiée n'est pas l'adresse connectée : on ne la montre pas comme telle
         #expect(AccountCard.wrongAddressText(list[1]) == "Connecté avec une autre adresse que Alex.Durand@gmail.com.")
@@ -65,7 +65,7 @@ struct ToolPagesTests {
         let data = try Data(contentsOf: Self.previewFolder.appending(path: "accounts.json"))
         let state = try JSONDecoder().decode(AccountsState.self, from: data)
         let wrong = try #require(state.accounts.first { $0.wrongAccount == true })
-        #expect(AccountCard.wrongAddressText(wrong) == "Connecté avec bob@autre.fr au lieu de alex.durand@gmail.com.")
+        #expect(AccountCard.wrongAddressText(wrong) == "Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com.")
         // un seul compte qui serait plein avant la remise à zéro, et c'est avant elle
         let forecasts = state.accounts.filter { $0.usage?.week?.fullAt != nil }
         #expect(forecasts.map(\.id) == ["travail1"])
@@ -89,30 +89,32 @@ struct ToolPagesTests {
         let now = try date(20, 21)   // mardi soir
         let reset = iso(try date(26, 20)), full = iso(try date(22, 13, 45))
         let window = try week(#"{ "pct": 62, "resetsAt": "\#(reset)", "fullAt": "\#(full)" }"#)
-        #expect(WeekForecast.text(window, now: now) == "À ce rythme : pleine vers jeu. 14 h, avant la remise à zéro de lun. 20:00")
+        #expect(WeekForecast.text(window, now: now) == "À ce rythme : semaine pleine vers jeu. 14\u{00A0}h, avant la remise à zéro de lun.\u{00A0}20:00")
+        // sous la jauge de la page Comptes, qui écrit déjà la remise à zéro : la première moitié
+        #expect(WeekForecast.text(window, now: now, withReset: false) == "À ce rythme : semaine pleine vers jeu. 14\u{00A0}h")
         #expect(WeekForecast.notificationTitle(account: "Travail 1", week: window, now: now)
-                == "Travail 1 sera plein avant la remise à zéro (vers jeu. 14 h)")
+                == "Travail 1 sera plein avant la remise à zéro (vers jeu. 14\u{00A0}h)")
 
         // à l'heure ronde, demain ou aujourd'hui
-        #expect(WeekForecast.approx(try date(22, 14, 15), now: now) == "vers jeu. 14 h")
-        #expect(WeekForecast.approx(try date(22, 13, 30), now: now) == "vers jeu. 14 h")
-        #expect(WeekForecast.approx(try date(21, 8), now: now) == "demain vers 8 h")
-        #expect(WeekForecast.approx(try date(21, 23, 45), now: now) == "vers jeu. 0 h")
-        #expect(WeekForecast.approx(try date(20, 17, 10), now: try date(20, 9)) == "vers 17 h")
+        #expect(WeekForecast.approx(try date(22, 14, 15), now: now) == "vers jeu. 14\u{00A0}h")
+        #expect(WeekForecast.approx(try date(22, 13, 30), now: now) == "vers jeu. 14\u{00A0}h")
+        #expect(WeekForecast.approx(try date(21, 8), now: now) == "demain vers 8\u{00A0}h")
+        #expect(WeekForecast.approx(try date(21, 23, 45), now: now) == "vers jeu. 0\u{00A0}h")
+        #expect(WeekForecast.approx(try date(20, 17, 10), now: try date(20, 9)) == "vers 17\u{00A0}h")
         // dans moins d'une heure : un délai à l'écran, une heure dans une notification (texte figé)
         let soon = now.addingTimeInterval(25 * 60)
         #expect(WeekForecast.approx(soon, now: now) == "dans 25 min")
         #expect(WeekForecast.approx(soon, now: now, fixed: true) == "vers \(Fmt.time(soon))")
         // le même jour de la semaine, 7 jours plus tard : la date entière
-        #expect(WeekForecast.approx(try date(26, 22), now: try date(19, 21)).hasSuffix("26 oct. 22 h"))
+        #expect(WeekForecast.approx(try date(26, 22), now: try date(19, 21)).hasSuffix("26 oct. 22\u{00A0}h"))
 
         #expect(WeekForecast.resetDay(try date(20, 23), now: now) == "à 23:00")
         #expect(WeekForecast.resetDay(try date(21, 20), now: now) == "de demain 20:00")
-        #expect(WeekForecast.resetDay(try date(26, 20), now: try date(19, 21)).hasSuffix("26 oct. 20:00"))
+        #expect(WeekForecast.resetDay(try date(26, 20), now: try date(19, 21)).hasSuffix("26 oct.\u{00A0}20:00"))
 
         // sans remise à zéro connue : la première moitié seulement
         let noReset = try week(#"{ "pct": 62, "fullAt": "\#(full)" }"#)
-        #expect(WeekForecast.text(noReset, now: now) == "À ce rythme : pleine vers jeu. 14 h")
+        #expect(WeekForecast.text(noReset, now: now) == "À ce rythme : semaine pleine vers jeu. 14\u{00A0}h")
     }
 
     @Test func weekForecastSaysNothingWhenItHolds() throws {
@@ -138,7 +140,7 @@ struct ToolPagesTests {
         { "session": { "pct": 20 }, "week": { "pct": 62, "resetsAt": "\(iso(reset))", "fullAt": "\(full)" } }
         """.utf8))
         let gauge = AccountGauge(usage: usage, now: now)
-        let text = "À ce rythme : pleine vers jeu. 14 h, avant la remise à zéro de lun. 20:00"
+        let text = "À ce rythme : semaine pleine vers jeu. 14\u{00A0}h, avant la remise à zéro de lun.\u{00A0}20:00"
         #expect(gauge.forecast == text)
         #expect(gauge.help.hasSuffix("\n" + text))
         #expect(AccountGauge(usage: nil, now: now).forecast == nil)
@@ -150,6 +152,23 @@ struct ToolPagesTests {
                 != Notifier.forecastKey(accountId: "travail1", reset: reset.addingTimeInterval(7 * 86_400), now: now))
         #expect(Notifier.forecastKey(accountId: "travail1", reset: reset, now: now).hasPrefix("f:travail1:"))
         #expect(NotifyKind.accountWeek.title.contains("sera plein avant la remise à zéro"))
+    }
+
+    @Test func accountAlertKeysDoNotMoveWithTheReading() throws {
+        let now = try date(20, 1)
+        // la remise à zéro lue oscille autour de l'heure ronde : une seule alerte
+        let reset = try date(26, 20)
+        #expect(Notifier.weekKey(accountId: "travail1", threshold: 90, reset: reset.addingTimeInterval(-1))
+                == Notifier.weekKey(accountId: "travail1", threshold: 90, reset: reset))
+        #expect(Notifier.weekKey(accountId: "travail1", threshold: 90, reset: reset)
+                != Notifier.weekKey(accountId: "travail1", threshold: 80, reset: reset))
+        #expect(Notifier.weekKey(accountId: "travail1", threshold: 90, reset: reset)
+                != Notifier.weekKey(accountId: "travail1", threshold: 90, reset: reset.addingTimeInterval(7 * 86_400)))
+        let session = try date(21, 4)
+        #expect(Notifier.sessionKey(accountId: "travail1", reset: session.addingTimeInterval(-0.2), now: now)
+                == Notifier.sessionKey(accountId: "travail1", reset: session.addingTimeInterval(0.2), now: now))
+        #expect(Notifier.sessionKey(accountId: "travail1", reset: session, now: now)
+                != Notifier.sessionKey(accountId: "travail1", reset: session.addingTimeInterval(5 * 3600), now: now))
     }
 
     // MARK: Lancement d'un agent
@@ -258,5 +277,8 @@ struct ToolPagesTests {
         // le rouge pour ce qui n'est pas passé sans toi ou t'attend ; jamais de vert pour « acceptée »
         #expect(HistoryStatus.blocked.tone == .alert && HistoryStatus.failed.tone == .alert && HistoryStatus.waiting.tone == .alert)
         #expect(HistoryStatus.accepted.tone == .neutral)
+        // accepter, c'est Vigie seule ; autoriser, c'est toi ; un statut inconnu reste lisible
+        #expect(HistoryStatus.accepted.label == "Acceptée" && HistoryStatus.allowed.label == "Autorisée")
+        #expect(HistoryStatus.allowed.title == "Autorisées" && HistoryStatus.allowed.tone == .neutral)
     }
 }

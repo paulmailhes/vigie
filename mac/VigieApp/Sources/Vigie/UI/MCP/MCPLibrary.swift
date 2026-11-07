@@ -86,14 +86,9 @@ struct MCPLibrarySheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: Icon.mcp)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Bibliothèque de MCP").font(.title3.bold())
-                    Text("Les MCP officiels, proposés par les services eux-mêmes. Un clic : il arrive sur tous tes comptes Claude.")
-                        .foregroundStyle(.secondary)
-                }
-            }
+            ObjectHeader("Bibliothèque de MCP",
+                         note: "Les MCP officiels, proposés par les services eux-mêmes. Un clic : il arrive sur tous tes comptes Claude.",
+                         icon: Icon.mcp)
             TextField("Chercher (Notion, design, paiements…)", text: $search)
                 .textFieldStyle(.roundedBorder)
             List {
@@ -122,10 +117,13 @@ struct MCPLibrarySheet: View {
             ServiceGlyph(service: entry.id, name: entry.title)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
+                    .textRole(.item)
                 Text(entry.open ? "Sans compte à connecter" : (URL(string: entry.url)?.host() ?? entry.url))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // le filet de la liste commence sous le nom, même quand « Déjà là » (un Label) suit
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
             Spacer()
             let names = present(entry)
             if !names.isEmpty || added.contains(entry.id) {
@@ -133,8 +131,9 @@ struct MCPLibrarySheet: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
+                // un bouton par ligne : aucun n'est le principal (comme « Ajouter » sur la page MCP)
                 AsyncButton("Ajouter") { await add(entry) }
-                    .glassButton(.primary)
+                    .glassButton()
                     .help(entry.open ? "Ajouté à tous tes comptes, rien à connecter" : "Ajouté à tous tes comptes ; ton navigateur s'ouvre pour le connecter")
             }
         }

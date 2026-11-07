@@ -190,10 +190,11 @@ struct ConversationTrail: View {
         }
     }
 
-    /// Ce que VoiceOver lit pour la ligne : « Atelier, À autoriser, Travail 1, 2 à décider ».
+    /// Ce que VoiceOver lit pour la ligne : « Atelier, À autoriser, s'emballe, Travail 1, 2 à décider ».
     static func spoken(_ conversation: ConversationSummary, store: VigieStore) -> String {
         let decisions = store.decisionCount(for: conversation.id)
         return [conversation.shortTitle, Theme.label(for: conversation.state),
+                conversation.alert?.isRunaway == true ? "s'emballe" : "",
                 conversation.isOpen ? store.accountName(of: conversation) : "",
                 decisions > 0 ? "\(decisions) à décider" : ""]
             .filter { !$0.isEmpty }
@@ -221,9 +222,7 @@ struct SidebarAccountRow: View {
                         .foregroundStyle(Theme.alert)
                         .help(Self.wrongAddressHelp)
                 } else {
-                    Circle()
-                        .fill(store.working(on: account.id).isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
-                        .frame(width: 8, height: 8)
+                    StateDot.working(!store.working(on: account.id).isEmpty)
                 }
             }
             .frame(width: 18)
@@ -293,7 +292,7 @@ struct AccountGauge: Equatable {
     let pct: Double?
     /// Une fenêtre pleine : ce texte rouge remplace la jauge (« Session pleine · 03:40 », « Semaine pleine »).
     let full: String?
-    /// La semaine serait pleine avant sa remise à zéro : « À ce rythme : pleine vers jeu. 14 h, avant la remise à
+    /// La semaine serait pleine avant sa remise à zéro : « À ce rythme : semaine pleine vers jeu. 14 h, avant la remise à
     /// zéro de lun. 20:00 » (`WeekForecast`) ; nil sinon.
     let forecast: String?
     /// Les deux chiffres et leurs remises à zéro, puis la prévision de la semaine, pour l'aide au survol et VoiceOver.

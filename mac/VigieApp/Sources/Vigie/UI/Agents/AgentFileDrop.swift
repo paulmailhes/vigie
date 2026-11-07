@@ -14,9 +14,9 @@ struct AgentTextArea: View {
 
     var body: some View {
         FileDropTextEditor(text: $text, label: label, onFiles: onFiles, targeted: $targeted)
-            .background(.quinary, in: .rect(cornerRadius: 10))
+            .background(.quinary, in: .rect(cornerRadius: 8))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(targeted ? AnyShapeStyle(Theme.action) : AnyShapeStyle(.separator), lineWidth: targeted ? 2 : 1)
             }
             .overlay(alignment: .topLeading) {

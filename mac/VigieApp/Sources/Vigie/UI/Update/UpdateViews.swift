@@ -55,15 +55,7 @@ struct WhatsNewSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: "sparkles")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Quoi de neuf dans Vigie").font(.title3.bold())
-                    if let current = store.updateStatus?.current {
-                        Text("Version \(current)").foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ObjectHeader("Quoi de neuf dans Vigie", note: store.updateStatus?.current.map { "Version \($0)" }, icon: "sparkles")
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(releases) { release in

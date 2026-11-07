@@ -68,21 +68,17 @@ struct BackgroundView: View {
 
     // MARK: Sous-titre, chiffre clé et groupes
 
-    /// « 16 Go sur 36 Go · 5 groupes · mis à jour à l'instant » : un état chiffré, 3 infos au plus.
+    /// « 5 groupes · 2 oubliés · mis à jour à l'instant » : un état chiffré, 3 infos au plus. La mémoire est le chiffre
+    /// clé de la page, en grand dans le corps : le sous-titre ne la répète pas.
     private var subtitle: String {
         guard let list = store.background else { return "" }
         let groups = list.total?.groups ?? list.groups.count
+        let lost = list.groups.count { $0.groupState == .forgotten }
         return InfoLine.text([
-            groups > 0 ? memoryLine(list) : nil,
             groups > 0 ? Fmt.count(groups, "groupe") : "Rien ne tourne",
+            lost > 0 ? Fmt.count(lost, "oublié") : nil,
             list.scannedAt.map { "mis à jour \(Fmt.ago($0, now: store.now))" },
         ])
-    }
-
-    /// « 16 Go sur 36 Go » (la mémoire de ton Mac).
-    private func memoryLine(_ list: BackgroundList) -> String {
-        let used = Fmt.memory(mb: list.total?.memoryMb)
-        return ram.map { "\(used) sur \($0) Go" } ?? used
     }
 
     /// La mémoire du Mac, en Go entiers.
@@ -177,7 +173,7 @@ struct BackgroundView: View {
             }
             .toggleStyle(.switch)
             if let last = list.autoStopped.first {
-                Text("Dernier arrêt automatique : \(last.label ?? "Chrome sans fenêtre")\(last.project.map { " (\(ProjectName.display($0)))" } ?? "") · \(Fmt.memory(mb: last.memoryMb)) libérés · \(Fmt.ago(last.ts, now: store.now))")
+                Text("Dernier arrêt automatique : \(last.label ?? "Chrome sans fenêtre")\(last.project.map { " (\(ProjectName.display($0)))" } ?? "") · \(Fmt.memory(mb: last.memoryMb)) libérés · \(last.ts.map { Fmt.when($0, now: store.now) } ?? Fmt.none)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -234,11 +230,18 @@ struct BackgroundRow: View {
         .accessibilityAction(named: expanded ? "Replier" : "Déplier", toggle)
     }
 
+    /// Avec « Différencier sans couleur », un symbole : oublié, travaille, ou rien de particulier.
     private var dot: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
+        StateDot(style: AnyShapeStyle(color), symbol: dotSymbol)
             .accessibilityHidden(true)
+    }
+
+    private var dotSymbol: String {
+        switch group.groupState {
+        case .forgotten: "exclamationmark.circle.fill"
+        case .working, .waiting: Theme.symbol(for: .working)
+        case .app, .idle, .unknown: "circle"
+        }
     }
 
     /// Ce que c'est : « Chrome sans fenêtre », et son détail.
@@ -266,12 +269,13 @@ struct BackgroundRow: View {
         }
     }
 
-    /// « depuis 1 j » et la mémoire, en colonnes alignées d'une ligne à l'autre.
+    /// « depuis 1 j » et la mémoire, en colonnes alignées d'une ligne à l'autre. La colonne tient « depuis 23 h » ou
+    /// « depuis 10 min » entier : un état ne se coupe jamais.
     private var numbers: some View {
         HStack(spacing: 10) {
             Text(launched)
                 .foregroundStyle(.secondary)
-                .frame(width: 76, alignment: .trailing)
+                .frame(width: 104, alignment: .trailing)
                 .help(group.startedAt.map { "Lancé \(Fmt.when($0, now: store.now))" } ?? "")
             Text(Fmt.memory(mb: group.memoryMb))
                 .frame(width: 64, alignment: .trailing)
@@ -310,10 +314,10 @@ struct BackgroundRow: View {
         return "Conversation inconnue"
     }
 
-    /// L'état de la conversation : « Travaille », « Fermée il y a 2 h ».
+    /// L'état de la conversation : « Travaille », « Fermée hier 22:10 ».
     private var stateText: String {
         switch group.groupState {
-        case .forgotten: "Fermée\(group.forgottenSince.map { " \(Fmt.ago($0, now: store.now))" } ?? "")"
+        case .forgotten: "Fermée\(group.forgottenSince.map { " \(ConversationVerdict.at($0, now: store.now))" } ?? "")"
         case .working: "Travaille"
         case .waiting: "T'attend"
         case .idle: "Au repos"
@@ -346,7 +350,7 @@ struct BackgroundRow: View {
                     Text("processeur \(Int(cpu)) %")
                 }
                 if let since = group.forgottenSince {
-                    Text("oublié \(Fmt.ago(since, now: store.now))")
+                    Text("oublié \(ConversationVerdict.at(since, now: store.now))")
                 }
             }
             .font(.caption)

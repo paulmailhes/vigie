@@ -55,6 +55,17 @@ struct AbsenceTests {
         #expect(absence.since(now: back) == back.addingTimeInterval(-24 * 3600))
     }
 
+    @Test func aCoveredWindowIsNotAnAbsence() {
+        // Vigie derrière VS Code, ou sur un autre bureau : toujours là
+        #expect(VigieStore.isPresent(windowPresent: true, menuPanelOpen: false, screensAsleep: false, screenLocked: false))
+        // fenêtre fermée, mais le panneau de la barre des menus ouvert : là aussi
+        #expect(VigieStore.isPresent(windowPresent: false, menuPanelOpen: true, screensAsleep: false, screenLocked: false))
+        // écrans en veille, session verrouillée, fenêtre fermée ou app cachée : absent
+        #expect(!VigieStore.isPresent(windowPresent: true, menuPanelOpen: false, screensAsleep: true, screenLocked: false))
+        #expect(!VigieStore.isPresent(windowPresent: true, menuPanelOpen: true, screensAsleep: false, screenLocked: true))
+        #expect(!VigieStore.isPresent(windowPresent: false, menuPanelOpen: false, screensAsleep: false, screenLocked: false))
+    }
+
     @Test func comingBackWithoutLeavingDoesNothing() {
         var absence = Absence()
         absence.back(at: start)
@@ -138,22 +149,37 @@ struct OverviewFactsTests {
         let perso = try #require(try accounts(#"[ { "id": "perso", "label": "Perso" } ]"#).first)
         let working = "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
         // au repos : elle garde son historique, et relit toute la conversation sur le nouveau compte (la phrase du moteur)
-        #expect(AccountSwitch.message(working: false, to: perso, contextTokens: 182_000)
-                == "Elle garde tout son historique. Elle relira toute la conversation sur Perso (environ 182 k tokens).")
+        let reread = "Elle relira toute la conversation sur Perso : sa première réponse coûtera plus qu'un message ordinaire."
+        #expect(AccountSwitch.message(working: false, to: perso, contextTokens: 182_000) == "Elle garde tout son historique. \(reread)")
+        // la taille, en tokens, seulement dans l'aide
+        #expect(AccountSwitch.size(contextTokens: 182_000) == "Taille de la conversation : environ 182 k tokens.")
+        #expect(AccountSwitch.size(contextTokens: nil) == nil)
+        #expect(!reread.contains("tokens"))
         #expect(AccountSwitch.message(working: false, to: perso, contextTokens: nil) == "Elle reprend sur Perso avec tout son historique.")
         #expect(AccountSwitch.message(working: false, to: perso, contextTokens: 0) == "Elle reprend sur Perso avec tout son historique.")
         // au travail : à la fin de son tour, ou tout de suite en l'interrompant
         #expect(AccountSwitch.message(working: true, to: perso, contextTokens: nil) == working)
-        #expect(AccountSwitch.message(working: true, to: perso, contextTokens: 1_250_000)
-                == "\(working) Elle relira toute la conversation sur Perso (environ \(Fmt.tokens(1_250_000)) tokens).")
+        #expect(AccountSwitch.message(working: true, to: perso, contextTokens: 1_250_000) == "\(working) \(reread)")
         #expect(AccountSwitch.reread(on: perso, contextTokens: -5) == nil)
     }
 
-    @Test func thePreviewLimitProposesPerso() async throws {
+    @Test func aWrongAddressIsNeverProposed() throws {
+        let list = try accounts("""
+        [ { "id": "travail1", "label": "Travail 1", "connected": true, "usage": { "session": { "pct": 100 }, "week": { "pct": 39 } } },
+          { "id": "perso", "label": "Perso", "connected": true, "wrongAccount": true, "usage": { "session": { "pct": 0 }, "week": { "pct": 8 } } },
+          { "id": "travail2", "label": "Travail 2", "connected": true, "usage": { "session": { "pct": 30 }, "week": { "pct": 40 } } } ]
+        """)
+        // Perso a plus de marge, mais tourne sur un autre compte claude.ai que celui prévu : Travail 2
+        #expect(AccountSwitch.freeAccount(in: list, limited: "travail1", now: now)?.id == "travail2")
+        #expect(AccountSwitch.freeAccount(in: list, limited: "travail1", excluding: ["travail2"], now: now) == nil)
+    }
+
+    @Test func thePreviewLimitProposesNoWrongAccount() async throws {
         let store = VigieStore(client: VigieClient(source: .fixtures(AbsenceTests.previewFolder)))
         await store.refreshOverview()
         let limit = try #require(store.toReview.first { $0.reviewKind == .limit })
-        #expect(AccountSwitch.freeAccount(in: store.accounts, limited: limit.accountId, now: store.now)?.displayName == "Perso")
+        // Perso est connecté à la mauvaise adresse, Travail 2 n'est pas connecté : « Voir les comptes »
+        #expect(AccountSwitch.freeAccount(in: store.accounts, limited: limit.accountId, now: store.now) == nil)
         // une conversation au repos, finie depuis moins de 24 h : son compte rendu, son verdict et ce qui te revient
         let portail = try #require(store.conversations.first { $0.shortTitle == "Portail" })
         let report = try #require(store.finishedReport(for: portail))
@@ -174,7 +200,7 @@ struct OverviewFactsTests {
                                         checks: checks)
                 == ["3 fichiers modifiés après le dernier commit", "3 commits", "déployé"])
 
-        let verified = try JSONDecoder().decode(RequestChecks.self, from: Data(#"{ "verdict": "verified", "label": "tests verts après la dernière modification" }"#.utf8))
+        let verified = try JSONDecoder().decode(RequestChecks.self, from: Data(#"{ "verdict": "verified", "label": "tests réussis après la dernière modification" }"#.utf8))
         #expect(FinishedReportRow.verdict(verified)?.color == nil)
         #expect(FinishedReportRow.verdict(verified)?.symbol == Icon.verified)
         let failed = try JSONDecoder().decode(RequestChecks.self, from: Data(#"{ "verdict": "testsFailed", "label": "tests en échec" }"#.utf8))
@@ -198,6 +224,18 @@ struct OverviewFactsTests {
         #expect(key(0.4) == key(0.9))     // « < 1 % »
         #expect(key(0.9) != key(1.2))     // « < 1 % » → « 1 % »
         #expect(key(nil) != key(0.4))
+    }
+
+    @Test func aCodeWriteInTheSameMinuteDoesNotRedraw() throws {
+        let json = #"{ "id": "c1", "checks": { "verdict": "changedAfterTests", "lastCodeAt": "2026-11-07T10:00:05Z" } }"#
+        let base = try JSONDecoder().decode(ConversationSummary.self, from: Data(json.utf8))
+        func key(_ seconds: TimeInterval) -> [VigieStore.ScreenRow] {
+            var c = base
+            c.checks?.lastCodeAt = Date(timeIntervalSince1970: 1_793_959_200 + seconds)
+            return VigieStore.screenKey([c])
+        }
+        #expect(key(5) == key(40))      // même minute : la liste ne se redessine pas
+        #expect(key(5) != key(65))      // la minute change (le survol l'écrit)
     }
 }
 
@@ -229,7 +267,7 @@ struct FinishedFactsTests {
                 == .init("modifié après la dernière série de tests", tone: .warn, kept: true))
         // sans phrase (ou vide) : la nôtre
         #expect(try checks(#"{ "verdict": "verified" }"#).verdictFact
-                == .init("tests verts après la dernière modification", tone: .checked, kept: true))
+                == .init("tests réussis après la dernière modification", tone: .checked, kept: true))
         #expect(try checks(#"{ "verdict": "changedAfterTests", "label": "  " }"#).verdictFact
                 == .init("modifié après les tests", tone: .warn, kept: true))
         #expect(try checks(#"{ "verdict": "testsFailed" }"#).verdictFact == .init("tests en échec", tone: .alert, kept: true))
@@ -255,7 +293,7 @@ struct FinishedFactsTests {
         #expect(try checks(#"{ "uncommitted": 0, "unpushed": null }"#).noteFacts.isEmpty)
         // la ligne entière : le verdict d'abord, puis ce qui reste à faire
         #expect(counted.facts.map(\.text)
-                == ["tests verts après la dernière modification", "3 fichiers modifiés après le dernier commit", "2 commits pas envoyés"])
+                == ["tests réussis après la dernière modification", "3 fichiers modifiés après le dernier commit", "2 commits pas envoyés"])
         #expect(try checks(#"{ "verdict": "nouveau", "unpushed": 1 }"#).facts.map(\.text) == ["1 commit pas envoyé"])
     }
 }

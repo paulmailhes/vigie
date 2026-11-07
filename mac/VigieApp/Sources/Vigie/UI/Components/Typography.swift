@@ -20,7 +20,7 @@ import SwiftUI
 // - Titre de page (niv. 0) : le nom n'est jamais répété dans le corps de la page. Le sous-titre dit un état chiffré,
 //   3 infos au plus, jamais une description (« 4 conversations ouvertes · 3 à décider »). Exception : la page d'une
 //   conversation a pour sous-titre son identité (son titre de VS Code), précédé de sa place quand plusieurs
-//   conversations attendent une décision et qu'elle en est (« 1 sur 3 à décider · Refonte du site de la boutique »,
+//   conversations attendent une décision et qu'elle en est (« 1re des 3 à décider · Refonte du site de la boutique »,
 //   ⌘J passe à la suivante) ; son état est dans la tuile d'état.
 // - Un seul titre d'objet (niv. 1) par vue ; les blocs suivants se titrent en `CardTitle`.
 // - Panneau de la barre des menus : il est lui-même une seule carte, ses groupes se titrent en surtitre (`CardTitle`,
@@ -177,11 +177,15 @@ struct CardTitle: View {
 ///     InfoLine("Atelier", "git push", "01:17")
 struct InfoLine: View {
     let parts: [String?]
+    /// Au survol, à la place de la ligne : le texte entier quand une info est raccourcie (une commande sans ses
+    /// chemins).
+    var fullText: String? = nil
 
-    init(parts: [String?]) {
+    init(parts: [String?], help: String? = nil) {
         assert(parts.compactMap { $0?.isEmpty == false ? $0 : nil }.count <= 3,
                "InfoLine : 3 infos au plus (qui · quoi · quand) — \(parts)")
         self.parts = parts
+        self.fullText = help
     }
 
     init(_ parts: String?...) {
@@ -201,7 +205,7 @@ struct InfoLine: View {
             .monospacedDigit()
             .lineLimit(1)
             .truncationMode(.tail)
-            .help(text)
+            .help(fullText ?? text)
     }
 }
 
@@ -237,22 +241,29 @@ struct CodeLine: View {
 struct ObjectHeader: View {
     let title: String
     var info: [String?] = []
+    /// Une description sur plusieurs lignes, sous le titre (en-tête de feuille : une recette d'agent, la Bibliothèque),
+    /// là où une ligne d'infos coupée ne convient pas.
+    var note: String? = nil
     var icon: String? = nil
     /// Couleur de texte du titre (verdict) ; `.primary` sinon. L'icône prend la couleur de remplissage du même sens
     /// si on la donne (`iconColor`), sinon `.secondary`.
     var color: Color? = nil
     var iconColor: Color? = nil
 
-    init(_ title: String, info: [String?] = [], icon: String? = nil, color: Color? = nil, iconColor: Color? = nil) {
+    init(_ title: String, info: [String?] = [], note: String? = nil, icon: String? = nil, color: Color? = nil,
+         iconColor: Color? = nil) {
         self.title = title
         self.info = info
+        self.note = note
         self.icon = icon
         self.color = color
         self.iconColor = iconColor
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        // un titre seul se centre sur l'icône ; avec des lignes dessous, tout part du haut
+        let alone = InfoLine.text(info).isEmpty && (note?.isEmpty ?? true)
+        HStack(alignment: alone ? .center : .top, spacing: 12) {
             if let icon {
                 Image(systemName: icon)
                     .symbolRenderingMode(.hierarchical)
@@ -269,6 +280,11 @@ struct ObjectHeader: View {
                     .accessibilityAddTraits(.isHeader)
                 if !InfoLine.text(info).isEmpty {
                     InfoLine(parts: info)
+                }
+                if let note, !note.isEmpty {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

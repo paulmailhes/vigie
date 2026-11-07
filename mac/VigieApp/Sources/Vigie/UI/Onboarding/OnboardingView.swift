@@ -101,7 +101,7 @@ struct OnboardingView: View {
                 (\ToolsChoice.codexVSCode, "Dans VS Code", "L'extension Codex", store.tools?.detected?.codexVSCode == true),
                 (\ToolsChoice.codexApp, "Dans l'app ChatGPT", "Codex dans l'app de bureau", store.tools?.detected?.codexApp == true),
             ])
-            Text("Tu peux en cocher plusieurs, même les deux pour un outil : Vigie suit tes conversations où qu'elles soient, et « Ouvrir » ramène chacune dans l'app où elle tourne.")
+            Text("Tu peux en cocher plusieurs, même les deux pour un outil : Vigie suit tes conversations où qu'elles soient, et le bouton « Ouvrir dans… » ramène chacune dans l'app où elle tourne.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -362,7 +362,8 @@ struct OnboardingView: View {
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Agents qui démarrent tout seuls")
+                        // « Agents Vigie » : les recettes de Vigie, pas les agents que Claude lance (ligne du dessus)
+                        Text("Agents Vigie qui démarrent tout seuls")
                         Text("Avec l'accès Accessibilité, Vigie envoie le message d'un agent dans le champ de Claude, sans que tu appuies sur Entrée.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -600,10 +601,7 @@ struct OnboardingAddAccountSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: "person.crop.circle.badge.plus")
-                Text("Ajouter un compte Claude").font(.title3.bold())
-            }
+            ObjectHeader("Ajouter un compte Claude", icon: "person.crop.circle.badge.plus")
             TextField("Nom", text: $label, prompt: Text("Travail, Perso, Client…"))
                 .textFieldStyle(.roundedBorder)
             TextField("Adresse e-mail du compte (facultatif)", text: $email, prompt: Text("toi@exemple.fr"))

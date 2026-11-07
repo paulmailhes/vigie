@@ -104,10 +104,11 @@ struct UsageLine: Identifiable, Equatable {
     var points: [Point]
 
     /// Couleurs sans sens d'état : ni le vert (travaille), l'orange (à surveiller), le rouge (t'attend), ni le violet
-    /// de « Toi » ; une courbe rouge se lisait comme une alerte.
-    static let palette: [Color] = [.blue, .indigo, .teal, .cyan, .brown, .gray]
-    /// Au-delà, les moins gourmandes sont regroupées en une courbe grise « Autres ».
-    static let maxLines = 6
+    /// de « Toi » ; une courbe rouge se lisait comme une alerte. Quatre seulement, bien distinctes (le cyan se
+    /// confondait avec le turquoise) ; le gris est réservé à « Autres », jamais à une vraie conversation.
+    static let palette: [Color] = [.blue, .teal, .indigo, .brown]
+    /// 4 courbes colorées au plus, puis « Autres » en gris.
+    static let maxLines = palette.count + 1
 
     @MainActor
     static func make(_ series: UsageSeries, store: VigieStore, span: UsageSpan, cumulative: Bool) -> [UsageLine] {
@@ -145,18 +146,18 @@ struct UsageLine: Identifiable, Equatable {
         return lines.sorted { ($0.account ?? "~", -$0.totalPct) < ($1.account ?? "~", -$1.totalPct) }
     }
 
-    /// Les courbes du graphique : 6 au plus. S'il y en a davantage, les 5 plus gourmandes gardent la leur et le reste
-    /// est additionné en une courbe grise « Autres », en dernier. Couleur stable : rang de l'identifiant parmi les
-    /// conversations affichées.
+    /// Les courbes du graphique : une couleur par conversation tant qu'il y a assez de couleurs (4). Au-delà, les 4 plus
+    /// gourmandes gardent la leur et le reste est additionné en une courbe grise « Autres », en dernier. Couleur
+    /// stable : rang de l'identifiant parmi les conversations affichées.
     static func forChart(_ lines: [UsageLine]) -> [UsageLine] {
         var kept = lines
         var others: UsageLine?
-        if lines.count > maxLines {
-            let top = Set(lines.sorted { $0.totalPct > $1.totalPct }.prefix(maxLines - 1).map(\.id))
+        if lines.count > palette.count {
+            let top = Set(lines.sorted { $0.totalPct > $1.totalPct }.prefix(palette.count).map(\.id))
             kept = lines.filter { top.contains($0.id) }
             others = merged(lines.filter { !top.contains($0.id) })
         }
-        let colors = others == nil ? palette : Array(palette.prefix(maxLines - 1))
+        let colors = palette
         let rank = Dictionary(uniqueKeysWithValues: kept.map(\.id).sorted().enumerated().map { ($1, $0) })
         var result = kept.map { line in
             var colored = line

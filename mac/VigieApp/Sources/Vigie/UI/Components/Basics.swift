@@ -29,6 +29,35 @@ struct StatusDot: View {
     }
 }
 
+/// Un rond coloré qui dit un état sans mot à côté (compte qui consomme, ligne d'En fond). Avec « Différencier sans
+/// couleur » (Réglages Système › Accessibilité), un symbole à la place : jamais la couleur seule.
+struct StateDot: View {
+    let style: AnyShapeStyle
+    /// Le symbole qui le remplace quand la couleur ne suffit pas (« bolt.circle.fill », « circle »…).
+    let symbol: String
+    var size: CGFloat = 8
+
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
+
+    /// Le rond d'un compte : vert (et l'éclair des conversations qui travaillent) quand une conversation consomme dessus.
+    static func working(_ working: Bool, size: CGFloat = 8) -> StateDot {
+        StateDot(style: working ? AnyShapeStyle(Theme.live) : AnyShapeStyle(.quaternary),
+                 symbol: working ? Theme.symbol(for: .working) : "circle", size: size)
+    }
+
+    var body: some View {
+        if differentiate {
+            Image(systemName: symbol)
+                .foregroundStyle(style)
+                .font(.system(size: size + 3))
+        } else {
+            Circle()
+                .fill(style)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
 /// Ancienne étiquette (« Par toi », « Créé ») : désormais une simple `Chip` neutre, ou rouge pour ce qui t'attend.
 /// Gardée pour les écrans pas encore passés à `Chip` ; à remplacer par `Chip(text, symbol:, tone:)`.
 struct Pill: View {

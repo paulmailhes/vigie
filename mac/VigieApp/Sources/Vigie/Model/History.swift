@@ -49,10 +49,11 @@ struct HistoryItem: Decodable, Equatable, Sendable, Identifiable {
     var didNotRun: Bool { [.blocked, .refused, .failed].contains(historyStatus) }
 }
 
-/// Issue d'une demande, dans l'ordre des filtres, avec le vocabulaire de Vigie : `blocked` (personne n'a répondu à
-/// temps, ou une règle) se lit « Refusée d'office », jamais « Bloquée » ; `failed` « En échec ».
+/// Issue d'une demande, dans l'ordre des filtres, avec le vocabulaire de Vigie : `accepted` « Acceptée » (par Vigie
+/// seule), `allowed` « Autorisée » (par toi) ; `blocked` (personne n'a répondu à temps, ou une règle) se lit « Refusée
+/// d'office », jamais « Bloquée » ; `failed` « En échec ».
 enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
-    case accepted, refused, blocked, failed, question, vscode, waiting
+    case accepted, allowed, refused, blocked, failed, question, vscode, waiting
 
     var id: String { rawValue }
 
@@ -60,6 +61,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .accepted: "Acceptées"
+        case .allowed: "Autorisées"
         case .refused: "Refusées"
         case .blocked: "Refusées d'office"
         case .failed: "En échec"
@@ -73,6 +75,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
     var label: String {
         switch self {
         case .accepted: "Acceptée"
+        case .allowed: "Autorisée"
         case .refused: "Refusée"
         case .blocked: "Refusée d'office"
         case .failed: "En échec"
@@ -85,6 +88,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .accepted: "checkmark.circle.fill"
+        case .allowed: "hand.thumbsup.circle.fill"
         case .refused: "xmark.circle.fill"
         case .blocked: "hand.raised.fill"
         case .failed: "exclamationmark.triangle.fill"
@@ -99,7 +103,7 @@ enum HistoryStatus: String, CaseIterable, Identifiable, Sendable {
     var tone: Chip.Tone {
         switch self {
         case .blocked, .failed, .waiting: .alert
-        case .accepted, .refused, .question, .vscode: .neutral
+        case .accepted, .allowed, .refused, .question, .vscode: .neutral
         }
     }
 

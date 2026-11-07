@@ -35,6 +35,19 @@ extension VigieStore {
         if let activity = conversation.lastActivity, activity.timeIntervalSince(ts) > 10 * 60 { return nil }
         return last
     }
+
+    /// Les fins de demande des conversations fermées depuis (onglet VS Code fermé la nuit) : elles n'ont plus de rangée
+    /// dans « Conversations », « À relire » les montre. La dernière par conversation, de moins de 24 h, la plus récente
+    /// d'abord.
+    func closedEnds() -> [Report] {
+        var latest: [String: Report] = [:]
+        for end in reports.map(\.value) where end.reportKind == .missionDone {
+            guard let id = end.conversationId, let ts = end.ts, now.timeIntervalSince(ts) < 24 * 3600,
+                  conversation(id)?.isOpen != true else { continue }
+            if (latest[id]?.ts ?? .distantPast) < ts { latest[id] = end }
+        }
+        return latest.values.sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
+    }
 }
 
 /// Rangées séparées par un filet, dans un seul fond arrondi.
@@ -235,9 +248,11 @@ struct ConversationListRow: View {
         .accessibilityAction { store.route = .conversation(conversation.id) }
     }
 
-    /// Ce qu'elle fait : l'étape en cours, sinon le dernier résumé, sinon son état.
+    /// Ce qu'elle fait : l'étape en cours, sinon le dernier résumé, sinon son état. Finie, son compte rendu est juste
+    /// dessous (`FinishedReportRow`) : « Finie », sans redire sa première ligne.
     private var line: String {
         if let current = data.current, !current.isEmpty { return current }
+        if store.finishedReport(for: conversation) != nil { return "Finie" }
         if let headline = conversation.headline, !headline.isEmpty { return headline }
         return Theme.label(for: conversation.state)
     }
@@ -332,21 +347,53 @@ struct ConversationListRow: View {
         }
     }
 
-    /// « 14 % de la semaine », « < 1 % de la semaine » ; rien sans relevé (jamais « — » dans la colonne).
+    /// « 14 % de la semaine », « < 1 % de la semaine » ; rien sans relevé (jamais « — » dans la colonne). Le même
+    /// texte dans la tuile d'État de la conversation : un seul chiffre pour une seule mesure.
     static func weekShare(_ pct: Double?) -> String? {
         guard let pct, pct > 0 else { return nil }
-        return pct < 1 ? "< 1 % de la semaine" : "\(Fmt.pct(pct.rounded())) de la semaine"
+        return pct < 1 ? "< 1\u{00A0}% de la semaine" : "\(Fmt.pct(pct.rounded())) de la semaine"
     }
 }
 
 /// Sous une conversation finie depuis moins de 24 h : ce que Claude a fait, son verdict et ses faits, sa durée et son
 /// heure, « À toi : … » en gras, la question qui finit le compte rendu, puis « Voir » et « Répondre dans VS Code ».
+/// `standalone` : la fin d'une conversation fermée depuis, seule dans « À relire » (son nom en tête, son icône).
 struct FinishedReportRow: View {
     @Environment(VigieStore.self) private var store
-    let conversation: ConversationSummary
+    /// nil : une conversation que Vigie ne suit plus (fermée depuis plus de 48 h).
+    let conversation: ConversationSummary?
     let report: Report
+    var standalone = false
+
+    private var conversationId: String? { conversation?.id ?? report.conversationId }
+    private var name: String { conversation?.shortTitle ?? report.conversationTitle ?? "Conversation" }
 
     var body: some View {
+        if standalone {
+            HStack(alignment: .top, spacing: 10) {
+                RowIcon(symbol: Icon.mission, alert: false)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    InfoLine(parts: [name, "fermée"])
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Compte rendu de \(name), fermée")
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 40)
+                .padding(.trailing, 14)
+                .padding(.bottom, 12)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Compte rendu de \(name)")
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(report.title ?? "Demande terminée")
                 .textRole(.event)
@@ -381,57 +428,58 @@ struct FinishedReportRow: View {
                 .help("Claude finit son compte rendu par cette question")
             }
             HStack(spacing: 6) {
-                Button("Voir") { store.route = .conversation(conversation.id) }
-                    .glassButton()
-                    .help("Voir la conversation dans Vigie")
-                AsyncButton(conversation.replyLabel) {
-                    await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd)
+                if let conversation {
+                    Button("Voir") { store.route = .conversation(conversation.id) }
+                        .glassButton()
+                        .help("Voir la conversation dans Vigie")
+                }
+                AsyncButton(conversation?.replyLabel ?? "Répondre dans VS Code") {
+                    await store.openConversationInVSCode(conversationId, cwd: conversation?.cwd)
                 }
                 .glassButton()
-                .help("Ouvre cette conversation dans VS Code")
+                .help("Ouvre cette conversation là où elle tourne")
             }
             .controlSize(.small)
             .fixedSize()
             .padding(.top, 2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 40)
-        .padding(.trailing, 14)
-        .padding(.bottom, 12)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Compte rendu de \(conversation.shortTitle)")
     }
 
     // MARK: Ligne de faits
 
     /// Le verdict de la demande : celui de la conversation (jusqu'à maintenant), sinon celui du compte rendu.
-    private var checks: RequestChecks? { conversation.checks ?? report.checks }
+    private var checks: RequestChecks? { conversation?.checks ?? report.checks }
 
-    /// Le verdict en couleur en tête (il ne se coupe jamais), puis ce qui reste à commiter ou envoyer, les autres
-    /// faits, la durée et l'heure, séparés par « · ». Le texte entier pour le survol.
+    /// Trois faits à l'écran (le standard) : le verdict en couleur en tête (il ne se coupe jamais), puis ce qui reste à
+    /// commiter ou envoyer (sinon le premier autre fait), puis l'heure ; séparés par « · ». Tout (commits, durée…) au
+    /// survol.
     private var factsLine: (text: Text, plain: String) {
         let verdict = Self.verdict(checks)
         let duration = report.durationMs.map { Fmt.duration(ms: $0) }.flatMap { $0.isEmpty ? nil : "a pris \($0)" }
-        let others = Self.facts(detail: report.detail, checks: checks)
-            + [duration, Fmt.when(report.ts, now: store.now)].compactMap { $0?.isEmpty == false ? $0 : nil }
+        let when = Fmt.when(report.ts, now: store.now)
+        let facts = Self.facts(detail: report.detail, checks: checks)
+        let shown = Array(facts.prefix(verdict == nil ? 2 : 1)) + (when.isEmpty ? [] : [when])
         var parts: [Text] = []
         if let verdict {
-            let text = Text("\(Image(systemName: verdict.symbol)) \(verdict.text)")
+            let text = verdict.symbol.map { Text("\(Image(systemName: $0)) \(verdict.text)") } ?? Text(verdict.text)
             parts.append(verdict.color.map { text.foregroundStyle($0) } ?? text)
         }
-        parts += others.map { Text($0) }
+        parts += shown.map { Text($0) }
         guard let first = parts.first else { return (Text(verbatim: ""), "") }
         let line = parts.dropFirst().reduce(first) { Text("\($0) \(Text("·").foregroundStyle(.tertiary)) \($1)") }
-        return (line, ([verdict?.text] + others).compactMap { $0 }.joined(separator: " · "))
+        let all = [verdict?.text] + facts + [duration, when]
+        return (line, all.compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
     }
 
     /// Le verdict à afficher : sa phrase, son icône et sa couleur de texte. Réussi en gris avec une coche (le vert veut
-    /// dire « travaille », pas « réussi ») ; modifié après les tests ou aucun test lancé en orange ; en échec en rouge.
-    static func verdict(_ checks: RequestChecks?) -> (text: String, symbol: String, color: Color?)? {
+    /// dire « travaille », pas « réussi ») ; modifié après les tests en orange ; en échec en rouge ; aucun test lancé en
+    /// gris, sans icône (rien de prouvé, pas un défaut : comme dans la page de la conversation).
+    static func verdict(_ checks: RequestChecks?) -> (text: String, symbol: String?, color: Color?)? {
         guard let label = checks?.label?.trimmingCharacters(in: .whitespaces), !label.isEmpty else { return nil }
         switch checks?.verdictKind ?? .unknown {
         case .verified: return (label, Icon.verified, nil)
-        case .changedAfterTests, .noTests: return (label, Icon.unverified, Theme.warnText)
+        case .changedAfterTests: return (label, Icon.unverified, Theme.warnText)
+        case .noTests: return (label, nil, nil)
         case .testsFailed: return (label, Icon.testFailed, Theme.alertText)
         case .unknown: return nil
         }

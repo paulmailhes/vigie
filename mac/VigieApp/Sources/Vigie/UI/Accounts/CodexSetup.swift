@@ -54,8 +54,8 @@ struct CodexSetupSteps: View {
                         .glassButton()
                         .controlSize(.small)
                     }
+                    // grisé par `disabled` (les contrôles) : le texte reste lisible
                     .disabled(account?.isConnected != true)
-                    .opacity(account?.isConnected == true ? 1 : Theme.dim)
                 }
             }
         }

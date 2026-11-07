@@ -84,7 +84,8 @@ struct GoCommands: Commands {
                 }
             }
             Divider()
-            Button("Actualiser") { Task { await store.refreshOverview() } }
+            // la page affichée, comme son bouton ⟳ (Comptes, MCP, Agents) : pas toujours la vue d'ensemble
+            Button("Actualiser") { Task { await store.refreshCurrentPage() } }
                 .keyboardShortcut("r", modifiers: .command)
             Divider()
             Button("Revoir l'accueil") {

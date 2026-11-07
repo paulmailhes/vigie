@@ -9,12 +9,14 @@ enum AccountSwitch {
 
     /// Le compte connecté qui a le plus de marge pour reprendre une conversation arrêtée sur `limited` : session et
     /// semaine sous 90 %, la plus petite session d'abord, puis la plus petite semaine. nil : aucun ne convient.
-    /// Jamais un compte Codex, ni un compte branché sur le même compte claude.ai que `limited` (même limite).
+    /// Jamais un compte Codex, ni un compte branché sur le même compte claude.ai que `limited` (même limite), ni un
+    /// compte que Vigie signale lui-même (mauvaise adresse, doublon, pas connecté : `AccountCard.hasProblem`, la même
+    /// règle que l'avertissement au lancement d'un agent).
     static func freeAccount(in accounts: [Account], limited: String?, excluding: Set<String> = [], now: Date) -> Account? {
         let sameAsLimited = Set(accounts.first { $0.id == limited }?.sameAs ?? [])
         return accounts
             .filter { account in
-                account.isConnected && !account.isCodex && account.id != limited && !excluding.contains(account.id)
+                !AccountCard.hasProblem(account) && !account.isCodex && account.id != limited && !excluding.contains(account.id)
                     && !sameAsLimited.contains(account.id) && !(account.sameAs ?? []).contains { $0 == limited }
             }
             .map { (account: $0, session: pct($0.usage?.session, now: now), week: pct($0.usage?.week, now: now)) }
@@ -42,10 +44,17 @@ enum AccountSwitch {
     }
 
     /// Ce que coûte la bascule : un autre compte n'a pas son cache, il relit toute la conversation. Vigie ne sait pas
-    /// encore le dire en part de semaine (le cache froid coûte plus qu'un tour ordinaire) : la taille de la
-    /// conversation, entre parenthèses. La même phrase que le moteur (`rereadEstimate`). nil : taille inconnue.
+    /// encore le dire en part de semaine : la phrase le dit en mots, la taille (`size`, en tokens, un mot qui ne
+    /// s'écrit pas à l'écran) va dans l'aide. La même phrase que le moteur (`rereadEstimate`). nil : taille inconnue.
     static func reread(on account: Account, contextTokens: Int?) -> String? {
         guard let contextTokens, contextTokens > 0 else { return nil }
-        return "Elle relira toute la conversation sur \(account.displayName) (environ \(Fmt.tokens(contextTokens)) tokens)."
+        return "Elle relira toute la conversation sur \(account.displayName) : sa première réponse coûtera plus qu'un message ordinaire."
+    }
+
+    /// La taille de la conversation, pour l'aide d'un bouton ou d'un menu qui change de compte : « Taille de la
+    /// conversation : environ 182 k tokens. » ; nil quand on ne la connaît pas.
+    static func size(contextTokens: Int?) -> String? {
+        guard let contextTokens, contextTokens > 0 else { return nil }
+        return "Taille de la conversation : environ \(Fmt.tokens(contextTokens)) tokens."
     }
 }

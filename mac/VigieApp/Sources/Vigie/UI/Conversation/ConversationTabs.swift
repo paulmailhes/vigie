@@ -262,7 +262,9 @@ struct ConversationMCPList: View {
         return HStack(spacing: 10) {
             ServiceGlyph(service: item.service, name: item.name)
                 .opacity(status == .disabled ? Theme.dim : 1)
+            // un objet qu'on ouvre : son nom en semi-gras, comme sur la page MCP
             Text(item.name)
+                .textRole(.item)
                 .foregroundStyle(status == .disabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
             Spacer(minLength: 8)
             if status == .needsAuth {

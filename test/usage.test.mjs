@@ -47,10 +47,10 @@ test('alerte : mêmes tests en échec ≥ 6 fois en 20 min ; étape rouge voulue
 });
 
 test('alerte : un agent qui répète la même action ≥ 8 fois', () => {
-  const act = (min, agent = 'ag1', detail = 'src/a.ts') => ({ ts: iso(min), agent, tool: 'Read', title: 'Lit a.ts', detail });
+  const act = (min, agent = 'ag1', detail = 'src/a.ts') => ({ ts: iso(min), agent, tool: 'Read', title: 'Lire a.ts', detail });
   const activity = [-18, -16, -14, -12, -10, -8, -6, -4].map((m) => act(m));
   const a = runawayAlert({ now: NOW, activity, agentLabel: () => 'faire:L2.24' });
-  assert.equal(a.reason, 'L\'agent « faire:L2.24 » répète la même action en boucle (8 fois en 20 min) : Lit a.ts.');
+  assert.equal(a.reason, 'L\'agent « faire:L2.24 » répète la même action en boucle (8 fois en 20 min) : Lire a.ts.');
   assert.equal(runawayAlert({ now: NOW, activity: activity.slice(1) }), null, '7 fois : rien');
   assert.equal(runawayAlert({ now: NOW, activity: activity.map((x) => ({ ...x, agent: null })) }), null, 'la conversation elle-même : pas cette règle');
   assert.equal(runawayAlert({ now: NOW, activity: [...activity.slice(1), act(-2, 'ag1', 'src/b.ts')] }), null, 'action différente');
@@ -95,9 +95,13 @@ test('jusqu\'où tient le compte : pente des dernières 24 h d\'après les vrais
   // même hausse, mais une remise à zéro dans 40 h : elle tient
   const soon = new Date(NOW + 40 * H).toISOString();
   assert.equal(weekFullAt([pt(-30, 10, soon), pt(-1, 40, soon)], { pct: 40, resetsAt: soon }, NOW), null);
-  // pas de relevé d'avant les 24 h : la pente part du premier relevé des 24 h, à son heure
-  const fromFirst = weekFullAt([pt(-6, 70), pt(-1, 85)], week(85), NOW);
-  assert.ok(Math.abs(fromFirst - (NOW + 6 * H)) <= 15 * 60_000, '15 points en 6 h → les 15 restants en 6 h');
+  // pas de relevé d'avant les 24 h : la moyenne depuis le début de la semaine (il y a 96 h, à 0 %), pas la pente de
+  // quelques heures de travail
+  const fromStart = weekFullAt([pt(-6, 70), pt(-1, 85)], week(85), NOW);
+  assert.ok(Math.abs(fromStart - (NOW + 15 * 96 / 85 * H)) <= 15 * 60_000, '85 points en 96 h → les 15 restants en 17 h');
+  // semaine commencée il y a 15 h, 1 % il y a 2 h, 6 % maintenant : 0,4 %/h en moyenne, elle tient jusqu'à la remise
+  const fresh = new Date(NOW + (7 * 24 - 15) * H).toISOString();
+  assert.equal(weekFullAt([pt(-2, 1, fresh)], { pct: 6, resetsAt: fresh }, NOW), null);
   // moins de 3 points de hausse : rien à mesurer
   assert.equal(weekFullAt([pt(-30, 38), pt(-1, 40)], week(40), NOW), null);
   // relevés d'une autre semaine ignorés

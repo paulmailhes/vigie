@@ -174,12 +174,12 @@
       "needsPassword": false
     },
     {
-      "id": "w:c3d2e1f0",
+      "id": "c:c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
       "kind": "waiting",
       "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
       "conversationTitle": "Portail/front",
-      "title": "T'attend depuis 23:12",
-      "detail": "« Je peux pousser la branche paiement ? »",
+      "title": "Attend ta réponse dans VS Code",
+      "detail": "Pousser la branche paiement ?",
       "ts": "2026-10-19T21:12:00.000Z"
     },
     {
@@ -187,7 +187,7 @@
       "kind": "limit",
       "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
       "conversationTitle": "Atelier",
-      "title": "Limite de session atteinte · Travail 1",
+      "title": "Limite de session atteinte sur Travail 1",
       "detail": "Remise à zéro à 03:40",
       "ts": "2026-10-19T21:41:00.000Z",
       "scope": "session",
@@ -358,32 +358,16 @@
       "headline": "Étape L2.24 sur L2.29",
       "progress": {
         "done": 23,
-        "total": 31,
+        "total": 29,
         "label": "Plan d'exécution 1.4",
         "current": "L2.24 Icônes de fin de partie"
       },
       "tests": {
-        "failedRecent": 2,
+        "failedRecent": 0,
         "running": 1,
-        "lastOk": false,
-        "lastTs": "2026-10-19T23:09:00.000Z",
-        "lastTitle": "vitest + tsc",
-        "failures": [
-          {
-            "title": "Pastille.test.tsx",
-            "line": "expected 'violet' to be 'nuit' (Pastille.test.tsx:42)",
-            "kind": "tests",
-            "ts": "2026-10-19T23:09:00.000Z",
-            "by": "refuter:L2.23"
-          },
-          {
-            "title": "tsc",
-            "line": "src/ecrans/Fin.tsx(18,7): Property 'icone' is missing",
-            "kind": "types",
-            "ts": "2026-10-19T23:07:00.000Z",
-            "by": "faire:L2.24"
-          }
-        ]
+        "lastOk": true,
+        "lastTs": "2026-10-19T23:15:00.000Z",
+        "lastTitle": "Lancer vitest et tsc"
       },
       "accepted": {
         "today": 412,
@@ -437,7 +421,7 @@
       "alert": null,
       "checks": {
         "verdict": "verified",
-        "label": "tests verts après la dernière modification",
+        "label": "tests réussis après la dernière modification",
         "lastTestAt": "2026-10-19T23:09:00.000Z",
         "lastCodeAt": "2026-10-19T23:02:00.000Z",
         "uncommitted": 0,
@@ -449,6 +433,7 @@
       "compactions": {
         "count": 2,
         "auto": 2,
+        "manual": 0,
         "lastAt": "2026-10-19T19:12:00.000Z"
       }
     },
@@ -544,7 +529,7 @@
       "weekPct": 5.0,
       "lastActivity": "2026-10-19T21:12:00.000Z",
       "needsYou": 2,
-      "headline": "T'attend : pousser la branche paiement ?",
+      "headline": "Pousser la branche paiement ?",
       "waitingFor": "Je peux pousser la branche paiement ?",
       "rate": {
         "weekPctPerHour": 0.0,
@@ -606,7 +591,7 @@
         "done": 7,
         "total": 10,
         "label": "Lot 6",
-        "current": "C8 Galerie des songeries"
+        "current": "C7 Poser les 37 doubles pages sur /songeries"
       },
       "tests": {
         "failedRecent": 0,
@@ -792,7 +777,7 @@
     {
       "ts": "2026-10-19T23:16:05.000Z",
       "kind": "file",
-      "title": "Modifie Fin.tsx",
+      "title": "Modifier Fin.tsx",
       "detail": "apps/web/src/ecrans/Fin.tsx",
       "decision": "auto",
       "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
@@ -941,7 +926,7 @@
     "groups": 5,
     "forgottenLabels": [
       "Chrome sans fenêtre (boutique)",
-      "Serveur web · port 8766 (portail)"
+      "Serveur web sur le port 8766 (portail)"
     ],
     "autoStopped": []
   }

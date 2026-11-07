@@ -2,8 +2,9 @@ import SwiftUI
 
 /// Une ligne de « À décider », « À regarder » ou « À relire » (vue d'ensemble, page d'une conversation, panneau) :
 /// action sensible, question choisie pour toi, conversation qui t'attend, limite.
-/// - Titre en noir ; une action sensible porte son état en puce à côté (« Refusée dans 8 min », « Attend ton
-///   accord », « Refusée d'office ») : c'est lui qui compte, il ne se coupe jamais.
+/// - Titre en noir ; une action sensible porte son état en puce à côté (« Refusée dans 8 min », « À autoriser »,
+///   « Refusée d'office ») : c'est lui qui compte, il ne se coupe jamais. Dans la page de sa conversation, la puce
+///   « À autoriser » est neutre : le verdict rouge juste au-dessus le dit déjà.
 /// - Dessous, qui · quoi · quand (conversation, règle, heure), puis la commande, coupée au milieu.
 /// - Les boutons ne se coupent jamais : quand la place manque, ils passent sous le texte (`ViewThatFits`, sans risque
 ///   dans une colonne à taille minimale fixe). Une décision a toujours « Voir · Refuser · Autoriser ».
@@ -58,7 +59,9 @@ struct ReviewRow: View {
 
     private func row(now: Date) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            RowIcon(symbol: Theme.symbol(for: item.reviewKind), alert: Theme.isAlert(item.reviewKind))
+            // une commande à lancer toi-même n'est pas refusée : son icône et sa couleur, celles de sa puce orange
+            RowIcon(symbol: runYourself ? Icon.command : Theme.symbol(for: item.reviewKind),
+                    alert: Theme.isAlert(item.reviewKind) && !runYourself)
                 .padding(.top, 1)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {
@@ -77,13 +80,18 @@ struct ReviewRow: View {
                     actions(stacked: true)
                 }
             }
-            if VigieStore.isLook(item) {
+            if VigieStore.canDismiss(item) {
                 IconButton("Retirer", systemImage: "xmark", help: "Retirer de « À regarder »") {
                     await store.dismissReview(item)
                 }
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Une commande administrateur refusée d'office : à lancer toi-même (puce orange), pas un refus à corriger.
+    private var runYourself: Bool {
+        item.reviewKind == .blocked && item.needsPassword == true && !item.needsDecision && item.state != "waiting" && !item.failed
     }
 
     // MARK: Texte
@@ -111,13 +119,14 @@ struct ReviewRow: View {
         return item.reviewKind == .question ? "« \(title) »" : title
     }
 
-    /// Qui · quoi · quand. Pour une action sensible, la règle (le détail du moteur va au survol du titre) ; sinon le
-    /// détail du moteur. Sur la page de sa conversation, son nom n'est pas répété.
+    /// Qui · quoi · quand. Pour une action sensible, la règle (le titre dit ce que fait l'action ; un moteur plus
+    /// ancien y mettait la règle : elle n'est pas répétée) ; sinon le détail du moteur. Sur la page de sa conversation,
+    /// son nom n'est pas répété.
     private var infoParts: [String?] {
         let who = inConversation ? nil : (item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.conversationTitle)
         let when = item.ts.map { Fmt.when($0, now: store.now) }
-        if item.reviewKind == .blocked, let rule = item.rule, !rule.isEmpty {
-            return [who, rule, when]
+        if item.reviewKind == .blocked {
+            return [who, item.rule.flatMap { $0.isEmpty || $0 == item.title ? nil : $0 }, when]
         }
         return [who, item.detail, when]
     }
@@ -131,7 +140,12 @@ struct ReviewRow: View {
                      symbol: "timer", tone: .alert)
                     .help("Sans réponse, Vigie la refuse d'office \(Fmt.reset(expires, now: now))")
             } else if item.needsDecision {
-                Chip("Attend ton accord", symbol: Icon.guardRule, tone: .alert)
+                // le même mot partout (fenêtre, barre des menus, liste « N à décider ») ; l'aide dit si elle attend en
+                // pause ou si elle a continué sans
+                Chip(Theme.label(for: .blocked), symbol: Icon.guardRule, tone: inConversation ? .neutral : .alert)
+                    .help(item.holding == true ? "En pause : elle attend ton accord ici"
+                          : item.isAwaitingApproval ? "Elle a continué sans cette action : autorise-la, elle pourra la relancer"
+                          : "Elle attend ton accord")
             } else if item.state == "waiting" {
                 Chip("À décider dans VS Code", tone: .alert)
             } else if item.failed {
@@ -191,6 +205,10 @@ struct ReviewRow: View {
                 Button("Répondre…") { store.answerRequest = item }
                     .glassButton(.primary)
                     .help("Voir la question et y répondre d'ici")
+            case .other where item.conversationId == nil:
+                // un avis sur un compte (à reconnecter, module Codex) : là où il se règle
+                Button("Voir les comptes") { store.showAccounts(item.accountId) }
+                    .glassButton()
             case .waiting, .other:
                 if inConversation {
                     replyButton
@@ -216,7 +234,7 @@ struct ReviewRow: View {
             await store.openConversationInVSCode(item.conversationId, cwd: item.cwd)
         }
         .glassButton(.primary)
-        .help("Ouvre cette conversation dans VS Code")
+        .help("Ouvre cette conversation là où elle tourne")
     }
 
     // MARK: Limite atteinte : passer sur un compte libre
@@ -243,7 +261,8 @@ struct ReviewRow: View {
 
     private func switchHelp(_ account: Account) -> String {
         let text = "\(account.displayName) a de la marge. Une confirmation d'abord : elle reprend dessus à ton prochain message, avec tout son historique."
-        return AccountSwitch.reread(on: account, contextTokens: switchContextTokens).map { "\(text) \($0)" } ?? text
+        return [text, AccountSwitch.reread(on: account, contextTokens: switchContextTokens),
+                AccountSwitch.size(contextTokens: switchContextTokens)].compactMap { $0 }.joined(separator: " ")
     }
 
     /// La même action que le menu Compte de la conversation. Le bouton s'efface tout de suite ; si le moteur refuse,

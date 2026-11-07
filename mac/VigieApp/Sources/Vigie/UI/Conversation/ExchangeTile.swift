@@ -11,10 +11,13 @@ struct ExchangeTile: View {
     let open: (ConversationPanel) -> Void
 
     /// Messages de Claude montrés : les 3 derniers.
-    static let shown = 3
+    nonisolated static let shown = 3
+
+    /// Faits sous ta demande : 3 au plus (le standard de lecture), le verdict et ce qui manque d'abord.
+    static let shownFacts = 3
 
     /// Le message d'indice `index` (sur `count`) a sa bulle dans l'Échange : la tuile d'État ne répète pas son « À toi ».
-    static func isVisible(_ index: Int, of count: Int) -> Bool {
+    nonisolated static func isVisible(_ index: Int, of count: Int) -> Bool {
         index >= count - shown
     }
 
@@ -34,16 +37,21 @@ struct ExchangeTile: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let current = detail.current {
                     youBubble(current)
-                    let facts = factsLine(current)
-                    if !facts.isEmpty {
+                    let all = factsLine(current)
+                    if !all.isEmpty {
+                        // trois faits au plus, sur une ligne coupée en fin ; la ligne entière et sur quoi le verdict
+                        // s'appuie au survol
+                        let facts = all.limited(to: Self.shownFacts)
                         facts.text
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
-                            .help(checks?.help(now: store.now) ?? "")
-                            .accessibilityLabel(facts.plain)
+                            .help(factsHelp(all))
+                            .accessibilityLabel(all.plain)
                     }
                 }
                 let messages = Array(detail.messages.enumerated()).suffix(Self.shown)
@@ -178,16 +186,19 @@ struct ExchangeTile: View {
         summary.checks ?? model.raw.summary?.checks
     }
 
-    /// « 4 commits · 38 fichiers · ✓ tests verts après la dernière modification · 1 commit pas envoyé · 7 agents finis,
+    /// « 4 commits · 38 fichiers · ✓ tests réussis après la dernière modification · 1 commit pas envoyé · 7 agents finis,
     /// 1 en échec » : seul le mot qui signale prend sa couleur (orange : modifié après les tests, pas commité, pas
-    /// envoyé ; rouge : en échec), le reste en gris. Cinq faits au plus : le verdict et ce qui manque restent, les
-    /// agents puis les fichiers partent d'abord.
+    /// envoyé ; rouge : en échec), le reste en gris. À l'écran, trois faits (`shownFacts`) : le verdict et ce qui manque
+    /// restent, les agents puis les fichiers partent d'abord. Finie, la tuile d'État dit déjà le verdict et ce qui
+    /// manque : la ligne ne les répète pas.
     private func factsLine(_ c: CurrentRequest) -> FactLine {
         var facts: [FactLine.Fact] = []
         if let v = c.commits, v > 0 { facts.append(.init(Fmt.count(v, "commit"))) }
         if let v = c.deploys, v > 0 { facts.append(.init(v > 1 ? "\(v) déploiements" : "déployé")) }
         if let v = c.files, v > 0 { facts.append(.init(Fmt.count(v, "fichier"))) }
-        if let verdict = checks?.verdictFact {
+        if verdict.finished, checks?.verdictFact != nil || !(checks?.noteFacts.isEmpty ?? true) {
+            // dans la tuile d'État, juste au-dessus
+        } else if let verdict = checks?.verdictFact {
             facts.append(verdict)
         } else if let test = lastTest(since: c.start) {
             // moteur plus ancien, ou rien à dire des vrais tests : le dernier contrôle, tel quel
@@ -196,13 +207,19 @@ struct ExchangeTile: View {
             let text = failed ? "tests en échec" : "tests réussis"
             facts.append(.init(when.isEmpty ? text : "\(text) \(when)", tone: failed ? .alert : .plain, kept: failed))
         }
-        facts += checks?.noteFacts ?? []
+        if !verdict.finished { facts += checks?.noteFacts ?? [] }
         let agents = model.doneAgents.filter { ($0.startedAt ?? .distantPast) >= (c.start ?? .distantPast) }
         let failed = agents.count { $0.status == "failed" }
         if !agents.isEmpty {
-            facts.append(.init("\(Fmt.count(agents.count, "agent fini", "agents finis"))\(failed > 0 ? ", \(failed) en échec" : "")"))
+            facts.append(.init("\(Fmt.count(agents.count, "agent fini", "agents finis"))\(failed > 0 ? ", \(failed)\u{00A0}en échec" : "")"))
         }
-        return FactLine(facts: facts).limited(to: 5)
+        return FactLine(facts: facts)
+    }
+
+    /// La ligne entière, puis sur quoi le verdict s'appuie (sauf finie : la tuile d'État le dit).
+    private func factsHelp(_ line: FactLine) -> String {
+        guard !verdict.finished, let help = checks?.help(now: store.now) else { return line.plain }
+        return "\(line.plain)\n\(help)"
     }
 
     private func lastTest(since start: Date?) -> TestRun? {

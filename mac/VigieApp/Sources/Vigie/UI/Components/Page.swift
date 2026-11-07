@@ -23,6 +23,9 @@ enum PageMetrics {
     static let maxWidth: CGFloat = 1080
     /// Entre deux sections d'une page.
     static let sectionSpacing: CGFloat = 24
+    /// Retrait d'un `SectionHeader` dans l'en-tête d'une Section de Form (MCP, Agents) : l'en-tête natif ajoute 4 pt,
+    /// retirés ici pour que le titre tombe au même bord que ceux d'une `Page` (6 pt du bord de la carte).
+    static let formHeaderInset: CGFloat = -4
 }
 
 /// Page de tableau de bord : défile, occupe la largeur du détail (le Form groupé se limite à ~700 pt).

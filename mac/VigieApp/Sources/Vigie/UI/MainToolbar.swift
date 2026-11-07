@@ -75,10 +75,12 @@ struct QuestionsMenu: View {
             }
             .disabled(!store.questionsAuto)
         } label: {
-            Label(store.questionsAuto ? "Questions : auto" : "Questions : à toi",
-                  systemImage: store.questionsAuto ? "questionmark.bubble.fill" : "questionmark.bubble")
-                .labelStyle(.titleAndIcon)
-                .fixedSize()
+            // une image et un texte, comme Garde-fous : un Label dans une barre d'outils n'y garde que son icône
+            HStack(spacing: 6) {
+                Image(systemName: store.questionsAuto ? "questionmark.bubble.fill" : "questionmark.bubble")
+                Text(store.questionsAuto ? "Questions : auto" : "Questions : à toi")
+            }
+            .fixedSize()
         }
         .accessibilityLabel(store.questionsAuto ? "Questions : Vigie choisit pour toi" : "Questions : c'est toi qui réponds")
         .help(store.questionsAuto

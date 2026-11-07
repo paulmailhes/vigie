@@ -100,7 +100,7 @@ struct ConversationBar: View {
         }
         .fixedSize()
         .glassButton()
-        .help("Compte de cette conversation")
+        .help(["Compte de cette conversation.", AccountSwitch.size(contextTokens: contextTokens)].compactMap { $0 }.joined(separator: " "))
     }
 
     /// Ce que devient la conversation et ce que coûte la bascule : le même texte que la limite de la vue d'ensemble.

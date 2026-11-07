@@ -87,8 +87,8 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
     { "kind": "missionDone", "id": "fin:<conv>:<demande>",  // une seule fin par demande, relances comprises
       "conversationId": "…", "conversationTitle": "Atelier",
       "title": "Les 29 étapes du plan 1.4 sont faites.",  // ce que Claude a fait (« En bref : », sinon 1re phrase utile)
-      "detail": "8 commits · tests verts après la dernière modification · 11 agents, 1 en échec",  // ? 4 faits au plus
-      "checks": { "verdict": "verified", "label": "tests verts après la dernière modification", "uncommitted": 0, "unpushed": null, "notes": [] },  // ? voir « Fini, mais pas vérifié »
+      "detail": "8 commits · tests réussis après la dernière modification · 11 agents, 1 en échec",  // ? 4 faits au plus
+      "checks": { "verdict": "verified", "label": "tests réussis après la dernière modification", "uncommitted": 0, "unpushed": null, "notes": [] },  // ? voir « Fini, mais pas vérifié »
       "prompt": "Applique la charte 1.4 à tous les écrans…", // la vraie demande, sans « continue » ni « ok donc »
       "question": "Je publie maintenant ?",       // ? le compte rendu finit par cette question
       "toYou": "relire la planche",               // ? ce que Claude laisse à l'utilisateur (« À toi : … »)
@@ -134,7 +134,7 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
       "decision": "auto" }                      // auto | you | blocked | waiting | denied
   ],
   "activity": [   // fil des actions de Claude et de ses agents, plus récent d'abord, 300 max
-    { "ts": "…", "kind": "file", "title": "Modifie Pastille.tsx", "detail": "apps/web/src/components/Pastille.tsx", "agent": "faire:L2.22", "ok": true }
+    { "ts": "…", "kind": "file", "title": "Modifier Pastille.tsx", "detail": "apps/web/src/components/Pastille.tsx", "agent": "faire:L2.22", "ok": true }
   ],
   "agents": {
     "running": [ { "id": "…", "title": "faire:L2.24", "type": "workflow-subagent", "workflow": "partie-c-charte-ecrans",
@@ -229,25 +229,29 @@ Toutes les réponses portent `X-Frame-Options: DENY` et une `Content-Security-Po
 - `status` : `blocked` quand un garde-fou attend la décision de l'utilisateur dans VS Code, `waiting` quand une question attend (ou quand Claude Code dit « en attente »).
 - `weekPct` = poids d'usage de la conversation depuis le début de la semaine du compte (`week.resetsAt` − 7 j), divisé par le poids de toutes les conversations de ce compte sur la même période, multiplié par `week.pct`. Poids = input + 5 × output + 1,25 × écriture cache + 0,1 × lecture cache, rangé par organisation (pièces jointes `credential_org`), l'organisation du compte venant de `oauthAccount.organizationUuid`. Arrondi au dixième. `null` si le compte n'a pas de relevé hebdomadaire, pas d'organisation connue, ou aucun usage sur la période.
 - `needsYou` = nombre d'éléments de `toReview` de cette conversation.
-- Champs ajoutés : `contextTokens` (? taille du contexte, pour « Elle relira toute la conversation sur Perso (environ N k tokens) » en cas de bascule), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? texte de Claude Code). Dans le détail seulement : `branch`, `startedAt`.
+- Champs ajoutés : `contextTokens` (? taille du contexte, dans l'aide d'une bascule de compte ; la phrase « Elle relira toute la conversation sur Perso : sa première réponse coûtera plus qu'un message ordinaire. » ne dit pas de chiffre), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? texte de Claude Code). Dans le détail seulement : `branch`, `startedAt`.
 
 ### toReview
 Ce qui attend l'utilisateur maintenant d'abord (plus récent d'abord), puis ce qui s'est passé depuis `since`, 100 au plus. Le préfixe de `id` dit d'où vient l'élément :
 | `id` | `kind` | Quand |
 |---|---|---|
-| `g:<conv>:<ts>` | `blocked` | garde-fou en attente dans VS Code (`detail` : « … sinon refusée dans N min ») |
+| `g:<conv>:<ts>` | `blocked` | garde-fou en attente dans VS Code (`title` : ce que fait l'action, la règle dans `rule`, le délai dans `expiresAt`) |
 | `w:<conv>:<ts>` | `waiting` | question en attente (« … Claude choisit l'option recommandée dans N min ») ; un plan proposé (`ExitPlanMode`) a pour titre « Plan à approuver » (« Plan à valider » avant le 2026-11-07) |
 | `c:<conv>` | `waiting` | conversation que Claude Code dit en attente de l'utilisateur |
-| `s:<conv>:<ts>` | `waiting` | bascule de compte faite : envoyer un message pour relancer la conversation |
+| `s:<conv>:<ts>` | `notice` | bascule de compte faite : envoyer un message pour relancer la conversation |
+| `cx:<compte>:<état>` | `notice` | compte à reconnecter (`accountId`) |
+| `cf:<conv>:<compte>` | `notice` | conversation lancée sur un autre compte que le sien |
+| `codex-hook` | `notice` | module de Vigie à accepter dans Codex |
 | `q:<id>` | `question` | question répondue à la place de l'utilisateur, pas encore relue |
 | `b:<conv>:<ts>` | `blocked` | action refusée par un garde-fou depuis `since` : à faire soi-même |
-| `l:<conv>:<ts>` | `limit` | limite atteinte depuis `since` (la plus récente par conversation), en français : `title` « Limite de session atteinte · Travail 1 » ou « Limite de la semaine atteinte · Travail 1 », `detail` « Remise à zéro à 03:40 » (« Remise à zéro lun. 26 oct. à 20:00 » au-delà de 20 h) ; champs `scope` (`session` \| `week`), `resetsAt`, `accountId` |
+| `l:<conv>:<ts>` | `limit` | limite atteinte depuis `since` (la plus récente par conversation), en français : `title` « Limite de session atteinte sur Travail 1 » ou « Limite de la semaine atteinte sur Travail 1 » (« Crédits d'usage épuisés sur Travail 1 », « Limite atteinte sur Travail 1 » quand le texte ne dit pas laquelle), `detail` « Remise à zéro à 03:40 » (« Remise à zéro lun. 26 oct. à 20:00 » au-delà de 20 h), rien quand Claude Code n'écrit pas l'heure (jamais une date devinée) ; champs `scope` (`session` \| `week`), `resetsAt`, `accountId` |
+`notice` : un avis, rien à décider dans une conversation ; le badge rouge (« À décider ») ne le compte pas, l'app le range dans « À regarder ». `s:` et `cf:` se retirent (`POST /api/v2/review/:id/dismiss`), `cx:` et `codex-hook` restent tant que le problème dure.
 Une attente n'est plus listée si son délai est passé (+ 2 min), si le processus du hook est mort, si la conversation est fermée, ou si un événement de fin a suivi. Ainsi, une réponse de l'utilisateur dans VS Code ne laisse pas d'« attente fantôme ».
 `reports` : tout depuis `since`, et au moins les dernières 24 h, 60 au plus. `sinceSummary.reports` ne compte que depuis `since`.
 `engine.notices` (? liste de phrases) : réparations des dossiers de comptes à signaler.
 
 ### Détail d'une conversation
-- `accepted[].decision` d'après le journal du hook : `auto-accepte`, `question-auto` → `auto` ; `garde-fou-bloque`, `garde-fou-delai-vigie` → `blocked` ; `*-attente` encore en cours → `waiting` (une attente finie n'a pas de ligne : sa suite en a une) ; `garde-fou-en-attente-vigie` → voir « Journal des actions retenues dans Vigie » ; `garde-fou-refuse-vigie` → `denied` ; `*-tu-as-repondu`, `*-pour-toi`, `*-rendu(e)`, `refus-classifieur-pour-toi`, `reponse-perdue` → `you` ; `refuse-mode-auto` → `denied`. `detail` est masqué (clés, jetons). Pour un garde-fou, il commence par le nom de la règle (`« règle » · commande`). Pour une question : `Choisi : <option>`. Champ ajouté : `agent` (? nom de l'agent).
+- `accepted[].decision` d'après le journal du hook : `auto-accepte`, `question-auto` → `auto` ; `garde-fou-bloque`, `garde-fou-delai-vigie` → `blocked` (le délai d'une action retenue dans Vigie qui reste à autoriser : `waiting`) ; `*-attente` encore en cours → `waiting` (une attente finie n'a pas de ligne : sa suite en a une) ; `garde-fou-en-attente-vigie` → voir « Journal des actions retenues dans Vigie » ; `garde-fou-refuse-vigie` → `denied` ; `*-tu-as-repondu`, `*-pour-toi`, `*-rendu(e)`, `refus-classifieur-pour-toi`, `reponse-perdue` → `you` ; `refuse-mode-auto` → `denied`. `detail` est masqué (clés, jetons). Pour un garde-fou, il commence par le nom de la règle (`« règle » · commande`). Pour une question : `Choisi : <option>`. Champ ajouté : `agent` (? nom de l'agent).
 - `mcp[]` : tout ce qui est branché pour le dossier et le compte de la conversation (même non utilisé, `uses: 0`), plus ce qu'elle a utilisé. `scope` peut aussi valoir `unknown` (serveur utilisé mais introuvable aujourd'hui dans les configurations, ex. retiré depuis, ou `claude-vscode` ajouté par l'extension), avec `enabled: null`. Connecteur : `enabled` = connecteurs de la conversation activés. Champs ajoutés : `service`, `lastTs`.
 - `tests[]` : champs ajoutés `pending` (test de fond pas encore fini, `ok: null`), `expectedFail` (étape rouge voulue, à montrer neutre, non comptée dans `testsFailed`), `line`.
 
@@ -362,7 +366,7 @@ Mécanisme côté hook : pendant l'attente d'un garde-fou, le hook relit `data/d
 Mêmes règles que `accepted[]` du détail : attentes finies écartées, `detail` masqué, conversations jetables écartées. Les anciennes lignes de question du journal (entrée brute de l'outil en JSON, coupée à 600 caractères) s'affichent comme les nouvelles : `title` = la question, `detail` = « question [option / option] ». `accepted[]` du détail porte aussi `service`.
 
 **À regarder**
-- `g:` (`state: "waiting"`) : listée seulement si le hook vit et est bien un `hook.mjs` (vérifié par `ps`), si `ts + guard.waitMin` (réglage actuel) n'est pas passé, si aucune ligne suivante du même `pid` (ni ligne de fin de la même action) ne l'a close, et si la conversation est ouverte. Champs : `pendingId` (pid du hook), `expiresAt`, `rule`, `ruleId`, `command` (masquée : clés remplacées par `••••` ; 4000 caractères au plus), `byAgent` (? nom de l'agent), `cwd`, `needsPassword`. `detail` : « … · décide ici ou dans VS Code, sinon refusée dans N min. ».
+- `g:` (`state: "waiting"`) : listée seulement si le hook vit et est bien un `hook.mjs` (vérifié par `ps`), si `ts + guard.waitMin` (réglage actuel) n'est pas passé, si aucune ligne suivante du même `pid` (ni ligne de fin de la même action) ne l'a close, et si la conversation est ouverte. Champs : `pendingId` (pid du hook), `expiresAt`, `rule`, `ruleId`, `command` (masquée : clés remplacées par `••••` ; 4000 caractères au plus), `byAgent` (? nom de l'agent), `cwd`, `needsPassword`. `title` : ce que fait l'action (sa description, sinon la première ligne de la commande, 100 caractères au plus) ; `detail` : `null` (le délai est dans `expiresAt`). Même titre pour `v:` (détail `null` : `holding` dit si elle est en pause) et `b:` (`detail` : pourquoi, « Refusée faute de réponse. À faire toi-même. », « Autorisée, mais elle a échoué : « … ». »).
 - `b:` (`state: "blocked"`) : refus d'un garde-fou depuis `since` ; mêmes champs sans `pendingId` ni `expiresAt`, plus `reason` : `delai` | `jamais` | `sous-agent`. Un refus de l'utilisateur depuis l'app (`garde-fou-refuse-app`) n'est pas « à faire toi-même » et n'y figure pas. Pour « Voir » : `command` + `cwd` → `POST /open` (terminal), `conversationId` → `POST /open` (conversation).
 - `l:` : une limite dont la remise à zéro est passée n'est plus listée ni comptée dans `needsYou`. L'heure est lue dans le texte de Claude Code (« resets 11:40pm », « resets Oct 26, 7pm », « …|1760917200 », heure du Mac, `lib/limits.mjs`) ; sans heure lisible : 5 h pour une limite de session, 7 jours sinon. Le texte de Claude Code n'est jamais renvoyé dans `title` ni `detail`. `sinceSummary.limits` compte toujours toutes les limites depuis `since`.
 - Élément écarté (`POST /review/:id/dismiss`) : caché tant qu'il ne change pas (son `ts` n'est pas plus récent que la date de l'écart). Liste dans `data/ui.json` (`dismissed`, gardée 14 jours, 500 au plus). Écarter un `q:` le note aussi relu, comme « Ça me va ».
@@ -706,7 +710,7 @@ Tous facultatifs : un moteur plus ancien ne les envoie pas, l'app les lit comme 
 - Règles, sans lire le code. Ne comptent que les vrais tests (`tests`, `e2e` : pas un build, un contrôle des types ni un lint), hors étape rouge voulue et tests pas finis, et les fichiers de code du projet (`code`, `style` : pas un `.md`, des données, ni un brouillon hors du projet).
   | `verdict` | `label` | Quand |
   |---|---|---|
-  | `verified` | tests verts après la dernière modification | le dernier test de la demande a réussi, et aucun code n'a été écrit après lui |
+  | `verified` | tests réussis après la dernière modification | le dernier test de la demande a réussi, et aucun code n'a été écrit après lui |
   | `changedAfterTests` | modifié après les tests | du code a été écrit après le dernier test |
   | `testsFailed` | tests en échec | le dernier test a échoué, rien d'écrit après |
   | `noTests` | aucun test lancé | du code écrit sans aucun test, dans un projet (racine du dépôt) où des tests ont déjà été lancés |
@@ -716,13 +720,13 @@ Tous facultatifs : un moteur plus ancien ne les envoie pas, l'app les lit comme 
 
 ### Contexte résumé (`ConversationSummary.compactions`)
 
-`{ "count": 2, "auto": 2, "lastAt": "…" }` ou `null` (jamais résumé). Claude Code résume le contexte quand il déborde (`auto`) ou sur `/compact` : après un résumé, Claude peut oublier une consigne du début. Compté sur la ligne système `compact_boundary` du transcript (`compactMetadata.trigger` : `auto` | `manual`) ; un transcript sans elle, sur le message de résumé qui la suit (`isCompactSummary`). Une ligne et son message de résumé à moins de 10 min l'un de l'autre font un seul résumé. `auto` : combien l'ont été automatiquement.
+`{ "count": 2, "auto": 2, "manual": 0, "lastAt": "…" }` ou `null` (jamais résumé). Claude Code résume le contexte quand il déborde (`auto`) ou sur `/compact` : après un résumé, Claude peut oublier une consigne du début. Compté sur la ligne système `compact_boundary` du transcript (`compactMetadata.trigger` : `auto` | `manual`) ; un transcript sans elle, sur le message de résumé qui la suit (`isCompactSummary`). Une ligne et son message de résumé à moins de 10 min l'un de l'autre font un seul résumé. `auto` : combien l'ont été automatiquement ; `manual` : combien sur `/compact`. Un résumé vu seulement par son message n'est dans aucun des deux (on ne sait pas).
 
 ### Jusqu'où tient chaque compte (`AccountSummary.usage.week.fullAt`)
 
 Date ISO à laquelle la semaine du compte serait pleine au rythme des dernières 24 h, au quart d'heure ; `null` si elle tient jusqu'à la remise à zéro, ou s'il n'y a pas de quoi mesurer. Vue d'ensemble et `GET /api/v2/accounts`.
 - D'après les vrais relevés du % de la semaine (`data/usage/semaine.json` : un point à chaque changement, 8 jours gardés), notés pour chaque compte à chaque lecture.
-- Pente : hausse depuis le % d'il y a 24 h (le dernier relevé d'avant ; sinon le premier des 24 h, à son heure), au moins 3 points, rapportée au temps écoulé jusqu'à maintenant (les heures calmes comptent). Relevés d'une autre semaine (autre `resetsAt`) ignorés.
+- Pente : hausse depuis le % d'il y a 24 h (le dernier relevé d'avant ; sans relevé aussi ancien, depuis le début de la semaine, à 0 %), au moins 3 points, rapportée au temps écoulé jusqu'à maintenant (les heures calmes comptent). Relevés d'une autre semaine (autre `resetsAt`) ignorés.
 - Déjà à 100 % : l'heure du premier relevé à 100 %.
 
 ### Pendant ton absence (`GET /api/v2/overview?since=<ISO>`)

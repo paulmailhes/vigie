@@ -46,7 +46,7 @@
         "workflows": 0,
         "agents": 0,
         "artifacts": 0,
-        "files": 6,
+        "files": 2,
         "tests": 1,
         "testsFailed": 0,
         "commits": 3
@@ -62,7 +62,7 @@
     "workflows": 0,
     "agents": 0,
     "artifacts": 0,
-    "files": 6,
+    "files": 2,
     "commits": 3,
     "pushes": 0,
     "deploys": 0,

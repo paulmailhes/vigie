@@ -422,7 +422,8 @@ struct ThreadPair: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 CardTitle(InfoLine.text(["Toi", chapter.start.map { Fmt.when($0, now: store.now) }]), compact: true, color: Theme.youText)
                 if let duration = chapter.durationMs, duration > 60_000 {
-                    Text(Fmt.duration(ms: duration)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    // une durée finie se dit avec son verbe : « a pris 42 min »
+                    Text("a pris \(Fmt.duration(ms: duration))").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
             Text(chapter.prompt ?? "").lineLimit(3).textSelection(.enabled)
@@ -519,6 +520,8 @@ struct AgentDetail: View {
         return "Estimé d'après les \(Fmt.int(basis)) agents\(phase) déjà finis, qui ont pris environ \(duration)."
     }
 
+    /// Une ligne seule : elle commence par une majuscule (« Depuis 18 min · reste ≈ 35 min », « A pris 12 min · fini
+    /// 01:17 »).
     private var timeLine: String {
         guard let start = agent.startedAt else { return Fmt.duration(ms: agent.durationMs) }
         if agent.status == "running" {
@@ -528,9 +531,10 @@ struct AgentDetail: View {
             } else if agent.estimate != nil {
                 text += " · plus long que les autres"
             }
-            return text
+            return ConversationVerdict.sentence(text)
         }
-        return "a pris \(Fmt.duration(ms: agent.durationMs)) · fini \(agent.lastAt.map { Fmt.when($0, now: store.now) } ?? "")"
+        let end = agent.lastAt.map { " · fini \(Fmt.when($0, now: store.now))" } ?? ""
+        return ConversationVerdict.sentence("a pris \(Fmt.duration(ms: agent.durationMs))\(end)")
     }
 }
 
@@ -630,7 +634,8 @@ struct ProcessLine: View {
     private var buttons: some View {
         HStack(spacing: 6) {
             if let port = group.ports.first {
-                Button("Ouvrir localhost:\(port)") { SystemActions.open("http://localhost:\(port)") }
+                // String(port) : un Int dans un libellé serait groupé (« 5 173 »)
+                Button("Ouvrir localhost:\(String(port))") { SystemActions.open("http://localhost:\(String(port))") }
                     .glassButton()
                     .help("Ouvrir dans ton navigateur")
             }

@@ -148,10 +148,11 @@ struct AccountCard: View {
         return email
     }
 
-    /// « Connecté avec bob@autre.fr au lieu de alex.durand@gmail.com. »
+    /// « Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com. » (sans « au lieu de », qui demanderait
+    /// une élision devant une voyelle).
     nonisolated static func wrongAddressText(_ account: Account) -> String {
         switch (foundEmail(account), account.expectedEmail) {
-        case let (found?, expected?): "Connecté avec \(found) au lieu de \(expected)."
+        case let (found?, expected?): "Connecté avec \(found). Adresse prévue : \(expected)."
         case let (found?, nil): "Connecté avec \(found), pas avec l'adresse prévue."
         case let (nil, expected?): "Connecté avec une autre adresse que \(expected)."
         case (nil, nil): "Connecté avec une autre adresse que celle prévue."
@@ -180,8 +181,9 @@ struct AccountCard: View {
                     if !account.isCodex || usage?.session != nil {
                         UsageGaugeRow(title: "Session 5 h", window: usage?.session)
                     }
+                    // la remise à zéro est écrite juste à côté de la jauge : la prévision ne la répète pas
                     UsageGaugeRow(title: "Semaine", window: usage?.week,
-                                  forecast: WeekForecast.text(usage?.week, now: store.now))
+                                  forecast: WeekForecast.text(usage?.week, now: store.now, withReset: false))
                     if let model = usage?.weekModel {
                         UsageGaugeRow(title: "Semaine \(model.label ?? "modèle")", window: model)
                     }
@@ -299,15 +301,15 @@ struct AccountCard: View {
     private func origin(_ source: String?) -> String? {
         switch source {
         case "session": account.isCodex ? "lu dans une conversation Codex" : "lu dans une conversation"
-        case "ping": "demandé par Vigie"
+        case "ping": "lu par Vigie"
         default: nil
         }
     }
 }
 
 /// Une jauge : « Semaine   ▬▬▬▬▭▭   39 %   remise à zéro lun. 26 oct. à 20:00 » ; « — » sans chiffre récent. Sous la
-/// jauge Semaine, quand le moteur la voit pleine avant la remise à zéro : « À ce rythme : pleine vers jeu. 14 h, avant
-/// la remise à zéro de lun. 20:00 » (`WeekForecast`), en orange, sous la barre.
+/// jauge Semaine, quand le moteur la voit pleine avant la remise à zéro : « À ce rythme : semaine pleine vers jeu. 14 h »
+/// (`WeekForecast`, sans redire la remise à zéro écrite juste au-dessus), en gris avec un triangle orange.
 struct UsageGaugeRow: View {
     @Environment(VigieStore.self) private var store
     let title: String
@@ -337,12 +339,19 @@ struct UsageGaugeRow: View {
                     .lineLimit(1)
             }
             if let forecast {
-                Text(forecast)
-                    .font(.callout)
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.warnText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, Self.titleWidth + Self.spacing)
+                // une phrase : en gris, l'icône orange seule signale (la couleur est pour les mots courts)
+                Label {
+                    Text(forecast)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.warn)
+                }
+                .labelStyle(CompactLabelStyle())
+                .font(.callout)
+                .padding(.leading, Self.titleWidth + Self.spacing)
             }
         }
         .accessibilityElement(children: .ignore)

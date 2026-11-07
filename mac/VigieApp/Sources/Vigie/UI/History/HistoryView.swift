@@ -136,6 +136,8 @@ struct HistoryView: View {
             ContentUnavailableView("Rien sur cette période", systemImage: "clock",
                                    description: Text("Change de période ou de filtre."))
         } else {
+            // largeurs idéales qui tiennent dans la fenêtre par défaut (rien ne dépasse, pas de défilement de côté) ;
+            // « Pourquoi » prend la place qui reste et se coupe en fin, entière au survol et dans le détail
             Table(items, selection: $selection) {
                 TableColumn("Heure") { item in
                     Text(item.ts.map { Fmt.when($0, now: store.now) } ?? Fmt.none)
@@ -143,13 +145,13 @@ struct HistoryView: View {
                         .foregroundStyle(.secondary)
                         .help(item.ts.map(HistoryDetail.exact) ?? "")
                 }
-                .width(min: 70, ideal: 90, max: 130)
+                .width(min: 64, ideal: 84, max: 120)
                 TableColumn("Résultat") { item in
                     Label(item.historyStatus.label, systemImage: item.historyStatus.symbol)
                         .foregroundStyle(item.historyStatus.color)
                         .labelStyle(.titleAndIcon)
                 }
-                .width(min: 110, ideal: 160, max: 190)
+                .width(min: 100, ideal: 150, max: 180)
                 TableColumn("Action") { item in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title ?? item.tool ?? "Action").lineLimit(1)
@@ -158,7 +160,7 @@ struct HistoryView: View {
                         }
                     }
                 }
-                .width(min: 200, ideal: 340)
+                .width(min: 160, ideal: 280)
                 TableColumn("Conversation") { item in
                     HStack(spacing: 6) {
                         Text(conversationName(item)).lineLimit(1)
@@ -167,13 +169,15 @@ struct HistoryView: View {
                         }
                     }
                 }
-                .width(min: 120, ideal: 180)
+                .width(min: 90, ideal: 130)
                 TableColumn("Pourquoi") { item in
                     Text(item.reason ?? "")
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .help(item.reason ?? "")
                 }
-                .width(min: 160, ideal: 280)
+                .width(min: 120, ideal: 180)
             }
             .tableStyle(.inset)
         }
@@ -247,7 +251,7 @@ struct HistoryDetail: View {
                     // Débloquer : Claude la relance à l'identique ; Vigie la redemande alors (fenêtre + Vigie).
                     Button(copied == "relaunch" ? "Message copié" : "Copier un message de relance",
                            systemImage: copied == "relaunch" ? "checkmark" : "arrow.clockwise") {
-                        SystemActions.copy("Je t'autorise cette action : relance-la exactement à l'identique, je l'autoriserai.\n\n```\n\(command)\n```")
+                        SystemActions.copy("Relance cette action exactement à l'identique : je l'autoriserai.\n\n```\n\(command)\n```")
                         copied = "relaunch"
                     }
                     .glassButton()

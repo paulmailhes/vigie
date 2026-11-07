@@ -91,6 +91,30 @@ struct MenuBarPanel: View {
                 }
             }
 
+            // ce qui a mal tourné ou que tu dois faire toi-même : un chiffre gris (jamais le rouge des décisions), la
+            // liste dans la Vue d'ensemble
+            let looks = store.lookItems(for: nil).count
+            if looks > 0 {
+                Button {
+                    open(.overview)
+                } label: {
+                    HStack(spacing: 6) {
+                        CardTitle("À regarder")
+                        CountBadge(count: looks, label: "\(looks) à regarder")
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(TileButtonStyle())
+                .padding(.horizontal, -6)
+                .help("Refus d'office, commande à lancer toi-même, limite : la liste dans la Vue d'ensemble")
+            }
+
             Divider()
 
             let openConversations = store.conversations.filter(\.isOpen)
@@ -110,9 +134,13 @@ struct MenuBarPanel: View {
                             .lineLimit(1)
                             .layoutPriority(1)
                         if let alert = conversation.alert, alert.isRunaway {
-                            Image(systemName: Icon.runaway)
-                                .foregroundStyle(Theme.warn)
-                                .imageScale(.small)
+                            // écrit en mots, comme dans la vue d'ensemble (pas seulement une flamme)
+                            Label("s'emballe", systemImage: Icon.runaway)
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption)
+                                .foregroundStyle(Theme.warnText)
+                                .lineLimit(1)
+                                .fixedSize()
                                 .help(alert.reason ?? "S'emballe")
                         }
                         Spacer(minLength: 4)
@@ -204,13 +232,20 @@ struct PanelAccounts: View {
                 VStack(alignment: .leading, spacing: 2) {
                     row(account)
                     if account.isConnected, let forecast = gauge.forecast {
-                        Text(forecast)
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.warnText)
-                            .fixedSize(horizontal: false, vertical: true)
-                            // sous le nom du compte (pastille de 7 pt et écart de 8)
-                            .padding(.leading, 15)
+                        // une phrase : en gris, l'icône orange seule signale (la couleur est pour les mots courts)
+                        Label {
+                            Text(forecast)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Theme.warn)
+                        }
+                        .labelStyle(CompactLabelStyle())
+                        .font(.caption)
+                        // sous le nom du compte (pastille de 7 pt et écart de 8)
+                        .padding(.leading, 15)
                     }
                 }
                 .help(gauge.help)
@@ -222,9 +257,7 @@ struct PanelAccounts: View {
         let working = store.working(on: account.id)
         let rate = store.ratePerHour(on: account.id)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle()
-                .fill(working.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
-                .frame(width: 7, height: 7)
+            StateDot.working(!working.isEmpty, size: 7)
                 .opacity(account.isConnected ? 1 : Theme.dim)
             VStack(alignment: .leading, spacing: 1) {
                 Text(account.displayName)
@@ -289,7 +322,10 @@ struct DecisionSummary: View {
                     .font(.callout)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    DecisionDeadline(item: item)
+                    // rien pour « T'attend » : pas d'espace vide en tête de ligne
+                    if DecisionDeadline.text(item, now: store.now) != nil {
+                        DecisionDeadline(item: item)
+                    }
                     Text(context)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -303,17 +339,18 @@ struct DecisionSummary: View {
         .help(InfoLine.text([item.title, context, DecisionDeadline.text(item, now: store.now)?.text]))
     }
 
-    /// Qui · quoi : la conversation, puis la règle (action sensible) ou ce qu'elle attend.
+    /// Qui · quoi : la conversation, puis la règle (action sensible, si le titre ne la dit pas déjà) ou ce qu'elle
+    /// attend.
     private var context: String {
         let who = item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.conversationTitle
-        let what = item.reviewKind == .blocked ? item.rule : item.detail
+        let what = item.reviewKind == .blocked ? item.rule.flatMap { $0 == item.title ? nil : $0 } : item.detail
         return InfoLine.text([who, what])
     }
 }
 
-/// Le délai d'une décision, en puce : « Refusée dans 8 min » (tenu à jour), « À autoriser » (elle a continué sans,
-/// attend ton accord pour la relancer), « À répondre » (question à laquelle répondre d'ici). Rien pour « T'attend » :
-/// son titre le dit déjà.
+/// Le délai d'une décision, en puce : « Refusée dans 8 min » (tenu à jour), « Refusée d'office » (délai passé), « À
+/// autoriser » (sans délai : elle attend ton accord ; le même mot que la fenêtre), « À répondre » (question à laquelle
+/// répondre d'ici). Rien pour « T'attend » : son titre le dit déjà.
 struct DecisionDeadline: View {
     @Environment(VigieStore.self) private var store
     let item: ReviewItem
@@ -329,8 +366,8 @@ struct DecisionDeadline: View {
     static func text(_ item: ReviewItem, now: Date) -> (text: String, tone: Chip.Tone)? {
         switch item.reviewKind {
         case .blocked:
-            if let expires = item.expiresAt, expires > now {
-                return ("Refusée \(Fmt.remaining(until: expires, now: now))", .alert)
+            if let expires = item.expiresAt {
+                return (expires > now ? "Refusée \(Fmt.remaining(until: expires, now: now))" : "Refusée d'office", .alert)
             }
             return (Theme.label(for: .blocked), .alert)
         case .waiting where !item.questions.isEmpty && item.pendingId != nil:

@@ -104,7 +104,7 @@ enum Fmt {
     static func pct(_ value: Double?) -> String {
         guard let value else { return none }
         let rounded = value >= 10 || value == value.rounded() ? value.rounded() : (value * 10).rounded() / 10
-        return "\(rounded.formatted(.number.locale(locale))) %"
+        return "\(rounded.formatted(.number.locale(locale)))\u{00A0}%"
     }
 
     /// « 182 k », « 1,2 M ».
@@ -209,10 +209,13 @@ enum Fmt {
         return value.allSatisfy { ($0.isLetter && $0.isLowercase) || $0.isNumber || $0 == "-" || $0 == "_" }
     }
 
-    /// Tirets en espaces, majuscule initiale : « partie-c-charte-ecrans » → « Partie c charte ecrans ».
+    /// Tirets en espaces, majuscule initiale, une lettre seule en capitale (le repère d'une partie du plan) :
+    /// « partie-c-charte-ecrans » → « Partie C charte ecrans ».
     private static func humanized(_ value: String) -> String {
         let spaced = value.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-            .split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .map { $0.count == 1 && $0.first?.isLetter == true ? $0.uppercased() : String($0) }
+            .joined(separator: " ")
         return spaced.prefix(1).uppercased() + spaced.dropFirst()
     }
 }

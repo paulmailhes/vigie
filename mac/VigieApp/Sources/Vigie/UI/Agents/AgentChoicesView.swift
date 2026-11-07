@@ -41,9 +41,9 @@ struct AgentChoicesView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
-            .background(on ? Theme.action.opacity(0.10) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(on ? Theme.action.opacity(0.55) : Color.secondary.opacity(0.22)))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .background(on ? Theme.action.opacity(0.10) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(on ? Theme.action.opacity(0.55) : Color.secondary.opacity(0.22)))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(option)

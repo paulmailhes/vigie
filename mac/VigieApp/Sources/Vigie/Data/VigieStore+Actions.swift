@@ -625,15 +625,22 @@ extension VigieStore {
     // MARK: Les trois listes : À décider · À regarder · À relire
 
     /// Il faut un clic maintenant (autoriser, refuser, répondre) dans la conversation : action sensible en attente,
-    /// question posée, conversation qui t'attend.
+    /// question posée, conversation qui t'attend. Un avis du moteur (`notice` : compte à reconnecter, compte changé,
+    /// lancée sur un autre compte, module Codex) n'en est pas un : il est lu en `.other`, dans « À regarder ».
     static func isDecision(_ item: ReviewItem) -> Bool {
         item.needsDecision || item.reviewKind == .waiting
     }
 
-    /// A mal tourné ou à faire toi-même : refusée d'office (délai, règle), autorisée mais en échec, sudo à lancer
-    /// toi-même, limite atteinte. Se retire (« Retirer »).
+    /// A mal tourné ou à faire toi-même : refusée d'office (délai, règle), autorisée mais en échec, commande à lancer
+    /// toi-même, limite atteinte, avis du moteur. Se retire (« Retirer ») quand le moteur le permet (`canDismiss`).
     static func isLook(_ item: ReviewItem) -> Bool {
-        (item.reviewKind == .blocked && !item.needsDecision) || item.reviewKind == .limit
+        (item.reviewKind == .blocked && !item.needsDecision) || item.reviewKind == .limit || item.reviewKind == .other
+    }
+
+    /// « Retirer » : ce que le moteur sait retirer. Un avis sans conversation (compte à reconnecter, module Codex)
+    /// reste tant que le problème dure.
+    static func canDismiss(_ item: ReviewItem) -> Bool {
+        isLook(item) && (item.reviewKind != .other || item.conversationId != nil)
     }
 
     /// « À décider » : LA liste du badge rouge, la même partout (barre latérale, icône, barre des menus, pages). Les
@@ -680,6 +687,19 @@ extension VigieStore {
 
     private static func matches(_ item: ReviewItem, _ conversationID: String?) -> Bool {
         conversationID == nil || item.conversationId == conversationID
+    }
+
+    /// ⌘R : ce que la page affichée relit, la même chose que le bouton ⟳ de sa barre d'outils quand elle en a un.
+    func refreshCurrentPage() async {
+        switch route {
+        case .overview?, nil: await refreshOverview()
+        case .conversation(let id)?: await refreshConversation(id)
+        case .account?: await refreshUsage(nil)
+        case .mcp?: await mcpCheck()
+        case .agents?: await refreshAgents()
+        case .history?: await refreshHistory()
+        case .background?: await refreshBackground()
+        }
     }
 
     /// Ouvre la page Comptes sur un compte (chaque compte est une ligne de la barre latérale).

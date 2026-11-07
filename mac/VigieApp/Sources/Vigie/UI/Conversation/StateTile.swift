@@ -12,8 +12,9 @@ struct StateTile: View {
     let verdict: ConversationVerdict
     let open: (ConversationPanel) -> Void
 
-    /// « À regarder » montré dans la tuile ; au-delà, la puce « À regarder » de la ligne du dessous ouvre la liste.
-    private static let shownLooks = 3
+    /// « À regarder » montré dans la tuile ; au-delà, la puce « N de plus à regarder » de la ligne du dessous ouvre la
+    /// liste (`DetailsBar`).
+    static let shownLooks = 3
 
     var body: some View {
         let looks = store.lookItems(for: summary.id)
@@ -68,12 +69,9 @@ struct StateTile: View {
                 ForEach(notes) { note in
                     noteView(note)
                 }
-                if verdict.showCause, let model {
-                    if SideTiles.redTest(model, now: store.now) != nil {
-                        Chip("Voir les tests", symbol: Icon.test, size: .regular, raised: true) { open(.tests) }
-                    } else if !model.feed.isEmpty {
-                        Chip("Journal", size: .regular, raised: true) { open(.journal) }
-                    }
+                // le Journal est dans la ligne juste dessous : seulement les tests, quand l'un est en échec
+                if verdict.showCause, let model, SideTiles.redTest(model, now: store.now) != nil {
+                    Chip("Voir les tests", symbol: Icon.test, size: .regular, raised: true) { open(.tests) }
                 }
                 if verdict.openButton {
                     AsyncButton(verdict.reply ? summary.replyLabel : summary.openLabel) {
@@ -141,7 +139,8 @@ struct StateTile: View {
     @ViewBuilder
     private var meta: some View {
         let other = otherAccount
-        let week = summary.weekPct
+        // les mêmes mots et le même arrondi que la vue d'ensemble (« 2 % de la semaine », « < 1 % ») ; rien à 0
+        let week = ConversationListRow.weekShare(summary.weekPct)
         if other != nil || rate != nil || week != nil {
             HStack(spacing: 6) {
                 if let other {
@@ -154,7 +153,7 @@ struct StateTile: View {
                 }
                 if let week {
                     if other != nil || rate != nil { separator }
-                    Text("\(Fmt.pct(week)) de la semaine")
+                    Text(week)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .help(weekHelp)
@@ -176,7 +175,8 @@ struct StateTile: View {
 
     // MARK: Ligne du bas : depuis quand, et les puces
 
-    /// « Travaille sur ta demande depuis 8 h · dernière action il y a 12 s ».
+    /// « Travaille sur ta demande depuis 8 h · dernière action il y a 12 s ». Quand le verdict dit déjà depuis quand
+    /// (« Finie · hier 23:35 », « T'attend · depuis 6 min »), la dernière action n'est pas répétée.
     private var timeLine: String {
         var parts: [String] = []
         if let start = model?.raw.current?.start {
@@ -188,7 +188,7 @@ struct StateTile: View {
                 parts.append("demande faite \(Fmt.ago(start, now: store.now))")
             }
         }
-        if let last = summary.lastActivity { parts.append("dernière action \(Fmt.ago(last, now: store.now))") }
+        if let last = summary.lastActivity, verdict.since == nil { parts.append("dernière action \(Fmt.ago(last, now: store.now))") }
         return ConversationVerdict.sentence(parts.joined(separator: " · "))
     }
 
@@ -263,22 +263,29 @@ struct StateTile: View {
         summary.compactions ?? model?.raw.summary?.compactions
     }
 
-    /// « Contexte résumé à 03:12 », « Contexte résumé 2 fois · dernière 03:12 ».
+    /// « Contexte résumé à 03:12 », « Contexte résumé 2 fois, la dernière à 03:12 ».
     private func compactedText(_ compactions: ContextCompactions, count: Int) -> String {
         guard let last = compactions.lastAt else { return "Contexte résumé \(count) fois" }
         if count == 1 { return "Contexte résumé \(ConversationVerdict.at(last, now: store.now))" }
-        return "Contexte résumé \(count) fois · dernière \(Fmt.when(last, now: store.now))"
+        return "Contexte résumé \(count) fois, la dernière \(ConversationVerdict.at(last, now: store.now))"
     }
 
     /// Ce que ça veut dire, et quoi faire.
     private func compactedHelp(_ compactions: ContextCompactions, count: Int) -> String {
+        "Claude Code a résumé le début de cette conversation pour faire de la place\(Self.compactedHow(compactions, count: count).map { " (\($0))" } ?? ""). Après un résumé, Claude peut oublier une consigne du début : redis-la si elle compte."
+    }
+
+    /// Comment : « automatiquement… », « à ta demande (/compact) », « dont 1 automatiquement » ; nil quand on ne sait
+    /// pas (un résumé vu seulement par son message n'est ni l'un ni l'autre, et un moteur plus ancien ne compte pas
+    /// les /compact).
+    static func compactedHow(_ compactions: ContextCompactions, count: Int) -> String? {
         let auto = min(compactions.auto ?? 0, count)
-        let how = switch auto {
-        case count: count > 1 ? "automatiquement, chaque fois que le contexte débordait" : "automatiquement, quand le contexte débordait"
-        case 0: "à ta demande (/compact)"
-        default: "dont \(auto) automatiquement"
-        }
-        return "Claude Code a résumé le début de cette conversation pour faire de la place (\(how)). Après un résumé, Claude peut oublier une consigne du début : redis-la si elle compte."
+        let manual = compactions.manual.map { min($0, count) }
+        if auto == count { return count > 1 ? "automatiquement, chaque fois que le contexte débordait" : "automatiquement, quand le contexte débordait" }
+        if manual == count { return "à ta demande (/compact)" }
+        if auto > 0 { return "dont \(auto) automatiquement" }
+        if let manual, manual > 0 { return "dont \(manual) à ta demande (/compact)" }
+        return nil
     }
 
     @ViewBuilder
@@ -303,7 +310,7 @@ struct StateTile: View {
             .buttonStyle(ChipButtonStyle())
             .help(note.help ?? note.text)
         } else if note.free {
-            // une puce neutre dont la date peut être longue (« dernière sam. 7 nov. 03:12 ») : elle se coupe en fin
+            // une puce neutre dont la date peut être longue (« la dernière sam. 7 nov. 03:12 ») : elle se coupe en fin
             // plutôt que de dépasser de la tuile dans une fenêtre étroite
             Text(note.text)
                 .lineLimit(1)
@@ -318,7 +325,8 @@ struct StateTile: View {
             HStack(spacing: 4) {
                 Chip(note.text, tone: .warn, size: .regular)
                 AsyncButton("Tout de suite") { await store.switchAccount(of: summary.id, to: to, now: true) }
-                    .buttonStyle(.borderless)
+                    .glassButton()
+                    .controlSize(.small)
                     .help("Interrompt son travail et la relance sur l'autre compte. Tu écris « continue » pour la reprendre.")
             }
         } else if let panel = note.panel {
