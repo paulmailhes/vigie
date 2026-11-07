@@ -33,6 +33,12 @@ enum ConversationPanel: Hashable, Sendable {
     case answers
 }
 
+/// Une page de la pile Retour / Suivant (⌘[ ⌘]), avec le détail qu'elle avait ouvert à droite (page d'une
+/// conversation) : il se rouvre au retour.
+struct VisitedPage: Equatable, Sendable {
+    var route: Route
+    var panel: ConversationPanel?
+}
 
 /// Un message d'une ligne en bas de la fenêtre.
 struct Toast: Equatable, Identifiable, Sendable {

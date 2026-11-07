@@ -16,9 +16,7 @@ struct SidebarView: View {
                 HStack {
                     SidebarLabel("Vue d'ensemble", symbol: "binoculars")
                     Spacer(minLength: 4)
-                    if store.toReviewCount > 0 {
-                        CountBadge(count: store.toReviewCount, urgent: store.somethingWaits)
-                    }
+                    OverviewCount()
                 }
                 .background { if !standIn { CalmSidebarSelection() } }
                 .tag(Route.overview)
@@ -39,24 +37,31 @@ struct SidebarView: View {
             }
 
             if !closedConversations.isEmpty {
-                Section("Fermées récemment", isExpanded: $showClosed) {
+                Section(isExpanded: $showClosed) {
                     ForEach(closedConversations) { conversation in
                         SidebarConversationRow(conversation: conversation)
                             .tag(Route.conversation(conversation.id))
                             .standInHighlight(standIn && store.route == .conversation(conversation.id))
                     }
+                } header: {
+                    // le nombre collé au titre (pas poussé à droite : la flèche de la section y apparaît au survol)
+                    HStack(spacing: 4) {
+                        Text("Fermées récemment")
+                        Text(Fmt.int(closedConversations.count))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
 
-            // Une seule entrée : tous les comptes sont sur la même page ; leur aperçu reste visible ici.
+            // Une entrée par compte : le clic ouvre la page Comptes sur ce compte ; leur aperçu reste visible ici.
             Section("Comptes") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(store.accounts) { account in
-                        SidebarAccountRow(account: account)
-                    }
+                ForEach(store.accounts) { account in
+                    SidebarAccountRow(account: account)
+                        .tag(Route.account(account.id))
+                        .standInHighlight(standIn && store.route == .account(account.id))
                 }
-                .tag(Route.account(accountsRouteID))
-                .standInHighlight(standIn && store.route == .account(accountsRouteID))
             }
 
             Section("Outils") {
@@ -83,12 +88,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 360)
-    }
-
-    /// La page Comptes, quel que soit le compte d'où l'on vient.
-    private var accountsRouteID: String {
-        if case .account(let id) = store.route { return id }
-        return store.accounts.first?.id ?? "principal"
     }
 
     private var openConversations: [ConversationSummary] {
@@ -120,7 +119,28 @@ struct SidebarLabel: View {
     }
 }
 
-/// Une ligne : pastille d'état, nom, compte sur lequel elle tourne ; un compteur rouge si elle t'attend.
+/// Le chiffre de « Vue d'ensemble » : la pastille rouge des décisions qui t'attendent (`decisionCount`, le même que
+/// l'icône et le panneau de la barre des menus) ; sans décision, le nombre de choses à regarder, en gris.
+struct OverviewCount: View {
+    @Environment(VigieStore.self) private var store
+
+    var body: some View {
+        let decisions = store.decisionCount
+        if decisions > 0 {
+            CountBadge(count: decisions, urgent: true)
+                .help(decisions > 1 ? "\(decisions) décisions t'attendent" : "Une décision t'attend")
+        } else {
+            let look = store.lookItems(for: nil).count
+            if look > 0 {
+                CountBadge(count: look, label: "\(look) à regarder")
+                    .help("À regarder : ce qui a mal tourné ou que tu dois faire toi-même")
+            }
+        }
+    }
+}
+
+/// Une ligne : pastille d'état, nom, puis le compte sur lequel elle tourne et la pastille rouge de ce qui t'attend.
+/// Une conversation fermée garde un nom lisible (`.secondary`) ; seule sa pastille est atténuée.
 struct SidebarConversationRow: View {
     @Environment(VigieStore.self) private var store
     let conversation: ConversationSummary
@@ -128,39 +148,68 @@ struct SidebarConversationRow: View {
     var body: some View {
         HStack(spacing: 8) {
             StatusDot(status: conversation.state)
+                .opacity(conversation.isOpen ? 1 : Theme.dim)
             Text(conversation.shortTitle)
                 .lineLimit(1)
+                .foregroundStyle(conversation.isOpen ? .primary : .secondary)
+                .layoutPriority(1)
             Spacer(minLength: 4)
-            let waiting = store.urgentItems(for: conversation.id).count
-            if waiting > 0 {
-                CountBadge(count: waiting, urgent: true)
-            } else if conversation.isOpen {
-                Text(accountName)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
+            ConversationTrail(conversation: conversation)
         }
         .padding(.vertical, 2)
-        .opacity(conversation.isOpen ? 1 : Theme.dim)
         .help(conversation.title ?? conversation.shortTitle)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(conversation.shortTitle), \(Theme.label(for: conversation.state)), \(accountName)")
-    }
-
-    private var accountName: String {
-        let id = conversation.resume?.to ?? store.runningAccountId(of: conversation)
-        return store.account(id)?.displayName ?? id ?? ""
+        .accessibilityLabel(ConversationTrail.spoken(conversation, store: store))
     }
 }
 
-/// Un compte : pastille verte quand une conversation consomme dessus, jauge de la semaine ;
-/// atténué s'il n'est pas connecté.
+/// La fin de ligne d'une conversation, la même dans la barre latérale et dans la barre des menus : le compte sur
+/// lequel elle tourne (toujours visible), puis la pastille rouge de ce qui t'attend (le calcul du badge rouge),
+/// seulement s'il y a quelque chose.
+struct ConversationTrail: View {
+    @Environment(VigieStore.self) private var store
+    let conversation: ConversationSummary
+    /// Largeur fixe de la colonne du compte (barre des menus : les noms s'alignent) ; sinon, sa largeur.
+    var accountWidth: CGFloat? = nil
+
+    var body: some View {
+        let decisions = store.decisionCount(for: conversation.id)
+        let account = conversation.isOpen ? store.accountName(of: conversation) : ""
+        HStack(spacing: 6) {
+            if !account.isEmpty || accountWidth != nil {
+                Text(account)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: accountWidth, alignment: .trailing)
+            }
+            if decisions > 0 {
+                CountBadge(count: decisions, urgent: true)
+                    .fixedSize()
+            }
+        }
+    }
+
+    /// Ce que VoiceOver lit pour la ligne : « Atelier, À autoriser, Travail 1, 2 à décider ».
+    static func spoken(_ conversation: ConversationSummary, store: VigieStore) -> String {
+        let decisions = store.decisionCount(for: conversation.id)
+        return [conversation.shortTitle, Theme.label(for: conversation.state),
+                conversation.isOpen ? store.accountName(of: conversation) : "",
+                decisions > 0 ? "\(decisions) à décider" : ""]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+}
+
+/// Un compte : pastille verte quand une conversation consomme dessus (triangle rouge : connecté à la mauvaise
+/// adresse), puis la limite qui compte (`AccountGauge`) : « sem. 39 % » et sa jauge, ou « Session pleine · 03:40 » en
+/// rouge à la place de la jauge. Pas connecté : le nom en gris lisible, seule la pastille est atténuée.
 struct SidebarAccountRow: View {
     @Environment(VigieStore.self) private var store
     let account: Account
 
     var body: some View {
+        let gauge = AccountGauge(usage: account.usage, now: store.now)
         HStack(spacing: 8) {
             Group {
                 if account.wrongAccount == true {
@@ -173,49 +222,118 @@ struct SidebarAccountRow: View {
                 }
             }
             .frame(width: 18)
+            .opacity(account.isConnected ? 1 : Theme.dim)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(account.displayName)
                         .lineLimit(1)
+                        .foregroundStyle(account.isConnected ? .primary : .secondary)
                     Spacer(minLength: 4)
-                    Text(weekText)
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    if account.isConnected {
+                        Text(gauge.label)
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(gauge.warn ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
+                            .fixedSize()
+                    }
                 }
-                if account.isConnected {
-                    UsageBar(pct: account.usage?.week?.pct, height: 3)
-                } else {
+                if !account.isConnected {
                     Text("Pas connecté")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if let full = gauge.full {
+                    Text(full)
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.alertText)
+                        .lineLimit(1)
+                } else {
+                    UsageBar(pct: gauge.pct, height: 3)
                 }
             }
         }
         .padding(.vertical, 2)
-        .opacity(account.isConnected ? 1 : Theme.dim)
-        .help(store.working(on: account.id).isEmpty ? account.displayName
-              : "Consomme : " + store.working(on: account.id).map(\.shortTitle).joined(separator: ", "))
+        .help(help(gauge))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(account.displayName), semaine \(weekText)")
+        .accessibilityLabel(account.isConnected ? "\(account.displayName), \(gauge.help)" : "\(account.displayName), pas connecté")
     }
 
-    private var weekText: String {
-        guard account.isConnected else { return "" }
-        return account.usage?.week?.pct.map(Fmt.pct) ?? "—"
+    private func help(_ gauge: AccountGauge) -> String {
+        guard account.isConnected else { return "\(account.displayName) : pas connecté" }
+        let working = store.working(on: account.id)
+        let head = working.isEmpty ? account.displayName
+            : "\(account.displayName) · consomme : " + working.map(\.shortTitle).joined(separator: ", ")
+        return gauge.help.isEmpty ? head : head + "\n" + gauge.help
     }
 }
 
-extension VigieStore {
-    /// Quelque chose t'attend vraiment (action bloquée, conversation en attente) : seul cas en rouge.
-    var somethingWaits: Bool {
-        toReview.contains { Theme.isAlert($0.reviewKind) }
+/// La limite d'un compte qui compte le plus, la même dans la barre latérale et la barre des menus : la semaine
+/// d'habitude ; la session quand elle passe 90 % (le seuil des alertes) et dépasse la semaine ; une fenêtre pleine
+/// s'écrit en toutes lettres, en rouge (« Session pleine · 03:40 »).
+struct AccountGauge: Equatable {
+    /// Texte court à côté du nom : « sem. 39 % », « session 92 % ».
+    let label: String
+    /// La session passe 90 % sans être pleine : le texte court en orange.
+    let warn: Bool
+    /// Le pourcentage de la jauge (la fenêtre qui compte).
+    let pct: Double?
+    /// Une fenêtre pleine : ce texte rouge remplace la jauge (« Session pleine · 03:40 », « Semaine pleine »).
+    let full: String?
+    /// Les deux chiffres et leurs remises à zéro, pour l'aide au survol et VoiceOver.
+    let help: String
+
+    /// Seuil à partir duquel la session passe devant la semaine (celui des alertes de consommation).
+    static let sessionAlert: Double = 90
+
+    init(usage: AccountUsage?, now: Date) {
+        let session = usage?.session, week = usage?.week
+        let sessionPct = session?.pct, weekPct = week?.pct
+        let weekLabel = "sem. \(Fmt.pct(weekPct))"
+        if let weekPct, weekPct >= 100 {
+            label = weekLabel
+            warn = false
+            pct = weekPct
+            full = Self.fullText(week, session: false)
+        } else if let sessionPct, sessionPct >= 100 {
+            label = weekLabel
+            warn = false
+            pct = sessionPct
+            full = Self.fullText(session, session: true)
+        } else if let sessionPct, sessionPct >= Self.sessionAlert, sessionPct > (weekPct ?? 0) {
+            label = "session \(Fmt.pct(sessionPct))"
+            warn = true
+            pct = sessionPct
+            full = nil
+        } else {
+            label = weekLabel
+            warn = false
+            pct = weekPct
+            full = nil
+        }
+        help = [Self.describe("Session", session, now: now), Self.describe("Semaine", week, now: now)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    /// « Session pleine · 03:40 » (la session se remet à zéro dans les 5 h : l'heure suffit), « Semaine pleine » ; nil
+    /// si la fenêtre n'est pas pleine.
+    static func fullText(_ window: UsageWindow?, session: Bool) -> String? {
+        guard let pct = window?.pct, pct >= 100 else { return nil }
+        guard session else { return "Semaine pleine" }
+        return window?.resetsAt.map { "Session pleine · \(Fmt.time($0))" } ?? "Session pleine"
+    }
+
+    /// « Session 100 %, remise à zéro aujourd'hui à 03:40 » ; nil sans relevé.
+    static func describe(_ title: String, _ window: UsageWindow?, now: Date) -> String? {
+        guard let pct = window?.pct else { return nil }
+        guard let reset = window?.resetsAt else { return "\(title) \(Fmt.pct(pct))" }
+        return "\(title) \(Fmt.pct(pct)), remise à zéro \(Fmt.reset(reset, now: now))"
     }
 }
 
 /// La barre latérale ne prend pas le focus clavier : sa sélection reste la sélection système discrète
 /// (grise), au lieu d'un bloc plein de la couleur d'accent. Le clic sélectionne toujours normalement ;
-/// ⌘1 à ⌘5 et le menu Aller restent pour le clavier.
+/// pour le clavier : ⌘1 à ⌘6 (les pages), ⌥⌘1 à ⌥⌘9 (les conversations ouvertes), ⌘J, ⌘[ ⌘] et le menu Aller.
 struct CalmSidebarSelection: NSViewRepresentable {
     func makeNSView(context: Context) -> Probe { Probe() }
 

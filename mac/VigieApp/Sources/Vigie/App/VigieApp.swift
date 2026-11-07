@@ -27,28 +27,7 @@ struct VigieApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
-            CommandMenu("Aller") {
-                Button("Vue d'ensemble") { store.route = .overview }
-                    .keyboardShortcut("1", modifiers: .command)
-                Button("Comptes") { store.showAccounts(nil) }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("MCP") { store.route = .mcp }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("Agents") { store.route = .agents }
-                    .keyboardShortcut("4", modifiers: .command)
-                Button("Historique") { store.route = .history }
-                    .keyboardShortcut("5", modifiers: .command)
-                Button("En fond") { store.route = .background }
-                    .keyboardShortcut("6", modifiers: .command)
-                Divider()
-                Button("Actualiser") { Task { await store.refreshOverview() } }
-                    .keyboardShortcut("r", modifiers: .command)
-                Divider()
-                Button("Revoir l'accueil") {
-                    store.openMainWindow?()
-                    store.showOnboarding = true
-                }
-            }
+            GoCommands(store: store)
         }
 
         Settings {
@@ -64,5 +43,54 @@ struct VigieApp: App {
             MenuBarLabel(store: store)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Le menu Aller : Retour / Suivant (⌘[ ⌘]), les pages (⌘1 à ⌘6), la conversation suivante qui t'attend (⌘J) et
+/// les conversations ouvertes (⌥⌘1 à ⌥⌘9) : la barre latérale ne prend pas le focus clavier, tout passe par ici.
+/// Navigation seulement : aucun raccourci ne décide (Autoriser reste un clic).
+struct GoCommands: Commands {
+    let store: VigieStore
+
+    var body: some Commands {
+        CommandMenu("Aller") {
+            Button("Retour") { store.goBack() }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!store.canGoBack)
+            Button("Suivant") { store.goForward() }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!store.canGoForward)
+            Divider()
+            Button("Vue d'ensemble") { store.route = .overview }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("Comptes") { store.showAccounts(nil) }
+                .keyboardShortcut("2", modifiers: .command)
+            Button("MCP") { store.route = .mcp }
+                .keyboardShortcut("3", modifiers: .command)
+            Button("Agents") { store.route = .agents }
+                .keyboardShortcut("4", modifiers: .command)
+            Button("Historique") { store.route = .history }
+                .keyboardShortcut("5", modifiers: .command)
+            Button("En fond") { store.route = .background }
+                .keyboardShortcut("6", modifiers: .command)
+            Divider()
+            Button("Suivante qui t'attend") { store.showNextWaiting() }
+                .keyboardShortcut("j", modifiers: .command)
+                .disabled(store.waitingConversationIDs.isEmpty)
+            Section("Conversations") {
+                ForEach(Array(store.conversations.filter(\.isOpen).prefix(9).enumerated()), id: \.element.id) { index, conversation in
+                    Button(conversation.shortTitle) { store.route = .conversation(conversation.id) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                }
+            }
+            Divider()
+            Button("Actualiser") { Task { await store.refreshOverview() } }
+                .keyboardShortcut("r", modifiers: .command)
+            Divider()
+            Button("Revoir l'accueil") {
+                store.openMainWindow?()
+                store.showOnboarding = true
+            }
+        }
     }
 }

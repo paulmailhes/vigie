@@ -3,7 +3,7 @@ import UserNotifications
 
 /// Les types de notifications, chacun réglable (Réglages › Notifications).
 enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
-    case waiting, sensitive, failed, question, accountWeek, missionDone, stopped, runaway, background
+    case waiting, sensitive, failed, question, accountSession, accountWeek, missionDone, stopped, runaway, background
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .sensitive: "Une action sensible attend ton accord"
         case .failed: "Une action autorisée a échoué"
         case .question: "Vigie a répondu à une question à ta place"
+        case .accountSession: "Un compte passe 90 % de sa session pendant qu'une conversation tourne"
         case .accountWeek: "Un compte passe 80 % puis 90 % de sa semaine"
         case .missionDone: "Une conversation ou un workflow a fini"
         case .stopped: "Une conversation s'arrête avant la fin"
@@ -27,6 +28,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .sensitive: Icon.guardRule
         case .failed: "exclamationmark.triangle"
         case .question: Icon.question
+        case .accountSession: Icon.limit
         case .accountWeek: Icon.week
         case .missionDone: Icon.mission
         case .stopped: "pause.circle"
@@ -41,12 +43,13 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .sensitive: 0
         case .waiting: 1
         case .stopped: 2
-        case .failed: 3
-        case .missionDone: 4
-        case .runaway: 5
-        case .question: 6
-        case .background: 7
-        case .accountWeek: 8
+        case .accountSession: 3
+        case .failed: 4
+        case .missionDone: 5
+        case .runaway: 6
+        case .question: 7
+        case .background: 8
+        case .accountWeek: 9
         }
     }
 
@@ -74,6 +77,10 @@ final class Notifier {
         var version: Double = 0
         /// Toujours discrète : dans le centre de notifications, sans bannière.
         var quiet = false
+        /// Le compte concerné (session presque pleine) : le clic ouvre sa page si aucune conversation n'est à ouvrir.
+        var accountId: String?
+        /// La conversation que le clic ouvre, sans ranger la notification avec elle (`conversationId` le fait).
+        var opens: String?
     }
 
     private static let seenKey = "notify.seen"
@@ -185,10 +192,9 @@ final class Notifier {
             case .waiting:
                 list.append(waiting(item, conversation: conversation, store: store))
             case .blocked where item.needsDecision:
-                let what = item.rule ?? item.title ?? "Action sensible"
-                let command = item.command.map { String($0.prefix(160)) } ?? ""
+                // ce que c'est et ce qui se passe sans réponse ; jamais la commande brute (elle est dans la fiche)
                 list.append(Candidate(key: "r:" + item.id, kind: .sensitive, title: "À autoriser · \(conversation)",
-                                      subtitle: what, body: command.isEmpty ? what : command,
+                                      subtitle: item.title ?? item.rule ?? "Action sensible", body: Self.sensitiveBody(item),
                                       conversationId: item.conversationId, reviewId: item.id))
             case .blocked where item.failed:
                 list.append(Candidate(key: "r:" + item.id, kind: .failed, title: "Action autorisée en échec · \(conversation)",
@@ -228,6 +234,8 @@ final class Notifier {
                                   title: "\(account.displayName) passe \(top) % de sa semaine", body: body,
                                   conversationId: nil, reviewId: nil))
         }
+
+        list.append(contentsOf: sessionAlerts(store))
 
         let reports = store.reports.map(\.value)
         for report in reports {
@@ -283,20 +291,68 @@ final class Notifier {
         return list
     }
 
-    /// Une conversation t'attend : sa question si Vigie l'a vue, sinon ce qu'elle dit attendre.
+    /// Une conversation t'attend : sa question si Vigie l'a vue, sinon ce qu'elle dit attendre. Le clic ouvre la
+    /// conversation, et la fiche pour répondre d'ici quand la question s'y prête.
     private func waiting(_ item: ReviewItem, conversation: String, store: VigieStore) -> Candidate {
         if item.id.hasPrefix("w:") {
-            let isPlan = item.title == "Plan à valider"
             return Candidate(key: "r:" + item.id, kind: .waiting,
-                             title: isPlan ? "\(conversation) te propose un plan" : "\(conversation) te pose une question",
+                             title: Self.isPlan(item.title) ? "\(conversation) te propose un plan" : "\(conversation) te pose une question",
                              subtitle: Self.deadline(item.detail), body: item.title ?? "Elle attend ta réponse",
-                             conversationId: item.conversationId, reviewId: nil)
+                             conversationId: item.conversationId, reviewId: item.id)
         }
         let summary = item.conversationId.flatMap { store.conversation($0) }
         let stamp = item.ts.map { String(Int($0.timeIntervalSince1970)) } ?? ""
         return Candidate(key: "r:\(item.id):\(stamp)", kind: .waiting, title: "\(conversation) t'attend",
                          body: summary?.waitingFor ?? item.detail ?? "Elle attend ta réponse",
-                         conversationId: item.conversationId, reviewId: nil)
+                         conversationId: item.conversationId, reviewId: item.id)
+    }
+
+    /// Un plan à approuver : le titre que le moteur donne à ExitPlanMode (l'ancien « Plan à valider » compris).
+    static func isPlan(_ title: String?) -> Bool {
+        title == "Plan à approuver" || title == "Plan à valider"
+    }
+
+    /// Le corps d'une notification d'action sensible. Le texte est figé une fois posté : une heure fixe, pas un délai.
+    static func sensitiveBody(_ item: ReviewItem) -> String {
+        if let expires = item.expiresAt {
+            return "Refusée à \(Fmt.time(expires)) sans réponse. Clique pour décider."
+        }
+        if item.isAwaitingApproval {
+            return "Elle a continué sans. Autorise-la pour qu'elle la relance."
+        }
+        return "Clique pour décider."
+    }
+
+    /// Un compte passe 90 % de sa session pendant qu'une conversation ouverte tourne dessus : elle va bientôt
+    /// s'arrêter. Une seule fois par compte et par session (la remise à zéro fait la clé).
+    private func sessionAlerts(_ store: VigieStore) -> [Candidate] {
+        store.accounts.compactMap { account in
+            guard let session = account.usage?.session, let pct = session.pct,
+                  pct >= AccountGauge.sessionAlert, pct < 100 else { return nil }
+            let running = store.working(on: account.id)
+            guard !running.isEmpty else { return nil }
+            // la remise à zéro à 10 min près (le relevé peut bouger de quelques secondes) ; sans elle, la tranche de 5 h
+            let period = session.resetsAt.map { String(Int($0.timeIntervalSince1970 / 600)) }
+                ?? "t\(Int(Date.now.timeIntervalSince1970 / 18_000))"
+            return Candidate(key: "s:\(account.id):\(period)", kind: .accountSession,
+                             title: "\(account.displayName) à \(Fmt.pct(pct)) de sa session",
+                             body: Self.sessionBody(running.map(\.shortTitle), reset: session.resetsAt),
+                             conversationId: nil, reviewId: nil, accountId: account.id,
+                             opens: running.count == 1 ? running.first?.id : nil)
+        }
+    }
+
+    /// « Atelier va bientôt s'arrêter (remise à zéro à 03:40) », « Atelier et Boutique vont bientôt s'arrêter ».
+    static func sessionBody(_ names: [String], reset: Date?) -> String {
+        let who: String
+        switch names.count {
+        case 0: who = "La conversation"
+        case 1: who = names[0]
+        default: who = names.dropLast().joined(separator: ", ") + " et " + (names.last ?? "")
+        }
+        let verb = names.count > 1 ? "vont" : "va"
+        let when = reset.map { " (remise à zéro à \(Fmt.time($0)))" } ?? ""
+        return "\(who) \(verb) bientôt s'arrêter\(when)"
     }
 
     /// « sinon Vigie choisit l'option recommandée dans 4 min » tiré de la consigne du moteur.
@@ -403,22 +459,25 @@ final class Notifier {
         content.interruptionLevel = banner ? .active : .passive
         if banner && (candidate.kind == .sensitive || candidate.kind == .runaway) { content.sound = .default }
         var info: [String: String] = ["kind": candidate.kind.rawValue]
-        if let id = candidate.conversationId { info["conversationId"] = id }
+        if let id = candidate.opens ?? candidate.conversationId { info["conversationId"] = id }
         if let id = candidate.reviewId { info["reviewId"] = id }
+        if let id = candidate.accountId { info["accountId"] = id }
         content.userInfo = info
         let request = UNNotificationRequest(identifier: candidate.key, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { _ in }
     }
 
-    /// Clic sur une notification : la fenêtre de Vigie s'ouvre sur l'élément.
-    func open(kind: String?, conversationId: String?, reviewId: String?) {
+    /// Clic sur une notification : la fenêtre de Vigie s'ouvre sur l'élément. Ce qui t'attend s'ouvre dans sa
+    /// conversation, puis sa fiche (action sensible, question) ; « t'attend » : la conversation seule.
+    func open(kind: String?, conversationId: String?, reviewId: String?, accountId: String? = nil) {
         let store = VigieStore.shared
         if let reviewId, let item = store.toReview.first(where: { $0.id == reviewId }) {
-            store.route = .overview
-            switch item.reviewKind {
-            case .question: store.changeRequest = item
-            case .blocked: store.blockedRequest = item
-            case .waiting, .limit, .other: break
+            store.open(review: item)
+        } else if kind == NotifyKind.accountSession.rawValue {
+            if let conversationId, store.conversation(conversationId) != nil {
+                store.route = .conversation(conversationId)
+            } else {
+                store.showAccounts(accountId)
             }
         } else if kind == NotifyKind.accountWeek.rawValue {
             store.showAccounts(nil)
@@ -453,8 +512,9 @@ final class NotificationRelay: NSObject, UNUserNotificationCenterDelegate {
         let kind = info["kind"] as? String
         let conversationId = info["conversationId"] as? String
         let reviewId = info["reviewId"] as? String
+        let accountId = info["accountId"] as? String
         Task { @MainActor in
-            Notifier.shared.open(kind: kind, conversationId: conversationId, reviewId: reviewId)
+            Notifier.shared.open(kind: kind, conversationId: conversationId, reviewId: reviewId, accountId: accountId)
         }
         completionHandler()
     }

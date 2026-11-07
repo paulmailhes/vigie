@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// L'icône de la barre des menus : jumelles pleines quand l'auto-accept est activé.
+/// L'icône de la barre des menus : jumelles pleines quand l'auto-accept est activé, et LE badge rouge (les décisions
+/// qui t'attendent, le même chiffre que la barre latérale et le panneau).
 struct MenuBarLabel: View {
     let store: VigieStore
 
@@ -13,14 +14,18 @@ struct MenuBarLabel: View {
                     .monospacedDigit()
             }
         }
-        .accessibilityLabel("Vigie, \(count) à regarder")
+        .accessibilityLabel(count > 0 ? "Vigie, \(count) à décider" : "Vigie")
     }
 }
 
-/// Le panneau compact de la barre des menus.
+/// Le panneau compact de la barre des menus : une seule carte, ses groupes titrés en surtitre (`CardTitle`).
+/// Un clic mène à l'élément dans la fenêtre : une décision ouvre sa conversation puis sa fiche.
 struct MenuBarPanel: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.openWindow) private var openWindow
+
+    /// Décisions montrées dans le panneau ; les autres sont dans la Vue d'ensemble.
+    private static let shownDecisions = 3
 
     var body: some View {
         @Bindable var store = store
@@ -45,7 +50,7 @@ struct MenuBarPanel: View {
             if store.connection == .down {
                 HStack(spacing: 8) {
                     Label("Le moteur de Vigie ne répond pas", systemImage: "bolt.horizontal.circle")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.alertText)
                         .font(.callout)
                     Spacer()
                     Button("Relancer") { store.restartEngine() }
@@ -56,36 +61,40 @@ struct MenuBarPanel: View {
 
             Divider()
 
-            Text("En ce moment").font(.subheadline.bold())
+            CardTitle("En ce moment")
             PanelAccounts()
 
-            let urgent = store.toReview.filter { $0.needsDecision || $0.reviewKind == .waiting }
-            if !urgent.isEmpty {
+            let decisions = store.decisionItems
+            if !decisions.isEmpty {
                 Divider()
                 HStack(spacing: 6) {
-                    Text("À décider").font(.subheadline.bold())
-                    CountBadge(count: urgent.count, urgent: true)
+                    CardTitle("À décider")
+                    CountBadge(count: decisions.count, urgent: true)
                 }
-                ForEach(urgent.prefix(3)) { item in
+                ForEach(decisions.prefix(Self.shownDecisions)) { item in
                     Button {
-                        if item.reviewKind == .blocked { store.blockedRequest = item }
-                        open(.overview)
+                        store.open(review: item)
+                        showWindow()
                     } label: {
-                        PanelReviewRow(item: item)
+                        DecisionSummary(item: item)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(TileButtonStyle())
+                    .padding(.horizontal, -6)
                 }
-                if urgent.count > 3 {
-                    Text("et \(urgent.count - 3) autres")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if decisions.count > Self.shownDecisions {
+                    Button("et \(decisions.count - Self.shownDecisions) autres") { open(.overview) }
+                        .buttonStyle(.link)
+                        .font(.callout)
+                        .help("Toutes les décisions, dans la Vue d'ensemble")
                 }
             }
 
             Divider()
 
-            Text("Conversations").font(.subheadline.bold())
             let openConversations = store.conversations.filter(\.isOpen)
+            CardTitle("Conversations", trailing: openConversations.isEmpty ? nil : Fmt.int(openConversations.count))
             if openConversations.isEmpty {
                 Text("Aucune conversation ouverte")
                     .font(.callout)
@@ -112,18 +121,16 @@ struct MenuBarPanel: View {
                                       live: conversation.state == .working)
                                 .font(.caption)
                         }
-                        Text(store.account(store.runningAccountId(of: conversation))?.displayName ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 62, alignment: .trailing)
-                        if let count = conversation.needsYou, count > 0 {
-                            CountBadge(count: count, urgent: Theme.needsYou(conversation.state))
-                        }
+                        ConversationTrail(conversation: conversation, accountWidth: 62)
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(conversation.shortTitle), \(Theme.label(for: conversation.state))")
+                .buttonStyle(TileButtonStyle())
+                .padding(.horizontal, -6)
+                .help(conversation.title ?? conversation.shortTitle)
+                .accessibilityLabel(ConversationTrail.spoken(conversation, store: store))
             }
 
             if let background = store.backgroundSummary, let count = background.forgotten, count > 0 {
@@ -139,9 +146,12 @@ struct MenuBarPanel: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TileButtonStyle())
+                .padding(.horizontal, -6)
                 .help("Leurs conversations sont fermées : tu peux les arrêter dans En fond")
             }
 
@@ -172,12 +182,17 @@ struct MenuBarPanel: View {
 
     private func open(_ route: Route?) {
         if let route { store.route = route }
+        showWindow()
+    }
+
+    private func showWindow() {
         openWindow(id: VigieApp.mainWindowID)
         NSApplication.shared.activate()
     }
 }
 
-/// Chaque compte : pastille verte s'il consomme, ce qui tourne dessus, débit, session et semaine.
+/// Chaque compte : pastille verte s'il consomme, ce qui tourne dessus, débit, session et semaine. Une fenêtre pleine
+/// s'écrit en toutes lettres, en rouge (« Session pleine · 03:40 »), comme dans la barre latérale.
 struct PanelAccounts: View {
     @Environment(VigieStore.self) private var store
 
@@ -186,14 +201,17 @@ struct PanelAccounts: View {
             ForEach(store.accounts) { account in
                 let working = store.working(on: account.id)
                 let rate = store.ratePerHour(on: account.id)
+                let gauge = AccountGauge(usage: account.usage, now: store.now)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Circle()
                         .fill(working.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
                         .frame(width: 7, height: 7)
+                        .opacity(account.isConnected ? 1 : Theme.dim)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(account.displayName)
                             .font(.callout.weight(.medium))
-                        Text(account.isConnected ? (working.isEmpty ? "Rien ne tourne" : working.map(\.shortTitle).joined(separator: " · "))
+                            .foregroundStyle(account.isConnected ? .primary : .secondary)
+                        Text(account.isConnected ? (working.isEmpty ? "Rien ne tourne" : working.map(\.shortTitle).joined(separator: ", "))
                              : "Pas connecté")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -204,49 +222,105 @@ struct PanelAccounts: View {
                         if rate > 0.005 {
                             Text(Fmt.rate(rate))
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.live)
+                                .foregroundStyle(.secondary)
                                 .monospacedDigit()
+                                .help("Débit des 10 dernières minutes, en % de la semaine par heure")
                         }
                         VStack(alignment: .trailing, spacing: 1) {
-                            usage("Session", account.usage?.session)
-                            usage("Semaine", account.usage?.week)
+                            usage("Session", account.usage?.session, session: true)
+                            usage("Semaine", account.usage?.week, session: false)
                         }
                         .font(.caption)
                     }
                 }
-                .opacity(account.isConnected ? 1 : Theme.dim)
+                .help(gauge.help)
             }
         }
     }
 
-    private func usage(_ title: String, _ window: UsageWindow?) -> some View {
-        HStack(spacing: 3) {
-            Text(title).foregroundStyle(.secondary)
-            Text(window?.pct.map(Fmt.pct) ?? "—")
+    @ViewBuilder
+    private func usage(_ title: String, _ window: UsageWindow?, session: Bool) -> some View {
+        if let full = AccountGauge.fullText(window, session: session) {
+            Text(full)
+                .fontWeight(.medium)
                 .monospacedDigit()
-                .foregroundStyle(window?.pct.map { $0 >= 80 ? AnyShapeStyle(Theme.gaugeTint($0)) : AnyShapeStyle(.primary) } ?? AnyShapeStyle(.secondary))
+                .foregroundStyle(Theme.alertText)
+                .help(AccountGauge.describe(title, window, now: store.now) ?? title)
+        } else {
+            HStack(spacing: 3) {
+                Text(title).foregroundStyle(.secondary)
+                Text(Fmt.pct(window?.pct))
+                    .monospacedDigit()
+                    .foregroundStyle(window?.pct.map { $0 >= 80 ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.primary) } ?? AnyShapeStyle(.secondary))
+            }
+            .help(AccountGauge.describe(title, window, now: store.now) ?? title)
         }
-        .help(window?.resetsAt.map { "\(title) : remise à zéro \(Fmt.reset($0, now: store.now))" } ?? title)
     }
 }
 
-struct PanelReviewRow: View {
+/// Une décision en deux lignes, la même dans le panneau de la barre des menus et la liste « À décider » de la barre
+/// d'outils : ce qu'elle demande, puis le délai d'abord (« Refusée dans 8 min ») et le contexte en fin de ligne,
+/// coupé ; le texte entier au survol.
+struct DecisionSummary: View {
+    @Environment(VigieStore.self) private var store
     let item: ReviewItem
 
     var body: some View {
         HStack(spacing: 8) {
-            RowIcon(symbol: Theme.symbol(for: item.reviewKind), alert: Theme.isAlert(item.reviewKind))
-            VStack(alignment: .leading, spacing: 0) {
-                Text(item.reviewKind == .question ? "« \(item.title ?? "") »" : item.title ?? "")
+            RowIcon(symbol: Theme.symbol(for: item.reviewKind), alert: true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title ?? Theme.label(for: item.reviewKind == .blocked ? .blocked : .waiting))
                     .font(.callout)
                     .lineLimit(1)
-                Text([item.conversationTitle, item.detail].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    DecisionDeadline(item: item)
+                    Text(context)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
+        .help(InfoLine.text([item.title, context, DecisionDeadline.text(item, now: store.now)?.text]))
+    }
+
+    /// Qui · quoi : la conversation, puis la règle (action sensible) ou ce qu'elle attend.
+    private var context: String {
+        let who = item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.conversationTitle
+        let what = item.reviewKind == .blocked ? item.rule : item.detail
+        return InfoLine.text([who, what])
+    }
+}
+
+/// Le délai d'une décision, en puce : « Refusée dans 8 min » (tenu à jour), « À autoriser » (elle a continué sans,
+/// attend ton accord pour la relancer), « À répondre » (question à laquelle répondre d'ici). Rien pour « T'attend » :
+/// son titre le dit déjà.
+struct DecisionDeadline: View {
+    @Environment(VigieStore.self) private var store
+    let item: ReviewItem
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            if let chip = Self.text(item, now: store.isDemo ? store.now : context.date) {
+                Chip(chip.text, tone: chip.tone)
+            }
+        }
+    }
+
+    static func text(_ item: ReviewItem, now: Date) -> (text: String, tone: Chip.Tone)? {
+        switch item.reviewKind {
+        case .blocked:
+            if let expires = item.expiresAt, expires > now {
+                return ("Refusée \(Fmt.remaining(until: expires, now: now))", .alert)
+            }
+            return (Theme.label(for: .blocked), .alert)
+        case .waiting where !item.questions.isEmpty && item.pendingId != nil:
+            return ("À répondre", .alert)
+        case .waiting, .question, .limit, .other:
+            return nil
+        }
     }
 }

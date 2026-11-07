@@ -30,6 +30,8 @@ final class VigieStore {
     @ObservationIgnored private(set) var latestConversations: [ConversationSummary] = []
     /// Ce que montre l'icône de la barre des menus. AppKit la redessine pour chaque écran à chaque changement :
     /// elle ne lit que ces deux valeurs, pas toute la liste « À regarder » ni tous les réglages.
+    /// `reviewBadge` est LE badge rouge : le nombre de décisions qui t'attendent (`decisionCount`), le même que la
+    /// barre latérale et le panneau.
     private(set) var reviewBadge = 0
     private(set) var autoAcceptBadge = false
     /// Fenêtre principale à l'écran (ni réduite, ni cachée, ni recouverte, écran allumé) : les pages ne sont relues
@@ -116,7 +118,17 @@ final class VigieStore {
 
     // MARK: Interface
 
-    var route: Route? = .overview
+    /// La page affichée. Chaque changement est noté dans la pile Retour / Suivant (⌘[ ⌘], boutons ‹ ›).
+    var route: Route? = .overview {
+        didSet { noteRoute(from: oldValue) }
+    }
+    /// Pages visitées avant celle-ci (la plus récente à la fin) et pages quittées par « Retour », 20 au plus chacune.
+    private(set) var backPages: [VisitedPage] = []
+    private(set) var forwardPages: [VisitedPage] = []
+    @ObservationIgnored private var restoringPage = false
+    /// Le rapport d'un lancement à montrer dans la page Agents (« Voir le rapport ») : la page défile jusqu'à lui et le
+    /// déplie, puis le remet à nil. `Route.agents` reste sans identifiant : c'est l'étiquette de la barre latérale.
+    var agentRunFocus: String?
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
     /// Installation du moteur par l'app elle-même (app glissée dans Applications) : en cours, ou échouée.
@@ -429,7 +441,7 @@ final class VigieStore {
         update(\.sinceSummary, overview.sinceSummary)
         settledReview = settledReview.filter { Date.now.timeIntervalSince($0.value) < 15 }
         update(\.toReview, overview.toReview.filter { settledReview[$0.id] == nil })
-        update(\.reviewBadge, toReview.count)
+        update(\.reviewBadge, decisionCount)
         update(\.reports, RowIDs.make(overview.reports) { $0.stableKey })
         update(\.accounts, overview.accounts)
         // Ordre STABLE (L'utilisateur : « les conversations passent les unes devant les autres ») : ouvertes d'abord,
@@ -649,7 +661,7 @@ final class VigieStore {
     func removeReview(_ id: String) {
         toReview.removeAll { $0.id == id }
         settledReview[id] = .now
-        update(\.reviewBadge, toReview.count)
+        update(\.reviewBadge, decisionCount)
     }
 
     /// L'action n'a pas abouti : l'élément revient à sa place.
@@ -657,7 +669,7 @@ final class VigieStore {
         settledReview[item.id] = nil
         guard !toReview.contains(where: { $0.id == item.id }) else { return }
         toReview.insert(item, at: 0)
-        update(\.reviewBadge, toReview.count)
+        update(\.reviewBadge, decisionCount)
     }
 
     func patchAccountsState(_ change: (inout AccountsState) -> Void) {
@@ -681,5 +693,132 @@ final class VigieStore {
         guard var value = mcp else { return }
         change(&value)
         mcp = value
+    }
+
+    // MARK: Navigation : Retour / Suivant
+
+    /// Pages gardées dans chaque sens.
+    static let pageHistoryLimit = 20
+
+    var canGoBack: Bool { !backPages.isEmpty }
+    var canGoForward: Bool { !forwardPages.isEmpty }
+
+    /// La page d'avant (⌘[), avec le détail qu'elle avait ouvert à droite.
+    func goBack() {
+        guard let page = nextPage(from: &backPages) else { return }
+        push(visited(route), to: &forwardPages)
+        restore(page)
+    }
+
+    /// La page quittée par « Retour » (⌘]).
+    func goForward() {
+        guard let page = nextPage(from: &forwardPages) else { return }
+        push(visited(route), to: &backPages)
+        restore(page)
+    }
+
+    /// Un changement de page venu d'ailleurs (barre latérale, bouton, menu) : l'ancienne page passe dans la pile, la
+    /// pile « Suivant » est oubliée.
+    private func noteRoute(from old: Route?) {
+        guard !restoringPage, (old ?? .overview) != (route ?? .overview) else { return }
+        push(visited(old), to: &backPages)
+        forwardPages.removeAll()
+    }
+
+    /// La page telle qu'on la quitte : son détail de droite s'il lui appartient (le store le garde jusqu'à ce qu'une
+    /// autre conversation en ouvre un).
+    private func visited(_ route: Route?) -> VisitedPage {
+        let page = route ?? .overview
+        if case .conversation(let id) = page, conversationPanelOwner == id {
+            return VisitedPage(route: page, panel: conversationPanel)
+        }
+        return VisitedPage(route: page, panel: nil)
+    }
+
+    private func push(_ page: VisitedPage, to stack: inout [VisitedPage]) {
+        if stack.last == page { return }
+        stack.append(page)
+        if stack.count > Self.pageHistoryLimit { stack.removeFirst(stack.count - Self.pageHistoryLimit) }
+    }
+
+    /// La page suivante de la pile, en sautant une conversation que le moteur ne connaît plus et la page affichée.
+    private func nextPage(from stack: inout [VisitedPage]) -> VisitedPage? {
+        while let page = stack.popLast() {
+            if page.route == (route ?? .overview) { continue }
+            if case .conversation(let id) = page.route, loadedOnce, !conversations.contains(where: { $0.id == id }) { continue }
+            return page
+        }
+        return nil
+    }
+
+    private func restore(_ page: VisitedPage) {
+        restoringPage = true
+        route = page.route
+        restoringPage = false
+        if case .conversation(let id) = page.route {
+            conversationPanel = page.panel
+            conversationPanelOwner = id
+        }
+    }
+
+    // MARK: Ce qui t'attend
+
+    /// Les décisions d'une conversation (le même calcul que le badge rouge) : la pastille de sa ligne, dans la barre
+    /// latérale comme dans la barre des menus.
+    func decisionCount(for conversationID: String) -> Int {
+        toReview.count { $0.conversationId == conversationID && Self.isDecision($0) }
+    }
+
+    /// Les conversations qui attendent une décision, celle dont l'échéance est la plus proche d'abord.
+    var waitingConversationIDs: [String] {
+        var seen: Set<String> = []
+        return decisionItems.compactMap { item in
+            guard let id = item.conversationId, conversations.contains(where: { $0.id == id }),
+                  seen.insert(id).inserted else { return nil }
+            return id
+        }
+    }
+
+    /// « Suivante qui t'attend » (⌘J) : la conversation qui attend une décision après celle affichée (la première
+    /// sinon). Navigation seulement : rien n'est décidé au clavier.
+    func showNextWaiting() {
+        let ids = waitingConversationIDs
+        guard var next = ids.first else { return }
+        if case .conversation(let current) = route, let index = ids.firstIndex(of: current) {
+            next = ids[(index + 1) % ids.count]
+        }
+        route = .conversation(next)
+    }
+
+    /// « 1 sur 3 » : la place de cette conversation parmi celles qui attendent une décision (nil si elle n'en est pas,
+    /// ou si elle est seule). Pour le sous-titre de sa page.
+    func waitingPosition(of conversationID: String) -> String? {
+        let ids = waitingConversationIDs
+        guard ids.count > 1, let index = ids.firstIndex(of: conversationID) else { return nil }
+        return "\(index + 1) sur \(ids.count)"
+    }
+
+    /// Ouvre un élément là où il se traite : la page de sa conversation, puis sa fiche (action sensible, réponse
+    /// choisie pour toi, question à laquelle répondre d'ici). « T'attend » : la conversation seule, sa tuile est en
+    /// haut. Navigation seulement : rien n'est décidé ici. Notifications, barre des menus, liste « À décider ».
+    func open(review item: ReviewItem) {
+        if let id = item.conversationId, conversations.contains(where: { $0.id == id }) {
+            route = .conversation(id)
+        } else {
+            route = .overview
+        }
+        switch item.reviewKind {
+        case .blocked: blockedRequest = item
+        case .question: changeRequest = item
+        case .waiting where !item.questions.isEmpty && item.pendingId != nil: answerRequest = item
+        case .waiting, .limit, .other: break
+        }
+    }
+
+    /// Nom du compte d'une conversation : celui sur lequel elle reprendra (remise sur un autre compte), sinon celui sur
+    /// lequel elle tourne.
+    func accountName(of conversation: ConversationSummary) -> String {
+        let id = conversation.resume?.to ?? runningAccountId(of: conversation)
+        return account(id)?.displayName ?? id ?? ""
     }
 }
