@@ -1,14 +1,12 @@
 import SwiftUI
 
-/// Agents : tes lancements (le rapport de chaque agent) dès qu'il y en a, puis les recettes prêtes à lancer, livrées
-/// avec Vigie (agents/<id>/AGENT.md, remplacés à chaque mise à jour). L'ordre des sections ne change jamais selon
-/// l'état d'un lancement. Une rangée par agent : ce qu'il fait, les MCP dont il a besoin et leur état, et « Lancer… »
-/// qui ouvre son formulaire.
+/// Agents : les recettes prêtes à lancer, livrées avec Vigie (agents/<id>/AGENT.md, remplacés à chaque mise à jour),
+/// et leurs réglages. Une rangée par agent : ce qu'il fait, les MCP dont il a besoin et leur état, et « Lancer… » qui
+/// ouvre son formulaire. Ce qu'un agent a fait ne s'affiche pas ici : son rapport se lit sur la page de sa
+/// conversation (tuile « Agent Vigie », panneau Rapport).
 struct AgentsView: View {
     @Environment(VigieStore.self) private var store
     @State private var launching: AgentInfo?
-    /// Les lancements ouverts (nil : le plus récent seul, rien de touché).
-    @State private var openedRuns: Set<String>?
 
     var body: some View {
         Group {
@@ -42,55 +40,27 @@ struct AgentsView: View {
         .task(id: store.windowVisible) { await store.followAgents() }
     }
 
-    /// « 2 agents · 1 lancement en cours · 3 à faire » : un état chiffré, 3 infos au plus.
+    /// « 2 agents » : un état chiffré.
     private var subtitle: String {
         guard let state = store.agentsState else { return "" }
-        let runs = store.agentRuns?.runs ?? []
-        let running = runs.count { RecipeRunState($0.report) == .running }
-        let todo = runs.reduce(0) { $0 + ($1.report?.isRunning == false ? ($1.report?.openTodo.count ?? 0) : 0) }
-        return InfoLine.text([Fmt.count(state.agents.count, "agent"),
-                              running > 0 ? Fmt.count(running, "lancement en cours", "lancements en cours") : nil,
-                              todo > 0 ? "\(todo) à faire" : nil])
+        return Fmt.count(state.agents.count, "agent")
     }
 
     private func content(_ state: AgentLibrary) -> some View {
-        ScrollViewReader { proxy in
-            Form {
-                // Tes lancements d'abord, dès qu'il y en a un : leurs rapports t'attendent, les recettes se lancent
-                // rarement. Ordre fixe : la page ne saute pas quand un lancement finit.
-                if let runs = store.agentRuns?.runs, !runs.isEmpty {
-                    RecipeRunsSection(runs: runs, opened: $openedRuns)
+        Form {
+            Section {
+                ForEach(state.agents) { agent in
+                    AgentRecipeRow(agent: agent) { launching = agent }
                 }
-                Section {
-                    ForEach(state.agents) { agent in
-                        AgentRecipeRow(agent: agent) { launching = agent }
-                    }
-                } header: {
-                    SectionHeader("Prêts à lancer", count: state.agents.count,
-                                  note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.",
-                                  inset: PageMetrics.formHeaderInset)
-                } footer: {
-                    footer(state)
-                }
+            } header: {
+                SectionHeader("Prêts à lancer", count: state.agents.count,
+                              note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude. Son rapport se lit ensuite sur la page de cette conversation.",
+                              inset: PageMetrics.formHeaderInset)
+            } footer: {
+                footer(state)
             }
-            .pageForm()
-            .onAppear { focusRun(proxy) }
-            .onChange(of: store.agentRunFocus) { focusRun(proxy) }
-            // le lancement demandé peut arriver avec la relecture suivante
-            .onChange(of: store.agentRuns?.runs.map(\.id)) { focusRun(proxy) }
         }
-    }
-
-    /// « Voir le rapport » d'un lancement (`store.agentRunFocus`) : son rapport s'ouvre, la page défile jusqu'à lui,
-    /// puis la demande est oubliée. Pas encore dans la liste : on attend la relecture suivante.
-    private func focusRun(_ proxy: ScrollViewProxy) {
-        guard let id = store.agentRunFocus, let runs = store.agentRuns?.runs, runs.contains(where: { $0.id == id }) else { return }
-        openedRuns = RecipeRunsSection.opening(id, in: openedRuns, runs: runs)
-        store.agentRunFocus = nil
-        // au tour suivant : le rapport est déplié, la page sait jusqu'où défiler
-        Task { @MainActor in
-            withAnimation(.smooth) { proxy.scrollTo(RecipeRunsSection.anchor(id), anchor: .top) }
-        }
+        .pageForm()
     }
 
     private func footer(_ state: AgentLibrary) -> some View {

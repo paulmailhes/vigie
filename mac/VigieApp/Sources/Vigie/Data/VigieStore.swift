@@ -120,8 +120,6 @@ final class VigieStore {
     private(set) var accountsState: AccountsState?
     /// Les agents (recettes à lancer) et le compte sur lequel ils partiraient.
     private(set) var agentsState: AgentLibrary?
-    /// Les derniers lancements d'agents et leurs rapports (GET /api/v2/agents/runs).
-    var agentRuns: RecipeRunList?
     /// Le moteur refuse la liste des agents (trop ancien…) : dit dans la page, sans bandeau.
     private(set) var agentsProblem: String?
     /// Le détail ouvert à droite de la page d'une conversation (nil : fermé), et la conversation à laquelle il
@@ -155,9 +153,6 @@ final class VigieStore {
     private(set) var backPages: [VisitedPage] = []
     private(set) var forwardPages: [VisitedPage] = []
     @ObservationIgnored private var restoringPage = false
-    /// Le rapport d'un lancement à montrer dans la page Agents (« Voir le rapport ») : la page défile jusqu'à lui et le
-    /// déplie, puis le remet à nil. `Route.agents` reste sans identifiant : c'est l'étiquette de la barre latérale.
-    var agentRunFocus: String?
     /// L'accueil (premier lancement, ou menu « Revoir l'accueil »).
     var showOnboarding = false
     /// Installation du moteur par l'app elle-même (app glissée dans Applications) : en cours, ou échouée.
@@ -515,10 +510,8 @@ final class VigieStore {
             update(\.agentsState, state)
             update(\.agentsProblem, nil)
             readSucceeded()
-            // les rapports : un moteur plus ancien n'en a pas, la page reste sans
-            if let list = try? await client.get("/api/v2/agents/runs", as: RecipeRunList.self), isFresh(started) {
-                update(\.agentRuns, list)
-            }
+            // les rapports des lancements ne sont plus lus ici : chacun vient avec le détail de sa conversation
+            // (`agentRun`) et se lit dans son panneau Rapport
         } catch ClientError.refused(let text) {
             // moteur sans la page Agents (trop ancien) : la page le dit ; un bandeau reviendrait toutes les 30 s
             if !Task.isCancelled { update(\.agentsProblem, text) }
@@ -757,6 +750,16 @@ final class VigieStore {
         update(\.autoAcceptBadge, value.autoAccept ?? false)
     }
 
+    /// Le lancement d'agent d'une conversation, changé sur place (une action cochée, le rapport retiré) : sa tuile et
+    /// son panneau Rapport le montrent tout de suite, avant la réponse du moteur. Rien si son détail n'est pas lu.
+    func patchAgentRun(in conversationID: String, _ change: (inout RecipeRun?) -> Void) {
+        guard let model = details[conversationID] else { return }
+        var raw = model.raw
+        change(&raw.agentRun)
+        guard raw != model.raw else { return }
+        details[conversationID] = ConversationDetailModel(raw)
+    }
+
     func patchConversation(_ id: String, _ change: (inout ConversationSummary) -> Void) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         var value = conversations[index]
@@ -865,6 +868,14 @@ final class VigieStore {
             conversationPanel = page.panel
             conversationPanelOwner = id
         }
+    }
+
+    /// « Voir le rapport » d'un agent de Vigie : la page de sa conversation, panneau Rapport ouvert à droite. La page
+    /// change d'abord (la page quittée garde son propre panneau dans la pile Retour), puis le panneau s'ouvre.
+    func showAgentReport(_ conversationID: String) {
+        route = .conversation(conversationID)
+        conversationPanelOwner = conversationID
+        conversationPanel = .report
     }
 
     // MARK: Ce qui t'attend

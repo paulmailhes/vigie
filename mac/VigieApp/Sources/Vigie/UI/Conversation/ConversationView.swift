@@ -173,7 +173,8 @@ struct ConversationView: View {
     }
 }
 
-/// La conversation vient d'un lancement d'agent Vigie : son rapport, en tête de « Au travail ».
+/// La conversation vient d'un lancement d'agent Vigie : son rapport en bref, en tête de « Au travail » ; « Voir le
+/// rapport » l'ouvre en entier dans le panneau de droite (`AgentReportPanel`).
 struct AgentReportTile: View {
     @Environment(VigieStore.self) private var store
     let run: RecipeRun
@@ -217,9 +218,8 @@ struct AgentReportTile: View {
                         .glassButton(.primary)
                 }
                 Button("Voir le rapport") {
-                    // la page Agents défile jusqu'à ce rapport et le déplie
-                    store.agentRunFocus = run.id
-                    store.route = .agents
+                    // le rapport entier s'ouvre à droite, la page reste visible à côté
+                    store.showAgentReport(summary.id)
                 }
                 .glassButton()
             }
@@ -232,7 +232,7 @@ struct AgentReportTile: View {
 
     private func status(_ report: AgentReport?) -> String {
         guard let report else { return "pas encore de rapport" }
-        if report.isBlocked { return "arrêté" } // comme la page Agents
+        if report.isBlocked { return "arrêté" } // comme le panneau Rapport
         return report.isRunning ? "en cours" : "fini"
     }
 

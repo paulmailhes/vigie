@@ -74,6 +74,13 @@ final class SnapshotRunner {
                 await settle(1.0)
                 await capture(window, "0\(number)-conversation-\(name)-\(theme)")
             }
+            // Boutique vient d'un agent de Vigie : « Voir le rapport » de sa tuile ouvre le rapport entier à droite
+            if let secondID, store.details[secondID]?.raw.agentRun != nil {
+                store.showAgentReport(secondID)
+                await settle(0.9)
+                await capture(window, "03d-detail-rapport-\(theme)")
+                store.conversationPanel = nil
+            }
             if let finishedID {
                 store.conversationPanel = nil
                 store.route = .conversation(finishedID)
@@ -200,6 +207,7 @@ final class SnapshotRunner {
                 panels += model.raw.messages.indices.map { .message($0) }
                 panels += model.raw.workflows.prefix(3).map { .workflow($0.id) }
                 panels += (model.runningAgents + model.doneAgents).prefix(3).map { .agent($0.id) }
+                if model.raw.agentRun != nil { panels.append(.report) }
                 for panel in panels {
                     store.conversationPanelOwner = id
                     store.conversationPanel = panel

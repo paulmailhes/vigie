@@ -30,6 +30,43 @@
       ]
     }
   },
+  "agentRun": {
+    "id": "8d3c1f2a-0b7e-4c55-9a61-2f4e7d1c9b30",
+    "agent": "webflow-controle-publication",
+    "name": "Contrôler un site Webflow avant publication",
+    "icon": "checkmark.seal",
+    "folder": "/Users/alex/Code/boutique",
+    "surface": "vscode",
+    "session": null,
+    "conversation": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
+    "at": "2026-10-19T13:00:00Z",
+    "changedAt": "2026-10-19T14:05:00Z",
+    "reportFile": "/Users/alex/Code/boutique/.vigie/rapport-webflow-controle-publication.json",
+    "unreadable": false,
+    "report": {
+      "status": "done",
+      "level": "block",
+      "title": "Contrôle avant publication",
+      "verdict": "Pas prêt : 1 point bloquant et 2 actions dans Webflow",
+      "counts": { "ok": 41, "warn": 3, "block": 1 },
+      "report": "docs/controle-publication-2026-10-19.md",
+      "links": [],
+      "done": [
+        "12 titres SEO réécrits",
+        "8 descriptions ajoutées",
+        "23 textes alternatifs d'images",
+        "Données structurées sur l'accueil"
+      ],
+      "todo": [
+        { "index": 0, "text": "Brancher le domaine boutique-exemple.fr et le choisir par défaut", "where": "Site settings › Publishing", "severity": "block", "done": false },
+        { "index": 1, "text": "Relier les cartes de la liste Songeries à leur page", "where": "Designer › page Songeries › carte › Link settings", "severity": "warn", "done": false },
+        { "index": 2, "text": "Envoyer les formulaires vers l'adresse de la boutique", "where": "Site settings › Forms", "severity": "warn", "done": true }
+      ],
+      "next": [
+        { "label": "Appliquer les 9 corrections", "message": "Applique maintenant les 9 corrections préparées dans docs/controle-publication-2026-10-19.md, sans refaire le contrôle." }
+      ]
+    }
+  },
   "now": {
     "text": "Le lot 6 a fini ses étapes C1 à C6 et C9. C7 tourne : poser les 37 doubles pages sur /songeries, avec ton Designer ouvert sur le site. C10 préparera la publication et le contrôle.",
     "ts": "2026-10-19T23:11:00.000Z",

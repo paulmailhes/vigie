@@ -215,17 +215,6 @@ struct ToolPagesTests {
         #expect(account?.name == "Travail 1")
     }
 
-    @Test func focusedRunOpensWithTheOthers() throws {
-        let runs = try JSONDecoder().decode([RecipeRun].self, from: Data("""
-        [ { "id": "r1", "agent": "site", "folder": "/Users/alex/Code/atelier" },
-          { "id": "r2", "agent": "site", "folder": "/Users/alex/Code/boutique" } ]
-        """.utf8))
-        // rien de touché : le plus récent reste ouvert, le rapport demandé s'ouvre en plus
-        #expect(RecipeRunsSection.opening("r2", in: nil, runs: runs) == ["r1", "r2"])
-        #expect(RecipeRunsSection.opening("r2", in: [], runs: runs) == ["r2"])
-        #expect(RecipeRunsSection.anchor("r2") == "run:r2")
-    }
-
     // MARK: MCP
 
     @Test func mcpFixesGatherWhatNeedsAGesture() throws {

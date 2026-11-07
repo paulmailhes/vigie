@@ -118,6 +118,9 @@ struct ConversationInspector: View {
             return PanelHeading(title: "En fond", subtitle: "Ce que cette conversation a laissé tourner.")
         case .answers:
             return answersHeading
+        case .report:
+            guard let run = detail.agentRun else { return PanelHeading(title: fallbackTitle) }
+            return AgentReportPanel.heading(run, now: store.now)
         }
     }
 
@@ -136,6 +139,7 @@ struct ConversationInspector: View {
         case .mcp: "MCP"
         case .background: "En fond"
         case .answers: "À relire"
+        case .report: "Rapport de l'agent"
         }
     }
 
@@ -295,6 +299,12 @@ struct ConversationInspector: View {
                 .buttonStyle(.link)
         case .answers:
             answers
+        case .report:
+            if let run = detail.agentRun {
+                AgentReportPanel(run: run, conversationID: summary.id)
+            } else {
+                note("Ce rapport n'est plus dans la conversation.")
+            }
         }
     }
 

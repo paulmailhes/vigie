@@ -1,11 +1,8 @@
 import Foundation
 
-/// GET /api/v2/agents/runs : les derniers lancements d'agents et le rapport que chaque agent tient à jour
-/// (<dossier>/.vigie/rapport-<id>.json, vérifié par le moteur).
-struct RecipeRunList: Decodable, Equatable, Sendable {
-    @Lossy var runs: [RecipeRun]
-}
-
+/// Un lancement d'agent de Vigie et le rapport que l'agent tient à jour (<dossier>/.vigie/rapport-<id>.json, vérifié
+/// par le moteur). L'app le lit dans le détail de la conversation qu'il a ouverte (`agentRun`) : sa tuile « Agent
+/// Vigie » et son panneau Rapport. Le moteur donne aussi la liste (GET /api/v2/agents/runs), que l'app ne lit plus.
 struct RecipeRun: Decodable, Equatable, Sendable, Identifiable {
     var id: String
     var agent: String

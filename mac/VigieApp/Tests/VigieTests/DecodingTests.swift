@@ -103,9 +103,6 @@ struct DecodingTests {
                 #expect(agents.agents.contains { $0.canLaunch && $0.fields.count == 1 && $0.dropField != nil && !$0.willCreate.isEmpty },
                         "\(name)")
                 #expect(agents.surfaces?.available == [.vscode, .claudeApp], "\(name)")
-            case "agents-runs.json":
-                let runs = try decoder.decode(RecipeRunList.self, from: data)
-                #expect(runs.runs.contains { $0.report?.todo.isEmpty == false } && runs.runs.contains { $0.report?.isRunning == true }, "\(name)")
             case "processes.json":
                 let list = try decoder.decode(BackgroundList.self, from: data)
                 let states = Set(list.groups.map(\.groupState))
@@ -340,28 +337,43 @@ struct DecodingTests {
         #expect(webflow.spaces.map(\.label) == ["Principal", "Novelo"] && webflow.spaceLabel == "Novelo")
     }
 
-    /// Les derniers lancements d'agents : leur rapport, son état en un mot ; une entrée illisible ne fait pas tomber la liste.
-    @Test func decodesRecipeRuns() throws {
-        let list = try JSONDecoder().decode(RecipeRunList.self, from: Data("""
-        { "runs": [
-          { "id": "a", "agent": "controle", "name": "Contrôler", "folder": "/Users/alex/Code/cabinet-martin", "at": "2026-10-27T15:10:00Z",
-            "report": { "status": "done", "level": "warn", "verdict": "Prêt après 2 actions", "counts": { "ok": 3 },
-                        "todo": [ { "index": 0, "text": "Brancher le domaine", "severity": "block", "done": true },
-                                  { "index": 2, "text": "Relier les fiches", "severity": "warn", "done": false }, { "text": "sans index" } ],
-                        "done": ["Titres"], "links": [ { "label": "Figma", "url": "https://figma.com/x" } ],
-                        "next": [ { "label": "Appliquer les 9 corrections", "message": "Applique-les" }, { "label": "sans message" } ] } },
-          { "id": "b", "agent": "demarrer", "folder": "/Users/alex/Code/atelier", "report": { "status": "running" } },
-          { "id": "c", "agent": "x", "folder": "/x", "report": "illisible" },
-          { "agent": "sans id" } ] }
-        """.utf8))
-        #expect(list.runs.map(\.id) == ["a", "b", "c"])
-        let a = list.runs[0]
-        #expect(a.project == "cabinet-martin" && a.displayName == "Contrôler" && a.at != nil)
+    /// La conversation lancée par un agent de Vigie porte son lancement (`agentRun`) : son rapport, son état en un mot ;
+    /// un lancement ou un rapport illisible ne fait pas tomber le détail.
+    @MainActor @Test func decodesAgentRunOfAConversation() throws {
+        func detail(_ agentRun: String) throws -> ConversationDetail {
+            try JSONDecoder().decode(ConversationDetail.self, from: Data(#"{ "summary": { "id": "c1" }, "agentRun": \#(agentRun) }"#.utf8))
+        }
+        let a = try #require(try detail("""
+        { "id": "a", "agent": "controle", "name": "Contrôler", "folder": "/Users/alex/Code/cabinet-martin", "conversation": "c1",
+          "at": "2026-10-27T15:10:00Z", "changedAt": "2026-10-27T15:31:00Z",
+          "report": { "status": "done", "level": "warn", "verdict": "Prêt après 2 actions", "counts": { "ok": 3 },
+                      "todo": [ { "index": 0, "text": "Brancher le domaine", "severity": "block", "done": true },
+                                { "index": 2, "text": "Relier les fiches", "severity": "warn", "done": false }, { "text": "sans index" } ],
+                      "done": ["Titres"], "links": [ { "label": "Figma", "url": "https://figma.com/x" } ],
+                      "next": [ { "label": "Appliquer les 9 corrections", "message": "Applique-les" }, { "label": "sans message" } ] } }
+        """).agentRun)
+        #expect(a.project == "cabinet-martin" && a.displayName == "Contrôler" && a.at != nil && a.conversation == "c1")
         #expect(a.report?.todo.map(\.index) == [0, 2] && a.report?.openTodo.map(\.text) == ["Relier les fiches"])
         #expect(RecipeRunState(a.report) == .todo(1))
         #expect(a.report?.next.map(\.label) == ["Appliquer les 9 corrections"])
-        #expect(RecipeRunState(list.runs[1].report) == .running && list.runs[1].displayName == "demarrer")
-        #expect(list.runs[2].report == nil && RecipeRunState(nil) == .running)
+        // le panneau Rapport : le nom de l'agent en titre (son identifiant au survol), le verdict sous l'état
+        let now = try #require(a.changedAt)
+        let heading = AgentReportPanel.heading(a, now: now)
+        #expect(heading.title == "Contrôler" && heading.help == "controle")
+        #expect(heading.subtitle == "Rapport de l'agent · mis à jour \(Fmt.when(now, now: now))")
+        #expect(AgentReportPanel.summary(a, now: now) == "Prêt après 2 actions")
+        #expect(AgentReportPanel.todoLine(a.report?.todo ?? []) == "1/2 faites")
+
+        let running = try #require(try detail(#"{ "id": "b", "agent": "demarrer", "folder": "/Users/alex/Code/atelier", "report": { "status": "running" } }"#).agentRun)
+        #expect(RecipeRunState(running.report) == .running && running.displayName == "demarrer")
+        #expect(AgentReportPanel.summary(running, now: now) == "L'agent travaille.")
+        let unreadable = try #require(try detail(#"{ "id": "c", "agent": "x", "folder": "/x", "report": "illisible", "unreadable": true }"#).agentRun)
+        #expect(unreadable.report == nil && RecipeRunState(nil) == .running)
+        #expect(AgentReportPanel.summary(unreadable, now: now)?.hasPrefix("Le rapport est illisible") == true)
+        // un lancement sans identifiant : la conversation se lit, sans tuile ni panneau Rapport
+        let broken = try detail(#"{ "agent": "sans id" }"#)
+        #expect(broken.summary?.id == "c1" && broken.agentRun == nil)
+
         var blocked = a.report
         blocked?.todo[0].done = false
         #expect(RecipeRunState(blocked) == .blocked)

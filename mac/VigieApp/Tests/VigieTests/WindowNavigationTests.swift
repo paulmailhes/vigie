@@ -165,4 +165,61 @@ struct WindowNavigationTests {
         #expect(store.blockedRequest == nil)
         #expect(store.answerRequest == nil)
     }
+
+    /// « Voir le rapport » d'un agent de Vigie : la page de SA conversation, panneau Rapport ouvert (plus la page
+    /// Agents) ; Retour ramène à la page d'avant avec son propre panneau.
+    @Test func agentReportOpensInItsConversation() async throws {
+        let store = await demoStore()
+        let boutique = "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24"
+        let atelier = "b1b9b451-c53c-439e-b804-3689257268e3"
+        store.route = .conversation(atelier)
+        store.conversationPanelOwner = atelier
+        store.conversationPanel = .plan
+
+        store.showAgentReport(boutique)
+        #expect(store.route == .conversation(boutique))
+        #expect(store.conversationPanel == .report)
+        #expect(store.conversationPanelOwner == boutique)
+
+        // retour : Atelier et son plan ; suivant : le rapport de Boutique
+        store.goBack()
+        #expect(store.route == .conversation(atelier))
+        #expect(store.conversationPanel == .plan)
+        store.goForward()
+        #expect(store.route == .conversation(boutique))
+        #expect(store.conversationPanel == .report)
+
+        // déjà sur la page : le panneau s'ouvre, la page ne s'empile pas une seconde fois
+        store.conversationPanel = nil
+        let back = store.backPages.count
+        store.showAgentReport(boutique)
+        #expect(store.conversationPanel == .report)
+        #expect(store.backPages.count == back)
+    }
+
+    /// Le rapport dans la page de sa conversation : une action cochée l'est tout de suite ; « Retirer ce rapport »
+    /// fait partir la tuile et ferme le panneau.
+    @Test func agentReportChangesShowAtOnce() async throws {
+        let store = await demoStore()
+        let boutique = "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24"
+        await store.refreshConversation(boutique)
+        let run = try #require(store.details[boutique]?.raw.agentRun)
+        #expect(run.conversation == boutique && run.folder == "/Users/alex/Code/boutique")
+        // la tuile a de quoi dire : un verdict, une suite proposée, des actions à toi dont une déjà faite
+        #expect(run.report?.verdict != nil && run.report?.next.isEmpty == false)
+        #expect(RecipeRunState(run.report) == .blocked)
+        let todo = try #require(run.report?.todo.first { !$0.done })
+        #expect(AgentReportPanel.todoLine(run.report?.todo ?? []) == "1/3 faites")
+
+        await store.setAgentTodo(run, todo, done: true, in: boutique)
+        let checked = try #require(store.details[boutique]?.raw.agentRun)
+        #expect(checked.report?.todo.first { $0.index == todo.index }?.done == true)
+        #expect(AgentReportPanel.todoLine(checked.report?.todo ?? []) == "2/3 faites")
+
+        store.showAgentReport(boutique)
+        await store.hideAgentRun(checked, in: boutique)
+        #expect(store.details[boutique]?.raw.agentRun == nil)
+        #expect(store.conversationPanel == nil)
+        #expect(store.route == .conversation(boutique))
+    }
 }

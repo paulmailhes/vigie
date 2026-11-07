@@ -462,17 +462,23 @@ extension VigieStore {
         if mcp != nil { await refreshMCP() }
     }
 
-    /// Coche ou décoche une action d'un rapport d'agent : tout de suite à l'écran, en arrière si le moteur refuse.
-    func setAgentTodo(_ run: RecipeRun, _ todo: AgentTodo, done: Bool) async {
-        let before = agentRuns
-        if var list = agentRuns, let r = list.runs.firstIndex(where: { $0.id == run.id }),
-           let t = list.runs[r].report?.todo.firstIndex(where: { $0.index == todo.index }) {
-            list.runs[r].report?.todo[t].done = done
-            agentRuns = list
+    /// Coche ou décoche une action d'un rapport d'agent, dans la page de sa conversation : tout de suite à l'écran, en
+    /// arrière si le moteur refuse ; accepté, le détail est relu (le rapport tel que le moteur l'a écrit).
+    func setAgentTodo(_ run: RecipeRun, _ todo: AgentTodo, done: Bool, in conversationID: String) async {
+        func mark(_ value: Bool) {
+            patchAgentRun(in: conversationID) { current in
+                guard current?.id == run.id, let t = current?.report?.todo.firstIndex(where: { $0.index == todo.index }) else { return }
+                current?.report?.todo[t].done = value
+            }
         }
+        mark(done)
         guard !isDemo else { return }
         let body: JSONValue = ["action": "todo", "id": .string(run.id), "index": .int(todo.index), "done": .bool(done)]
-        if await write("/api/v2/agents/runs", body) == nil { agentRuns = before }
+        if await write("/api/v2/agents/runs", body) == nil {
+            mark(todo.done)
+        } else {
+            await refreshConversation(conversationID)
+        }
     }
 
     /// Une suite proposée par l'agent (« Appliquer les 10 corrections ») : sa conversation s'ouvre dans VS Code et le
@@ -498,12 +504,20 @@ extension VigieStore {
         }
     }
 
-    /// Retire un lancement de la liste (son rapport reste dans le dossier du projet).
-    func hideAgentRun(_ run: RecipeRun) async {
-        let before = agentRuns
-        agentRuns?.runs.removeAll { $0.id == run.id }
+    /// Retire le rapport d'un agent de la page de sa conversation (tuile et panneau Rapport) : le moteur ne le donne
+    /// plus ; le fichier reste dans le dossier du projet. Le panneau se ferme tout de suite ; en arrière si le moteur
+    /// refuse.
+    func hideAgentRun(_ run: RecipeRun, in conversationID: String) async {
+        patchAgentRun(in: conversationID) { current in
+            if current?.id == run.id { current = nil }
+        }
+        if conversationPanel == .report, conversationPanelOwner == conversationID { conversationPanel = nil }
         guard !isDemo else { return }
-        if await write("/api/v2/agents/runs", ["action": "hide", "id": .string(run.id)]) == nil { agentRuns = before }
+        if await write("/api/v2/agents/runs", ["action": "hide", "id": .string(run.id)]) == nil {
+            patchAgentRun(in: conversationID) { current in
+                if current == nil { current = run }
+            }
+        }
     }
 
     private func result(_ answer: Result<WriteResult, ClientError>) -> WriteResult? {
@@ -579,7 +593,7 @@ extension VigieStore {
                 show(info: "\(surface?.label ?? "VS Code") s'ouvre : Vigie envoie le message à Claude…")
                 Task {
                     if await watching.value == .sent {
-                        show(info: "Message envoyé : l'agent travaille. Son rapport s'affiche dans « Derniers lancements ».")
+                        show(info: "Message envoyé : l'agent travaille. Son rapport s'affichera sur la page de sa conversation.")
                     } else {
                         SystemActions.copy(copy ?? result(answer)?.prompt ?? "")
                         show(info: "Le message n'a pas pu partir tout seul : il est copié, colle-le dans Claude (⌘V) puis Entrée.")

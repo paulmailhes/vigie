@@ -77,9 +77,11 @@ pas protégé comme l'installation de Vigie (`~/.vigie`) : seul le brief (`.vigi
 ## Le rapport pour Vigie
 
 Le brief demande à chaque agent de tenir à jour `<dossier>/.vigie/rapport-<id>.json` (forme dans `api-v2.md`,
-« Rapports d'agents »). La page Agents le montre dans « Derniers lancements », à la seconde : en cours ou terminé, le
-verdict, les décomptes, ce que l'agent a fait, ce qui reste à valider (l'utilisateur coche), le rapport détaillé, la
-conversation et le dossier. Rien à écrire dans `AGENT.md` pour ça ; une phrase qui dit quoi mettre dans `todo` aide.
+« Rapports d'agents »). Vigie le montre sur la page de la conversation que l'agent a ouverte : une tuile « Agent Vigie »
+en tête de « Au travail », et « Voir le rapport » l'ouvre en entier à droite (panneau Rapport), à jour avec la
+conversation : en cours ou terminé, le verdict, les décomptes, ce que l'agent a fait, ce qui reste à valider
+(l'utilisateur coche), le rapport détaillé, la conversation et le dossier. La page Agents ne montre que les agents
+prêts à lancer. Rien à écrire dans `AGENT.md` pour ça ; une phrase qui dit quoi mettre dans `todo` aide.
 
 ## Format d'AGENT.md
 

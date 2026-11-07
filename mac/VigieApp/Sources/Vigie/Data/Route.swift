@@ -31,6 +31,8 @@ enum ConversationPanel: Hashable, Sendable {
     case mcp
     case background
     case answers
+    /// Le rapport de l'agent de Vigie qui a lancé la conversation : verdict, ce qui te reste à faire, ce qu'il a fait.
+    case report
 }
 
 /// Une page de la pile Retour / Suivant (⌘[ ⌘]), avec le détail qu'elle avait ouvert à droite (page d'une
