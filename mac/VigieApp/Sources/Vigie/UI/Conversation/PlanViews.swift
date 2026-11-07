@@ -64,7 +64,9 @@ struct StepLine: View {
     }
 }
 
-/// Le plan en plusieurs étapes : progression, étape en cours bien visible, étapes suivantes, faites repliées.
+/// Le plan en plusieurs étapes : progression, étape en cours bien visible, étapes suivantes, faites repliées. Le nom
+/// du plan est le titre du panneau ; ici, l'avancée reste en gras simple (un seul grand titre par vue) et le chemin
+/// du fichier n'est que dans l'aide de « Ouvrir le plan ».
 struct PlanView: View {
     let plan: WorkPlan
     @State private var showDone = false
@@ -87,7 +89,7 @@ struct PlanView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(Fmt.int(done)) sur \(Fmt.int(total))")
-                        .font(.title3.bold())
+                        .font(.headline)
                         .monospacedDigit()
                     Text(total > 1 ? "étapes faites" : "étape faite")
                         .foregroundStyle(.secondary)
@@ -97,7 +99,7 @@ struct PlanView: View {
                             SystemActions.openInVSCode(path: file)
                         }
                         .buttonStyle(.borderless)
-                        .help(Fmt.shortPath(file))
+                        .help("Ouvrir dans VS Code : \(Fmt.shortPath(file))")
                     }
                 }
                 ProgressView(value: Double(min(done, total)), total: Double(max(total, 1)))
@@ -112,10 +114,8 @@ struct PlanView: View {
 
             if !next.isEmpty {
                 let shown = showAllNext ? next : Array(next.prefix(Self.nextShown))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("À suivre")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    CardTitle("À suivre", trailing: Fmt.count(next.count, "étape"))
                     stepList(shown, skipFirstHeaderIf: current?.group)
                     if !showAllNext && next.count > Self.nextShown {
                         ShowAllButton(count: next.count) { withAnimation(.smooth) { showAllNext = true } }
@@ -165,19 +165,17 @@ struct PlanView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 9))
+        .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: Theme.cornerInner))
         .accessibilityElement(children: .combine)
     }
 
-    /// Étapes groupées par `group` (titres de groupe en petit), dans l'ordre du plan.
+    /// Étapes groupées par `group` (surtitre compact, comme un groupe dans une liste), dans l'ordre du plan.
     private func stepList(_ items: [Indexed], skipFirstHeaderIf skipped: String?) -> some View {
         let groups = Self.runs(items)
         return VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(groups.enumerated()), id: \.offset) { position, run in
                 if let group = run.group, !(position == 0 && group == skipped) {
-                    Text(group)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    CardTitle(group, compact: true)
                         .padding(.top, position == 0 ? 0 : 4)
                 }
                 ForEach(run.items, id: \.index) { item in

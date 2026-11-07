@@ -23,17 +23,18 @@ struct AcceptedRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title ?? "Action")
                     .lineLimit(1)
+                    .help(item.title ?? "")
                 if let detail = item.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(isCode ? .caption.monospaced() : .caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if isCode {
+                        CodeLine(detail)
+                    } else {
+                        InfoLine(detail)
+                    }
                 }
             }
             Spacer(minLength: 8)
             if let label = decision.label {
-                Pill(text: label, alert: decision.alert)
+                Chip(label, tone: decision.alert ? .alert : .neutral)
             }
             TimeText(date: item.ts)
         }
@@ -59,118 +60,48 @@ struct TimeText: View {
     }
 }
 
-struct WorkflowRow: View {
-    let workflow: Workflow
-
-    var body: some View {
-        HStack(spacing: 10) {
-            RowIcon(symbol: Icon.workflow)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Workflow « \(workflow.name ?? workflow.id) »")
-                Text([workflow.summary, workflow.phases.isEmpty ? nil : workflow.phases.joined(separator: " → ")]
-                    .compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Text([workflow.agents.map { Fmt.count($0, "agent") }, Fmt.duration(ms: workflow.durationMs)]
-                .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-struct AgentRow: View {
-    let agent: AgentRun
-
-    var body: some View {
-        HStack(spacing: 10) {
-            statusIcon
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(agent.title ?? "Agent")
-                    if let phase = agent.phase {
-                        Pill(text: phase)
-                    }
-                }
-                Text(agent.lastAction ?? agent.workflow ?? "")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Text(stats)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// « 44 actions · 3 fichiers · 2 min ».
-    private var stats: String {
-        var parts: [String] = []
-        if let value = agent.actions, value > 0 { parts.append(Fmt.count(value, "action")) }
-        if let value = agent.files, value > 0 { parts.append(Fmt.count(value, "fichier")) }
-        let duration = Fmt.duration(ms: agent.durationMs)
-        if !duration.isEmpty { parts.append(duration) }
-        return parts.joined(separator: " · ")
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch agent.status {
-        case "running":
-            RunningMark()
-        case "failed":
-            RowIcon(symbol: "xmark.octagon")
-        case "killed":
-            RowIcon(symbol: "stop.circle")
-        case "idle":
-            RowIcon(symbol: "pause.circle")
-        default:
-            RowIcon(symbol: "checkmark.circle")
-        }
-    }
-}
-
+/// Une page publiée sur claude.ai : clic = l'ouvrir dans ton navigateur (on quitte Vigie, comme un fichier s'ouvre
+/// dans VS Code) ; clic droit = copier son adresse.
 struct ArtifactRow: View {
     @Environment(VigieStore.self) private var store
     let artifact: Artifact
 
     var body: some View {
-        HStack(spacing: 10) {
-            RowIcon(symbol: Icon.artifact)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(artifact.title ?? "Rapport")
-                if let description = artifact.description, !description.isEmpty {
-                    Text(description)
-                        .font(.callout)
+        let url = artifact.url ?? ""
+        Button {
+            SystemActions.open(url)
+        } label: {
+            HStack(spacing: 10) {
+                RowIcon(symbol: Icon.artifact)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(artifact.title ?? "Page publiée").lineLimit(2)
+                    if let description = artifact.description, !description.isEmpty {
+                        InfoLine(description)
+                    }
+                    let facts: [String?] = [artifact.publishes.flatMap { $0 > 1 ? "publié \($0) fois" : nil },
+                                            artifact.ts.map { Fmt.when($0, now: store.now) }]
+                    if !InfoLine.text(facts).isEmpty {
+                        InfoLine(parts: facts)
+                    }
+                }
+                Spacer(minLength: 8)
+                if !url.isEmpty {
+                    Image(systemName: "arrow.up.forward.square")
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .accessibilityHidden(true)
                 }
             }
-            Spacer(minLength: 8)
-            Text(footer)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let url = artifact.url, !url.isEmpty {
-                Button("Ouvrir") { SystemActions.open(url) }
-                    .glassButton()
-                    .help("Ouvrir sur claude.ai")
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(url.isEmpty ? "" : "Ouvrir dans ton navigateur")
+        .contextMenu {
+            if !url.isEmpty {
+                Button("Ouvrir dans ton navigateur", systemImage: "safari") { SystemActions.open(url) }
+                Button("Copier l'adresse", systemImage: "doc.on.doc") { SystemActions.copy(url) }
             }
         }
         .padding(.vertical, 2)
-    }
-
-    private var footer: String {
-        var parts: [String] = []
-        if let count = artifact.publishes, count > 1 { parts.append("publié \(count) fois") }
-        if let ts = artifact.ts { parts.append(Fmt.when(ts, now: store.now)) }
-        return parts.joined(separator: " · ")
     }
 }
 
@@ -187,11 +118,7 @@ struct FileRow: View {
                 RowIcon(symbol: Theme.symbol(for: file.fileKind))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(file.displayName).lineLimit(1)
-                    Text(folder)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    CodeLine(folder)
                 }
                 Spacer(minLength: 8)
                 Text(change)
@@ -253,11 +180,7 @@ struct TestRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else if let command = test.command {
-                    Text(command)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    CodeLine(command)
                 }
             }
             Spacer(minLength: 8)
@@ -321,41 +244,49 @@ struct ConversationMCPList: View {
             EmptyRow(text: "Aucun MCP utilisé par cette conversation")
         } else {
             ForEach(model.mcpGroups, id: \.0) { group, items in
-                Text(Theme.title(for: group))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                CardTitle(Theme.title(for: group), compact: true)
+                    .padding(.top, 4)
                 ForEach(items, id: \.name) { item in
                     row(item)
                 }
             }
-            Button("Ouvrir la page MCP", systemImage: Icon.mcp) { store.route = .mcp }
+            Button("Voir la page MCP", systemImage: Icon.mcp) { store.route = .mcp }
                 .buttonStyle(.link)
                 .padding(.top, 4)
         }
     }
 
+    /// Un MCP coupé : seule son icône s'atténue ; son nom passe en gris et « coupé » reste lisible.
     private func row(_ item: ConversationMCP) -> some View {
         let status = item.enabled == false ? MCPStatus.disabled : item.mcpStatus
         return HStack(spacing: 10) {
             ServiceGlyph(service: item.service, name: item.name)
+                .opacity(status == .disabled ? Theme.dim : 1)
             Text(item.name)
+                .foregroundStyle(status == .disabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
             Spacer(minLength: 8)
             if status == .needsAuth {
                 Button("Connecter") {
                     let summary = store.conversation(model.raw.summary?.id ?? "")
                     Task { await store.mcpConnect(name: item.name, accountId: summary.flatMap { store.runningAccountId(of: $0) }, path: cwd) }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.warn)
+                .glassButton(.primary)
                 .controlSize(.small)
             } else {
                 Text(MCPStatusStyle.label(status))
                     .font(.callout)
-                    .foregroundStyle(status == .connected ? AnyShapeStyle(.secondary) : AnyShapeStyle(MCPStatusStyle.color(status)))
+                    .foregroundStyle(Self.statusText(status))
             }
             UsesLabel(count: item.uses, here: true)
         }
-        .opacity(status == .disabled ? Theme.dim : 1)
+    }
+
+    /// Couleur de TEXTE de l'état : orange ou rouge foncés (lisibles en mode clair) pour un problème, gris sinon.
+    private static func statusText(_ status: MCPStatus) -> AnyShapeStyle {
+        switch status {
+        case .needsAuth, .pendingApproval: AnyShapeStyle(Theme.warnText)
+        case .failed: AnyShapeStyle(Theme.alertText)
+        case .connected, .disabled, .unknown: AnyShapeStyle(.secondary)
+        }
     }
 }
