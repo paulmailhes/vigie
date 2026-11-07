@@ -60,7 +60,8 @@ struct GuardSettingsView: View {
                 .disabled(!store.guardEnabled)
             }
         }
-        .pageForm()
+        // fenêtre Réglages : le Form natif, centré (pas le gabarit des pages de la fenêtre principale)
+        .formStyle(.grouped)
     }
 
     private var waitChoices: [Int] {
@@ -79,7 +80,7 @@ struct NotificationSettingsView: View {
                 Section {
                     HStack {
                         Label("Notifications refusées pour Vigie", systemImage: "bell.slash")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Theme.alertText)
                         Spacer()
                         Button("Ouvrir Réglages Système") {
                             SystemActions.open("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
@@ -98,7 +99,7 @@ struct NotificationSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .pageForm()
+        .formStyle(.grouped)
         .task { status = await Self.authorization() }
     }
 

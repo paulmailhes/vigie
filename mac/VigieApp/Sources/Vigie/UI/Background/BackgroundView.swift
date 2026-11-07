@@ -4,7 +4,7 @@ import SwiftUI
 /// Outil « En fond » : ce que tes conversations ont laissé tourner (Chrome sans fenêtre, serveurs, rendus, apps),
 /// en trois groupes, du geste à faire à ce qui est normal : les oubliés (conversation fermée), les apps ouvertes par
 /// un agent, puis ce qui accompagne une conversation ouverte. Un clic sur une ligne montre la commande entière,
-/// le dossier et la conversation.
+/// le dossier et la conversation. Le titre est dans la barre de la fenêtre, avec l'état chiffré en sous-titre.
 struct BackgroundView: View {
     @Environment(VigieStore.self) private var store
     @State private var expanded: String?
@@ -14,9 +14,9 @@ struct BackgroundView: View {
 
     var body: some View {
         Page {
-            header
             if let problem = store.backgroundProblem, store.background == nil {
-                ContentUnavailableView("Relevé indisponible", systemImage: "memorychip", description: Text(problem))
+                // le texte du moteur dit ce qui ne va pas
+                ContentUnavailableView("Liste indisponible", systemImage: "memorychip", description: Text(problem))
             } else if let list = store.background {
                 if list.groups.isEmpty {
                     ContentUnavailableView {
@@ -26,16 +26,18 @@ struct BackgroundView: View {
                     }
                     .padding(.top, 40)
                 } else {
+                    header(list)
                     sections(list.groups)
                 }
                 footer(list)
             } else {
-                ProgressView("Relevé en cours…")
+                ProgressView("Lecture en cours…")
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
             }
         }
         .navigationTitle("En fond")
+        .navigationSubtitle(subtitle)
         .task { await store.followBackground() }
         .confirmationDialog("Sa conversation travaille encore", isPresented: Binding(
             get: { !confirmBusy.isEmpty }, set: { if !$0 { confirmBusy = [] } }
@@ -64,35 +66,46 @@ struct BackgroundView: View {
         }
     }
 
-    // MARK: En-tête et groupes
+    // MARK: Sous-titre, chiffre clé et groupes
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("En fond")
-                .font(.largeTitle.bold())
-            if let list = store.background, let total = list.total, (total.groups ?? 0) > 0 {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(Fmt.memory(mb: total.memoryMb))
-                        .font(.title2.bold())
-                        .monospacedDigit()
-                    Text(summaryLine(list))
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text("Ce que tes conversations ont laissé tourner : Chrome sans fenêtre, serveurs, rendus, apps.")
-                    .foregroundStyle(.secondary)
-            }
-        }
+    /// « 16 Go sur 36 Go · 5 groupes · mis à jour à l'instant » : un état chiffré, 3 infos au plus.
+    private var subtitle: String {
+        guard let list = store.background else { return "" }
+        let groups = list.total?.groups ?? list.groups.count
+        return InfoLine.text([
+            groups > 0 ? memoryLine(list) : nil,
+            groups > 0 ? Fmt.count(groups, "groupe") : "Rien ne tourne",
+            list.scannedAt.map { "mis à jour \(Fmt.ago($0, now: store.now))" },
+        ])
     }
 
-    private func summaryLine(_ list: BackgroundList) -> String {
-        var parts: [String] = []
-        let ram = ProcessInfo.processInfo.physicalMemory
-        if ram > 0 { parts.append("sur \(Int((Double(ram) / 1_073_741_824).rounded())) Go") }
-        if let groups = list.total?.groups { parts.append(Fmt.count(groups, "groupe")) }
-        if let processes = list.total?.processes { parts.append(Fmt.count(processes, "processus", "processus")) }
-        if let at = list.scannedAt { parts.append("relevé \(Fmt.ago(at, now: store.now))") }
-        return parts.joined(separator: " · ")
+    /// « 16 Go sur 36 Go » (la mémoire de ton Mac).
+    private func memoryLine(_ list: BackgroundList) -> String {
+        let used = Fmt.memory(mb: list.total?.memoryMb)
+        return ram.map { "\(used) sur \($0) Go" } ?? used
+    }
+
+    /// La mémoire du Mac, en Go entiers.
+    private var ram: Int? {
+        let bytes = ProcessInfo.processInfo.physicalMemory
+        return bytes > 0 ? Int((Double(bytes) / 1_073_741_824).rounded()) : nil
+    }
+
+    /// Le chiffre clé de la page, en grand : la mémoire prise par ce qui tourne en fond.
+    @ViewBuilder
+    private func header(_ list: BackgroundList) -> some View {
+        if let total = list.total, (total.groups ?? 0) > 0 {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(Fmt.memory(mb: total.memoryMb))
+                    .font(.title2.bold())
+                    .monospacedDigit()
+                Text(InfoLine.text([ram.map { "de mémoire, sur \($0) Go" } ?? "de mémoire",
+                                    total.processes.map { Fmt.count($0, "processus", "processus") }]))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private var forgotten: [BackgroundGroup] {
@@ -110,52 +123,42 @@ struct BackgroundView: View {
         let apps = groups.filter { $0.groupState == .app }
         let open = groups.filter { $0.groupState != .forgotten && $0.groupState != .app }
         if !lost.isEmpty {
-            group("Oubliés", note: "leur conversation est fermée", groups: lost) {
+            CardSection("Oubliés", count: lost.count, note: "Leur conversation est fermée.") {
+                rows(lost)
+            } trailing: {
                 if lost.count > 1 {
                     Button("Arrêter les \(lost.count) oubliés") { confirmAll = true }
                         .glassButton(.primary)
-                } else {
-                    EmptyView()
                 }
             }
         }
         if !apps.isEmpty {
-            group("Apps ouvertes par un agent", note: "tu peux les vouloir", groups: apps) { EmptyView() }
+            CardSection("Apps ouvertes par un agent", count: apps.count, note: "Tu t'en sers peut-être encore.") {
+                rows(apps)
+            }
         }
         if !open.isEmpty {
-            group("Conversations ouvertes", note: nil, groups: open) { EmptyView() }
+            CardSection("Avec une conversation ouverte", count: open.count) {
+                rows(open)
+            }
         }
     }
 
-    private func group<Trailing: View>(_ title: String, note: String?, groups: [BackgroundGroup],
-                                       @ViewBuilder trailing: () -> Trailing) -> some View {
-        CardSection {
-            ForEach(groups) { group in
-                BackgroundRow(group: group, expanded: expanded == group.id) {
-                    withAnimation(.smooth(duration: 0.2)) { expanded = expanded == group.id ? nil : group.id }
-                } stop: {
-                    if group.groupState == .app {
-                        confirmApp = group
-                    } else if group.groupState.conversationBusy {
-                        confirmBusy = [group]
-                    } else {
-                        Task {
-                            let ask = await store.stopBackground([group])
-                            if !ask.isEmpty { confirmBusy = ask }
-                        }
+    private func rows(_ groups: [BackgroundGroup]) -> some View {
+        ForEach(groups) { group in
+            BackgroundRow(group: group, expanded: expanded == group.id) {
+                withAnimation(.smooth(duration: 0.2)) { expanded = expanded == group.id ? nil : group.id }
+            } stop: {
+                if group.groupState == .app {
+                    confirmApp = group
+                } else if group.groupState.conversationBusy {
+                    confirmBusy = [group]
+                } else {
+                    Task {
+                        let ask = await store.stopBackground([group])
+                        if !ask.isEmpty { confirmBusy = ask }
                     }
                 }
-            }
-        } header: {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                if let note {
-                    Text("· \(note)")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                trailing()
             }
         }
     }
@@ -165,7 +168,7 @@ struct BackgroundView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $store.stopForgotten) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Arrêter seuls les Chrome sans fenêtre oubliés")
+                    Text("Vigie arrête les Chrome sans fenêtre oubliés")
                     Text("Quand leur conversation est fermée depuis 6 h et qu'ils ne consomment plus rien. Rien d'autre ne s'arrête tout seul.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -174,7 +177,7 @@ struct BackgroundView: View {
             }
             .toggleStyle(.switch)
             if let last = list.autoStopped.first {
-                Text("Dernier arrêt automatique : \(last.label ?? "Chrome sans fenêtre")\(last.project.map { " (\($0))" } ?? "") · \(Fmt.memory(mb: last.memoryMb)) libérés · \(Fmt.ago(last.ts, now: store.now))")
+                Text("Dernier arrêt automatique : \(last.label ?? "Chrome sans fenêtre")\(last.project.map { " (\(ProjectName.display($0)))" } ?? "") · \(Fmt.memory(mb: last.memoryMb)) libérés · \(Fmt.ago(last.ts, now: store.now))")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -187,7 +190,8 @@ struct BackgroundView: View {
     }
 }
 
-/// Une ligne : pastille d'état, ce que c'est, sa conversation, depuis quand, sa mémoire, le bouton.
+/// Une ligne : pastille d'état, ce que c'est, sa conversation (nommée comme partout : « Atelier »), depuis quand, sa
+/// mémoire, le bouton. Fenêtre étroite : la conversation passe sous ce que c'est.
 struct BackgroundRow: View {
     @Environment(VigieStore.self) private var store
     let group: BackgroundGroup
@@ -197,54 +201,94 @@ struct BackgroundRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(group.label ?? "Commande")
-                        .fontWeight(.medium)
-                    if let detail = group.detail {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 10) {
+                    dot
+                    what
+                        .frame(minWidth: 120, idealWidth: 180, maxWidth: .infinity, alignment: .leading)
+                    conversation
+                        .frame(width: 240, alignment: .leading)
+                    numbers
+                    stopButton
+                }
+                HStack(alignment: .center, spacing: 10) {
+                    dot
+                    VStack(alignment: .leading, spacing: 6) {
+                        what
+                        conversation
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    numbers
+                    stopButton
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 1) {
-                    // la conversation qui l'a lancé : son titre, puis son projet et son état
-                    Text(group.conversationTitle ?? group.project ?? "Conversation inconnue")
-                        .lineLimit(1)
-                        .help(group.conversationTitle ?? "")
-                    Text(where_)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .font(.callout)
-                .frame(width: 260, alignment: .leading)
-                Text(Fmt.age(since: group.startedAt, now: store.now))
-                    .font(.callout)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 52, alignment: .trailing)
-                Text(Fmt.memory(mb: group.memoryMb))
-                    .font(.callout)
-                    .monospacedDigit()
-                    .frame(width: 64, alignment: .trailing)
-                    .help(group.memoryReal == true ? "Mémoire réelle" : "Mémoire estimée")
-                Button(group.groupState == .app ? "Quitter" : "Arrêter", action: stop)
-                    .glassButton()
-                    .frame(width: 80, alignment: .trailing)
             }
             .contentShape(.rect)
             .onTapGesture(perform: toggle)
             if expanded { details }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(group.label ?? "Commande"), lancé par \(group.conversationTitle ?? "une conversation"), \(where_), \(Fmt.memory(mb: group.memoryMb))")
+        .accessibilityLabel(InfoLine.text([group.label ?? "Commande", "lancé par \(conversationName)", stateText, Fmt.memory(mb: group.memoryMb)]))
+        .accessibilityHint(expanded ? "Referme le détail" : "Montre la commande entière et le dossier")
+    }
+
+    private var dot: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .accessibilityHidden(true)
+    }
+
+    /// Ce que c'est : « Chrome sans fenêtre », et son détail.
+    private var what: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(group.label ?? "Commande")
+                .textRole(.item)
+                .lineLimit(1)
+            if let detail = group.detail {
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(detail)
+            }
+        }
+    }
+
+    /// La conversation qui l'a lancé : son nom court, puis son état et son titre de VS Code.
+    private var conversation: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(conversationName)
+                .lineLimit(1)
+            InfoLine(parts: [stateText, group.conversationTitle])
+        }
+    }
+
+    /// « depuis 1 j » et la mémoire, en colonnes alignées d'une ligne à l'autre.
+    private var numbers: some View {
+        HStack(spacing: 10) {
+            Text(launched)
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .trailing)
+                .help(group.startedAt.map { "Lancé \(Fmt.when($0, now: store.now))" } ?? "")
+            Text(Fmt.memory(mb: group.memoryMb))
+                .frame(width: 64, alignment: .trailing)
+                .help(group.memoryReal == true ? "Mémoire réelle" : "Mémoire estimée")
+        }
+        .font(.callout)
+        .monospacedDigit()
+        .lineLimit(1)
+    }
+
+    private var stopButton: some View {
+        Button(group.groupState == .app ? "Quitter" : "Arrêter", action: stop)
+            .glassButton()
+            .frame(width: 80, alignment: .trailing)
+    }
+
+    /// « depuis 1 j », « à l'instant » juste après le lancement.
+    private var launched: String {
+        guard let started = group.startedAt else { return Fmt.none }
+        return store.now.timeIntervalSince(started) < 5 ? "à l'instant" : "depuis \(Fmt.age(since: started, now: store.now))"
     }
 
     private var color: Color {
@@ -255,15 +299,23 @@ struct BackgroundRow: View {
         }
     }
 
-    private var where_: String {
-        let name = group.project ?? "?"
+    /// Le nom de la conversation, comme dans le reste de l'app ; fermée depuis plus de 48 h, Vigie ne la suit plus :
+    /// le nom de son projet.
+    private var conversationName: String {
+        if let id = group.conversationId, let conversation = store.conversation(id) { return conversation.shortTitle }
+        if let project = group.project { return ProjectName.display(project, cwd: group.cwd) }
+        return "Conversation inconnue"
+    }
+
+    /// L'état de la conversation : « Travaille », « Fermée il y a 2 h ».
+    private var stateText: String {
         switch group.groupState {
-        case .forgotten: return "\(name) · fermée\(group.forgottenSince.map { " \(Fmt.ago($0, now: store.now))" } ?? "")"
-        case .working: return "\(name) · travaille"
-        case .waiting: return "\(name) · t'attend"
-        case .idle: return "\(name) · au repos"
-        case .app: return "\(name) · \(conversationOpen ? "ouverte" : "fermée")"
-        case .unknown: return name
+        case .forgotten: "Fermée\(group.forgottenSince.map { " \(Fmt.ago($0, now: store.now))" } ?? "")"
+        case .working: "Travaille"
+        case .waiting: "T'attend"
+        case .idle: "Au repos"
+        case .app: conversationOpen ? "Ouverte" : "Fermée"
+        case .unknown: ""
         }
     }
 
@@ -296,28 +348,31 @@ struct BackgroundRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
+            WrapLayout(spacing: 8) {
                 if let id = group.conversationId {
                     if store.conversation(id) != nil {
                         Button("Voir la conversation") { store.route = .conversation(id) }
                             .glassButton()
                     } else {
                         // fermée depuis plus de 48 h : Vigie ne la suit plus, VS Code la rouvre
-                        AsyncButton("Rouvrir la conversation") { await store.openConversationInVSCode(id, cwd: group.cwd) }
+                        AsyncButton("Ouvrir dans VS Code") { await store.openConversationInVSCode(id, cwd: group.cwd) }
                             .glassButton()
+                            .help("Rouvre sa conversation dans VS Code")
                     }
                 }
                 if let cwd = group.cwd {
-                    Button("Afficher le dossier") {
+                    Button("Ouvrir dans le Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: cwd)])
                     }
                     .glassButton()
+                    .help("Le dossier où il a été lancé")
                 }
                 if let port = group.ports.first {
                     Button("Ouvrir localhost:\(port)") {
                         if let url = URL(string: "http://localhost:\(port)") { NSWorkspace.shared.open(url) }
                     }
                     .glassButton()
+                    .help("Dans ton navigateur")
                 }
             }
             .controlSize(.small)

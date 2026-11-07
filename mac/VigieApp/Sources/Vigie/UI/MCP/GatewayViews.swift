@@ -3,35 +3,48 @@ import SwiftUI
 /// Ligne d'état d'un MCP qui passe par la passerelle de Vigie : connecté une fois pour tous les comptes, avec ses
 /// espaces (une connexion par espace, par exemple un espace Webflow par client) et le passage de l'un à l'autre en
 /// un clic. « Reconnecter » n'apparaît que si le service a coupé l'accès (une coupure réseau n'en est pas une).
+/// Deux places : sous le MCP (`.status`, seulement quand tout va bien : le reste est « À régler ») et dans « À
+/// régler » (`.fix` : les espaces et le bouton, la phrase est dans la rangée).
 struct GatewayLine: View {
+    enum Mode { case status, fix }
+
     @Environment(VigieStore.self) private var store
     let name: String
     let server: GatewayServer
+    var mode: Mode = .status
     @State private var askingLabel = false
     @State private var renaming = false
     @State private var confirmRemove = false
     @State private var label = ""
     @State private var busy = false
 
+    /// Pas encore connecté, ou accès coupé par le service : à régler.
+    nonisolated static func needsFix(_ server: GatewayServer) -> Bool {
+        server.open != true && (server.profiles.isEmpty || server.needsAuthorization)
+    }
+
+    /// Ce qui est à régler, en une phrase (ligne de « À régler »).
+    nonisolated static func fixText(_ server: GatewayServer) -> String {
+        server.profiles.isEmpty
+            ? "Pas encore connecté : une seule connexion pour tous tes comptes"
+            : "Le service a coupé l'accès à l'espace « \(server.activeProfile?.label ?? "Espace") »"
+    }
+
     var body: some View {
         Group {
-            if server.open == true {
-                MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Pour tous tes comptes, rien à connecter") { EmptyView() }
-            } else if server.profiles.isEmpty {
-                MCPIssueLine(systemImage: "key", color: Theme.warn, text: "Pas encore connecté : une seule connexion pour tous tes comptes") {
-                    authorizeButton("Connecter")
+            switch mode {
+            case .fix:
+                HStack(spacing: 8) {
+                    if !server.profiles.isEmpty { spaces }
+                    authorizeButton(server.profiles.isEmpty ? "Connecter" : "Reconnecter")
                 }
-            } else if server.needsAuthorization {
-                MCPIssueLine(systemImage: "exclamationmark.triangle.fill", color: Theme.warn,
-                             text: "Le service a coupé l'accès à l'espace « \(server.activeProfile?.label ?? "Espace") » : reconnecte-le") {
-                    HStack(spacing: 8) {
+            case .status:
+                if server.open == true {
+                    MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Pour tous tes comptes, rien à connecter") { EmptyView() }
+                } else if !Self.needsFix(server) {
+                    MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Connecté une fois pour tous tes comptes") {
                         spaces
-                        authorizeButton("Reconnecter")
                     }
-                }
-            } else {
-                MCPIssueLine(systemImage: "checkmark.circle", color: .secondary, text: "Connecté une fois pour tous tes comptes") {
-                    spaces
                 }
             }
         }
@@ -69,8 +82,7 @@ struct GatewayLine: View {
         AsyncButton(title) {
             await store.gateway("authorize", name: name, server.active.map { ["profileId": .string($0)] } ?? [:])
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Theme.warn)
+        .glassButton(.primary)
         .controlSize(.small)
         .help("Ouvre la page du service dans ton navigateur : une seule connexion, valable pour tous tes comptes")
     }

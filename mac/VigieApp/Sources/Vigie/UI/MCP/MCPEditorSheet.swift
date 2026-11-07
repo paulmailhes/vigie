@@ -123,8 +123,11 @@ struct MCPEditorSheet: View {
                     }
                 }
             if let pasteError {
-                Label(pasteError, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+                Label {
+                    Text(pasteError)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.alert)
+                }
             }
         }
         .padding(.horizontal, 24)
@@ -285,12 +288,9 @@ struct PairsEditor: View {
                     .frame(maxWidth: 200)
                 SecureField("Valeur", text: $pair.value, prompt: Text("valeur"))
                     .labelsHidden()
-                Button("Retirer", systemImage: "minus.circle.fill") {
+                IconButton(pair.key.isEmpty ? "Retirer cette ligne" : "Retirer \(pair.key)", systemImage: "xmark") {
                     pairs.removeAll { $0.id == pair.id }
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
             }
         }
         Button(addTitle, systemImage: "plus.circle") {

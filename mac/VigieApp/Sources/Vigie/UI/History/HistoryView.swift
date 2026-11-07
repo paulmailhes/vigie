@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Historique : toutes les demandes d'autorisation et leur issue (acceptée, refusée, bloquée, échouée…), avec des
-/// filtres. Un clic sur une ligne ouvre son détail à droite : pourquoi, la commande entière, de quoi la relancer.
+/// Historique : toutes les demandes d'autorisation et leur issue (acceptée, refusée, refusée d'office, échouée…), avec
+/// des filtres. Un clic sur une ligne ouvre son détail à droite : pourquoi, la commande entière, de quoi la relancer.
+/// Même bord gauche que les autres pages (28 pt) ; la table défile seule, elle n'entre pas dans `Page`.
 struct HistoryView: View {
     @Environment(VigieStore.self) private var store
     @State private var selection: HistoryItem.ID?
@@ -15,8 +16,8 @@ struct HistoryView: View {
             statusChips
             table
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
+        .padding(.horizontal, PageMetrics.margin)
+        .padding(.top, PageMetrics.verticalMargin)
         .splitColumn(minWidth: 340)
         .navigationTitle("Historique")
         .navigationSubtitle(subtitle)
@@ -93,21 +94,24 @@ struct HistoryView: View {
     }
 
     private func conversationName(_ item: HistoryItem) -> String {
-        item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.project ?? item.conversationTitle ?? "Conversation"
+        item.conversationId.flatMap { store.conversation($0)?.shortTitle }
+            ?? item.project.map { ProjectName.display($0, cwd: item.cwd) }
+            ?? item.conversationTitle ?? "Conversation"
     }
 
+    /// Les filtres par issue : une puce par issue présente, la choisie pleine (bleu d'action).
     private var statusChips: some View {
         let counts = store.historyPage?.counts ?? [:]
         let total = counts.values.reduce(0, +)
         return FlowLayout(spacing: 6) {
-            chip(title: "Tout", count: total, symbol: nil, color: .accentColor, selected: store.historyStatus == nil) {
+            filterChip("Tout \(Fmt.int(total))", symbol: nil, selected: store.historyStatus == nil) {
                 store.historyStatus = nil
             }
             ForEach(HistoryStatus.allCases) { status in
                 let count = counts[status.rawValue] ?? 0
                 if count > 0 || store.historyStatus == status.rawValue {
-                    chip(title: status.title, count: count, symbol: status.symbol, color: status.color,
-                         selected: store.historyStatus == status.rawValue) {
+                    filterChip("\(status.shownTitle) \(Fmt.int(count))", symbol: status.symbol,
+                               selected: store.historyStatus == status.rawValue) {
                         store.historyStatus = store.historyStatus == status.rawValue ? nil : status.rawValue
                     }
                 }
@@ -115,20 +119,13 @@ struct HistoryView: View {
         }
     }
 
-    private func chip(title: String, count: Int, symbol: String?, color: Color, selected: Bool, action: @escaping () -> Void) -> some View {
+    /// Une puce de filtre : la `Chip` standard (sans chevron : elle filtre, elle n'ouvre rien), choisie = pleine.
+    private func filterChip(_ title: String, symbol: String?, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                if let symbol { Image(systemName: symbol).foregroundStyle(selected ? .white : color) }
-                Text(title)
-                Text(Fmt.int(count)).monospacedDigit().foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .foregroundStyle(selected ? .white : .primary)
-            .background(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quinary), in: .capsule)
-            .contentShape(.capsule)
+            Chip(title, symbol: symbol, tone: selected ? .selected : .neutral, size: .regular)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ChipButtonStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -141,14 +138,15 @@ struct HistoryView: View {
         } else {
             Table(items, selection: $selection) {
                 TableColumn("Heure") { item in
-                    Text(item.ts.map { Fmt.when($0, now: store.now) } ?? "")
+                    Text(item.ts.map { Fmt.when($0, now: store.now) } ?? Fmt.none)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                        .help(item.ts.map(HistoryDetail.exact) ?? "")
                 }
                 .width(min: 70, ideal: 90, max: 130)
                 TableColumn("Résultat") { item in
-                    Label(item.historyStatus.label, systemImage: item.historyStatus.symbol)
-                        .foregroundStyle(item.historyStatus.color)
+                    Label(item.historyStatus.shownLabel, systemImage: item.historyStatus.symbol)
+                        .foregroundStyle(item.historyStatus.shownColor)
                         .labelStyle(.titleAndIcon)
                 }
                 .width(min: 110, ideal: 160, max: 190)
@@ -156,11 +154,7 @@ struct HistoryView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title ?? item.tool ?? "Action").lineLimit(1)
                         if let command = item.command, !command.isEmpty, command != item.title {
-                            Text(command)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            CodeLine(command)
                         }
                     }
                 }
@@ -169,10 +163,7 @@ struct HistoryView: View {
                     HStack(spacing: 6) {
                         Text(conversationName(item)).lineLimit(1)
                         if item.isCodex {
-                            Text("Codex")
-                                .font(.caption)
-                                .padding(.horizontal, 5)
-                                .background(.quaternary, in: .capsule)
+                            Chip("Codex")
                         }
                     }
                 }
@@ -189,28 +180,55 @@ struct HistoryView: View {
     }
 }
 
+/// Les mots et les couleurs de l'Historique, avec le vocabulaire de Vigie : « Refusée d'office » (par Vigie : délai
+/// ou règle), jamais « Bloquée » ; une couleur de TEXTE lisible en mode clair.
+extension HistoryStatus {
+    var shownTitle: String {
+        self == .blocked ? "Refusées d'office" : title
+    }
+
+    var shownLabel: String {
+        self == .blocked ? "Refusée d'office" : label
+    }
+
+    var shownColor: Color {
+        switch self {
+        case .accepted: Theme.liveText
+        case .blocked, .failed: Theme.alertText
+        case .waiting: Theme.warnText
+        case .refused, .question, .vscode: .secondary
+        }
+    }
+}
+
 /// Le détail d'une ligne : ce qui s'est passé, la commande entière, et de quoi la débloquer.
 struct HistoryDetail: View {
     @Environment(VigieStore.self) private var store
     let item: HistoryItem
     @State private var copied: String?
 
+    /// La date exacte, avec les secondes (au survol) : « lundi 26 octobre 20:14:05 ».
+    nonisolated static func exact(_ date: Date) -> String {
+        date.formatted(.dateTime.weekday(.wide).day().month(.wide).hour().minute().second().locale(Fmt.locale))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Label(item.historyStatus.label, systemImage: item.historyStatus.symbol)
-                    .font(.headline)
-                    .foregroundStyle(item.historyStatus.color)
-                Text(item.title ?? item.tool ?? "Action")
-                    .font(.title3.bold())
-                    .fixedSize(horizontal: false, vertical: true)
+                Chip(item.historyStatus.shownLabel, symbol: item.historyStatus.symbol, tone: tone)
+                ObjectHeader(item.title ?? item.tool ?? "Action")
                 if let reason = item.reason {
                     Text(reason).fixedSize(horizontal: false, vertical: true)
                 }
-                LabeledContent("Quand", value: item.ts.map { $0.formatted(date: .abbreviated, time: .standard) } ?? "—")
+                LabeledContent("Quand") {
+                    Text(item.ts.map { Fmt.when($0, now: store.now) } ?? Fmt.none)
+                        .help(item.ts.map(Self.exact) ?? "")
+                }
                 LabeledContent("Conversation") {
                     HStack(spacing: 6) {
-                        Text(item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.project ?? item.conversationTitle ?? "—")
+                        Text(item.conversationId.flatMap { store.conversation($0)?.shortTitle }
+                             ?? item.project.map { ProjectName.display($0, cwd: item.cwd) }
+                             ?? item.conversationTitle ?? Fmt.none)
                         if item.isCodex { Text("Codex").foregroundStyle(.secondary) }
                     }
                 }
@@ -218,18 +236,27 @@ struct HistoryDetail: View {
                 if let rule = item.rule { LabeledContent("Garde-fou", value: rule) }
                 if let command = item.command, !command.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Commande").font(.headline)
+                        CardTitle("Commande")
                         Text(command)
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quinary, in: .rect(cornerRadius: 8))
+                            .background(.quinary, in: .rect(cornerRadius: Theme.cornerInner))
                     }
                 }
                 actions
             }
             .padding(16)
+        }
+    }
+
+    private var tone: Chip.Tone {
+        switch item.historyStatus {
+        case .accepted: .live
+        case .blocked, .failed: .alert
+        case .waiting: .warn
+        case .refused, .question, .vscode: .neutral
         }
     }
 
@@ -250,11 +277,11 @@ struct HistoryDetail: View {
                     // Débloquer : Claude la relance à l'identique ; Vigie la redemande alors (fenêtre + Vigie).
                     Button(copied == "relaunch" ? "Message copié" : "Copier un message de relance",
                            systemImage: copied == "relaunch" ? "checkmark" : "arrow.clockwise") {
-                        SystemActions.copy("Je t'autorise cette action : relance-la exactement à l'identique, je la validerai.\n\n```\n\(command)\n```")
+                        SystemActions.copy("Je t'autorise cette action : relance-la exactement à l'identique, je l'autoriserai.\n\n```\n\(command)\n```")
                         copied = "relaunch"
                     }
                     .glassButton()
-                    .help("À coller dans sa conversation : elle relance la commande, tu la valides dans Vigie ou dans la conversation")
+                    .help("À coller dans sa conversation : elle relance la commande, tu l'autorises dans Vigie ou dans la conversation")
                     if item.needsPassword == true {
                         AsyncButton("Lancer dans Terminal", systemImage: "terminal") {
                             await store.runInTerminal(command, cwd: item.cwd)
@@ -265,7 +292,7 @@ struct HistoryDetail: View {
                 }
             }
             if item.conversationId != nil {
-                AsyncButton(item.conversationId.flatMap { store.conversation($0)?.openLabel } ?? "Ouvrir la conversation", systemImage: "arrow.up.forward.app") {
+                AsyncButton(item.conversationId.flatMap { store.conversation($0)?.openLabel } ?? "Ouvrir dans VS Code", systemImage: "arrow.up.forward.app") {
                     await store.openConversationInVSCode(item.conversationId, cwd: item.cwd)
                 }
                 .glassButton(.primary)

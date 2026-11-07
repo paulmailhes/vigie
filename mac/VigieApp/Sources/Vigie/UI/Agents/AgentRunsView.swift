@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Les derniers lancements d'agents (page Agents) : pour chacun, le rapport que l'agent tient à jour — en cours ou
-/// terminé, le verdict, ce qu'il a fait, ce qui reste à valider (à cocher), le rapport détaillé et la conversation.
+/// Tes lancements d'agents (page Agents) : pour chacun, le rapport que l'agent tient à jour — en cours ou terminé, le
+/// verdict, ce qu'il a fait, ce qui te reste à faire (à cocher), le rapport détaillé et la conversation.
 /// Chaque lancement s'ouvre et se referme ; le plus récent est ouvert. Mis à jour à la seconde (GET /api/v2/changes).
 struct RecipeRunsSection: View {
     @Environment(VigieStore.self) private var store
@@ -21,8 +21,9 @@ struct RecipeRunsSection: View {
                 })
             }
         } header: {
-            MCPSectionHeader(title: "Derniers lancements",
-                             text: "Le rapport de chaque agent : où il en est, ce qu'il a fait, ce qui te reste à valider.")
+            SectionHeader("Tes lancements", count: runs.count,
+                          note: "Le rapport de chaque agent : où il en est, ce qu'il a fait, ce qui te reste à faire.",
+                          inset: 0)
         }
     }
 }
@@ -44,15 +45,16 @@ enum RecipeRunState: Equatable {
         switch self {
         case .running: "En cours"
         case .ready: "Tout est bon"
-        case .todo(let n): n == 1 ? "1 à valider" : "\(n) à valider"
+        case .todo(let n): "\(n) à faire"
         case .blocked: "Bloquant"
         case .stopped: "Arrêté"
         }
     }
 
+    /// Le même repère « travaille » que partout (vert, éclair) : `circle.dashed` voulait dire « fermée ».
     var symbol: String {
         switch self {
-        case .running: "circle.dashed"
+        case .running: Theme.symbol(for: .working)
         case .ready: "checkmark.circle.fill"
         case .todo: "exclamationmark.circle.fill"
         case .blocked: "xmark.octagon.fill"
@@ -60,12 +62,21 @@ enum RecipeRunState: Equatable {
         }
     }
 
+    /// Couleur de remplissage (rond, icône).
     var color: Color {
         switch self {
-        case .running: Theme.action
-        case .ready: Theme.live
+        case .running, .ready: Theme.live
         case .todo, .stopped: Theme.warn
         case .blocked: Theme.alert
+        }
+    }
+
+    /// Le ton de sa puce.
+    var tone: Chip.Tone {
+        switch self {
+        case .running, .ready: .live
+        case .todo, .stopped: .warn
+        case .blocked: .alert
         }
     }
 }
@@ -84,7 +95,7 @@ struct RecipeRunRow: View {
                 header(state)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(run.displayName), \(run.project) : \(state.label)")
+            .accessibilityLabel("\(project), \(run.displayName) : \(state.label)")
             .accessibilityHint(expanded ? "Referme le rapport" : "Ouvre le rapport")
             if expanded {
                 details
@@ -95,13 +106,16 @@ struct RecipeRunRow: View {
         .padding(.vertical, 6)
     }
 
+    /// Le projet, nommé comme partout ailleurs (« Portail/back »).
+    private var project: String { ProjectName.display(run.project, cwd: run.folder) }
+
     private func header(_ state: RecipeRunState) -> some View {
         HStack(alignment: .top, spacing: 12) {
             AgentIcon(symbol: run.icon)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(run.project)
-                        .fontWeight(.semibold)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(project)
+                        .textRole(.item)
                     Text(run.displayName)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -113,33 +127,21 @@ struct RecipeRunRow: View {
                     .fixedSize(horizontal: false, vertical: expanded)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 5) {
-                if state == .running {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: state.symbol)
-                }
-                Text(state.label)
-            }
-            .font(.callout.weight(.medium))
-            .foregroundStyle(state.color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(state.color.opacity(0.12), in: .capsule)
+            Chip(state.label, symbol: state.symbol, tone: state.tone)
             Image(systemName: "chevron.right")
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .foregroundStyle(.tertiary)
-                .padding(.top, 5)
+                .padding(.top, 3)
+                .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
     }
 
     private func subtitle(_ state: RecipeRunState) -> String {
-        let when = Fmt.when(run.changedAt ?? run.at)
+        let when = Fmt.when(run.changedAt ?? run.at, now: store.now)
         if let verdict = run.report?.verdict { return "\(verdict) · \(when)" }
         if run.unreadable == true { return "Rapport illisible pour l'instant · \(when)" }
-        return state == .running ? "L'agent travaille · lancé \(Fmt.when(run.at))" : when
+        return state == .running ? "L'agent travaille · lancé \(Fmt.when(run.at, now: store.now))" : when
     }
 
     @ViewBuilder
@@ -148,32 +150,30 @@ struct RecipeRunRow: View {
         VStack(alignment: .leading, spacing: 12) {
             if let counts = report?.counts, (counts.ok ?? 0) + (counts.warn ?? 0) + (counts.block ?? 0) > 0 {
                 HStack(spacing: 8) {
-                    countChip(counts.ok, "conforme", "conformes", "checkmark.circle.fill", Theme.live)
-                    countChip(counts.warn, "à corriger", "à corriger", "exclamationmark.circle.fill", Theme.warn)
-                    countChip(counts.block, "bloquant", "bloquants", "xmark.octagon.fill", Theme.alert)
+                    Chip(Fmt.count(counts.ok ?? 0, "conforme"), symbol: "checkmark.circle.fill", tone: .live)
+                    Chip(Fmt.count(counts.warn ?? 0, "à corriger", "à corriger"), symbol: "exclamationmark.circle.fill", tone: .warn)
+                    Chip(Fmt.count(counts.block ?? 0, "bloquant"), symbol: "xmark.octagon.fill", tone: .alert)
                 }
             }
             if let next = report?.next, !next.isEmpty, report?.isRunning == false {
-                HStack(spacing: 8) {
+                // même taille que « Lancer… » (deux actions principales de la page) ; ils passent à la ligne
+                WrapLayout(spacing: 8) {
                     ForEach(next) { step in
                         AsyncButton(step.label, systemImage: "wand.and.stars") { await store.sendToRun(run, step) }
                             .glassButton(.primary)
-                            .controlSize(.small)
                             .help("Envoie à l'agent, dans sa conversation : « \(step.message) »")
                     }
                 }
             }
             if let todo = report?.todo, !todo.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("À valider de ton côté")
-                        .font(.callout.weight(.semibold))
+                    CardTitle("À faire de ton côté")
                     ForEach(todo) { item in todoRow(item) }
                 }
             }
             if let done = report?.done, !done.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Fait par l'agent")
-                        .font(.callout.weight(.semibold))
+                    CardTitle("Fait par l'agent")
                     ForEach(Array(done.prefix(8).enumerated()), id: \.offset) { _, line in
                         Label(line, systemImage: "checkmark")
                             .font(.callout)
@@ -183,24 +183,12 @@ struct RecipeRunRow: View {
                     if done.count > 8 {
                         Text("et \(done.count - 8) autres, dans le rapport détaillé")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
             actions
         }
-    }
-
-    private func countChip(_ value: Int?, _ one: String, _ many: String, _ symbol: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
-            Text(Fmt.count(value ?? 0, one, many))
-        }
-        .font(.caption)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(.quaternary, in: .capsule)
     }
 
     private func todoRow(_ item: AgentTodo) -> some View {
@@ -212,7 +200,7 @@ struct RecipeRunRow: View {
                     .foregroundStyle(item.done ? Theme.live : .secondary)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel(item.done ? "Fait" : "À faire")
+            .accessibilityLabel(item.done ? "Fait : \(item.text)" : "À faire : \(item.text)")
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     if !item.done, let severity = item.severity, severity != "info" {
@@ -236,32 +224,56 @@ struct RecipeRunRow: View {
         .font(.callout)
     }
 
+    /// Ce qui sort de Vigie le dit (« Ouvrir dans … ») ; « Retirer » ne retire que de la liste. Fenêtre étroite : les
+    /// liens passent à la ligne.
     private var actions: some View {
-        HStack(spacing: 14) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                links
+                Spacer(minLength: 8)
+                remove
+            }
+            WrapLayout(spacing: 14) {
+                links
+                remove
+            }
+        }
+        .buttonStyle(.link)
+        .font(.callout)
+    }
+
+    private var remove: some View {
+        AsyncButton("Retirer", systemImage: "xmark") { await store.hideAgentRun(run) }
+            .help("Retire ce lancement de la liste ; son rapport reste dans le dossier du projet")
+    }
+
+    @ViewBuilder
+    private var links: some View {
+        Group {
             if let path = run.report?.report {
                 Button("Rapport détaillé", systemImage: "doc.text") {
                     NSWorkspace.shared.open(URL(filePath: (run.folder as NSString).appendingPathComponent(path)))
                 }
+                .help("Ouvre le rapport dans son app")
             }
             ForEach(run.report?.links ?? []) { link in
                 if let url = URL(string: link.url) {
                     Link(destination: url) { Label(link.label, systemImage: "arrow.up.right.square") }
+                        .help("Ouvrir dans ton navigateur")
                 }
             }
             if let conversation = run.conversation {
-                AsyncButton("Conversation", systemImage: "bubble.left.and.text.bubble.right") {
+                AsyncButton(store.conversation(conversation)?.openLabel ?? "Ouvrir dans VS Code",
+                            systemImage: "bubble.left.and.text.bubble.right") {
                     await store.openConversationInVSCode(conversation, cwd: run.folder)
                 }
+                .help("La conversation de l'agent")
             }
-            Button("Dossier", systemImage: "folder") {
+            Button("Ouvrir dans le Finder", systemImage: "folder") {
                 NSWorkspace.shared.open(URL(filePath: run.folder, directoryHint: .isDirectory))
             }
-            Spacer()
-            AsyncButton("Retirer", systemImage: "xmark") { await store.hideAgentRun(run) }
-                .help("Retire ce lancement de la liste ; son rapport reste dans le dossier du projet")
+            .help("Le dossier du projet")
         }
-        .buttonStyle(.link)
-        .font(.callout)
     }
 }
 

@@ -48,11 +48,22 @@ enum AgentMCPState: Equatable {
         }
     }
 
+    /// Couleur de remplissage (fond de la pastille).
     var color: Color {
         switch self {
         case .ready: Theme.live
         case .toConnect, .toAdd, .toApprove: Theme.warn
         case .failed: Theme.alert
+        case .off, .unchecked, .checking: .secondary
+        }
+    }
+
+    /// Couleur du mot (lisible en mode clair).
+    var textColor: Color {
+        switch self {
+        case .ready: Theme.liveText
+        case .toConnect, .toAdd, .toApprove: Theme.warnText
+        case .failed: Theme.alertText
         case .off, .unchecked, .checking: .secondary
         }
     }
@@ -91,8 +102,9 @@ struct AgentMCPStrip: View {
             ForEach(agent.mcpNeeds) { mcp in
                 AgentMCPChip(mcp: mcp, state: AgentMCPState(mcp, checking: store.isVerifying(mcp)))
             }
+            // cible de 28 pt, mais la ligne garde la hauteur des pastilles
             AgentMCPVerifyButton(agent: agent, compact: true)
-                .padding(.top, 1)
+                .padding(.vertical, -4)
             AgentMCPFixes(agent: agent)
                 .buttonStyle(.link)
                 .font(.caption)
@@ -102,6 +114,7 @@ struct AgentMCPStrip: View {
 }
 
 /// Une pastille : le service, le MCP utilisé quand son nom en dit plus (« Figma · figma-pro »), l'état en couleur.
+/// L'habillage d'une `Chip` (fond teinté à 12 %, sans bordure), avec le logo du service en plus.
 struct AgentMCPChip: View {
     let mcp: AgentMCP
     let state: AgentMCPState
@@ -123,9 +136,8 @@ struct AgentMCPChip: View {
         }
         .font(.caption)
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(state.color.opacity(state == .ready ? 0.14 : 0.10), in: .capsule)
-        .overlay(Capsule().strokeBorder(state.color.opacity(0.25), lineWidth: 0.5))
+        .padding(.vertical, 4)
+        .background(state.color.opacity(0.12), in: .capsule)
         .fixedSize()
         .help(mcp.servers.count > 1 ? "L'agent utilisera \(mcp.chosen ?? mcp.title) ; un autre se choisit au lancement" : "")
         .accessibilityElement(children: .ignore)
@@ -150,11 +162,12 @@ struct AgentMCPStateLabel: View {
             }
             Text(state.label)
         }
-        .foregroundStyle(state.color)
+        .foregroundStyle(state.textColor)
     }
 }
 
-/// « Vérifier » : les MCP choisis de l'agent, vérifiés seuls (quelques secondes). `compact` : une simple flèche.
+/// « Vérifier » : les MCP choisis de l'agent, vérifiés seuls (quelques secondes). `compact` : une simple flèche
+/// (bouton icône de 28 pt, toujours nommé).
 struct AgentMCPVerifyButton: View {
     @Environment(VigieStore.self) private var store
     let agent: AgentInfo
@@ -162,21 +175,25 @@ struct AgentMCPVerifyButton: View {
 
     var body: some View {
         let busy = agent.mcpNeeds.contains(where: store.isVerifying)
-        Button {
-            Task { await store.verifyAgentMCP(agent) }
-        } label: {
+        let help = "Vérifier tout de suite l'état de \(agent.mcpNeeds.map(\.title).formatted(.list(type: .and).locale(Fmt.locale))) (quelques secondes)"
+        Group {
             if compact {
-                Image(systemName: "arrow.clockwise")
-                    .imageScale(.small)
+                IconButton("Vérifier ses MCP", systemImage: "arrow.clockwise", help: help) {
+                    await store.verifyAgentMCP(agent)
+                }
             } else {
-                Label("Vérifier", systemImage: "arrow.clockwise")
+                Button {
+                    Task { await store.verifyAgentMCP(agent) }
+                } label: {
+                    Label("Vérifier", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help(help)
+                .accessibilityLabel("Vérifier ses MCP")
             }
         }
-        .buttonStyle(.borderless)
-        .controlSize(compact ? .mini : .small)
         .disabled(busy || !agent.canVerifyMCP)
-        .help("Vérifier tout de suite l'état de \(agent.mcpNeeds.map(\.title).formatted(.list(type: .and).locale(Fmt.locale))) (quelques secondes)")
-        .accessibilityLabel("Vérifier ses MCP")
     }
 }
 
@@ -283,7 +300,7 @@ struct AgentMCPPanel: View {
         if waiting.isEmpty {
             Label("Tout est prêt", systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(Theme.live)
+                .foregroundStyle(Theme.liveText)
         } else if waiting.allSatisfy({ !$0.isMissing && $0.mcpStatus == .unknown }) {
             Text("À vérifier")
                 .font(.caption)
@@ -291,7 +308,7 @@ struct AgentMCPPanel: View {
         } else {
             Text(waiting.count == 1 ? "1 à régler avant de lancer" : "\(waiting.count) à régler avant de lancer")
                 .font(.caption)
-                .foregroundStyle(Theme.warn)
+                .foregroundStyle(Theme.warnText)
         }
     }
 

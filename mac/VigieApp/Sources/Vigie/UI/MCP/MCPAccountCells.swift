@@ -1,7 +1,8 @@
 import SwiftUI
 
-// L'état d'un MCP sur tes comptes Claude. Rien quand tout marche (« on affiche les problèmes ») ; sinon une ligne par
-// sorte de problème, en toutes lettres, avec un seul geste à droite. Chaque compte Claude garde sa propre
+// L'état d'un MCP sur tes comptes Claude. Rien quand tout marche (« on affiche les problèmes »). Ce qui demande un
+// geste (à connecter, en échec, à approuver) est rangé dans « À régler », en tête de la page, une ligne par MCP et par
+// compte ; sous le MCP restent les remarques (absent d'un compte, coupé). Chaque compte Claude garde sa propre
 // autorisation : un MCP en direct (pas par Vigie) se connecte une fois par compte.
 
 /// Les comptes d'un MCP, rangés par état (comptes Claude connectés seulement).
@@ -13,6 +14,17 @@ struct MCPAccountSummary {
     var off: [Account] = []
 
     var isEmpty: Bool { connect.isEmpty && failed.isEmpty && missing.isEmpty && pending.isEmpty && off.isEmpty }
+
+    /// Les remarques sous le MCP (absent, coupé) ; le reste est dans « À régler ».
+    var hasNotes: Bool { !missing.isEmpty || !off.isEmpty }
+
+    /// La puce à côté du nom : le plus grave d'abord.
+    var status: MCPRowStatus? {
+        if !failed.isEmpty { return MCPRowStatus(text: "en échec", tone: .alert) }
+        if !connect.isEmpty { return MCPRowStatus(text: "à connecter", tone: .warn) }
+        if !pending.isEmpty { return MCPRowStatus(text: "à approuver", tone: .warn) }
+        return nil
+    }
 
     /// declaredIn : comptes qui déclarent ce MCP (vide : on ne sait pas, l'état est lu dans `health`) ;
     /// only : limiter à ces comptes (MCP du compte : le sien seulement).
@@ -51,6 +63,7 @@ struct MCPIssueLine<Action: View>: View {
             Image(systemName: systemImage)
                 .foregroundStyle(color)
                 .frame(width: 16)
+                .accessibilityHidden(true)
             Text(text)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -61,89 +74,30 @@ struct MCPIssueLine<Action: View>: View {
     }
 }
 
-/// Les problèmes d'un MCP sur tes comptes, une ligne par sorte.
+/// Les remarques d'un MCP sur tes comptes (absent d'un compte, coupé), une ligne par sorte.
 struct MCPAccountIssues: View {
-    @Environment(VigieStore.self) private var store
     let name: String
     let summary: MCPAccountSummary
-    /// Dossier du projet (MCP de projet) ; nil pour un MCP du Mac ou du compte.
-    var path: String?
     /// Ajouter ce MCP aux comptes où il manque (MCP du Mac seulement).
     var addTo: (([String]) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !summary.connect.isEmpty {
-                MCPIssueLine(systemImage: "person.crop.circle.badge.exclamationmark", color: Theme.warn,
-                             text: "À connecter sur \(MCPAccountSummary.names(summary.connect))") {
-                    connectButton
-                }
-            }
-            if !summary.failed.isEmpty {
-                MCPIssueLine(systemImage: "xmark.octagon.fill", color: Theme.alert,
-                             text: "En échec sur \(MCPAccountSummary.names(summary.failed))") {
-                    retryMenu
-                }
-            }
             if !summary.missing.isEmpty {
                 MCPIssueLine(systemImage: "plus.circle", color: .secondary,
                              text: "Absent de \(MCPAccountSummary.names(summary.missing))") {
                     if let addTo {
                         Button("Ajouter") { addTo(summary.missing.map(\.id)) }
+                            .glassButton()
                             .controlSize(.small)
                             .help("Ajoute « \(name) » à \(MCPAccountSummary.names(summary.missing)), avec la même configuration")
                     }
                 }
-            }
-            if !summary.pending.isEmpty {
-                MCPIssueLine(systemImage: "hourglass", color: Theme.warn,
-                             text: "À approuver dans Claude Code, sur \(MCPAccountSummary.names(summary.pending))") { EmptyView() }
-                    .help("MCP de projet en attente d'approbation : ouvre Claude Code dans ce dossier et accepte-le")
             }
             if !summary.off.isEmpty {
                 MCPIssueLine(systemImage: "pause.circle", color: .secondary,
                              text: "Coupé sur \(MCPAccountSummary.names(summary.off))") { EmptyView() }
             }
         }
-    }
-
-    /// Un compte : le connecter ; plusieurs : l'un après l'autre (une page de connexion à la fois).
-    private var connectButton: some View {
-        let accounts = summary.connect
-        return AsyncButton(accounts.count == 1 ? "Connecter" : "Connecter les \(accounts.count) comptes") {
-            if accounts.count == 1 || path != nil {
-                for account in accounts { await store.mcpConnect(name: name, accountId: account.id, path: path) }
-            } else {
-                await store.mcpConnectEverywhere(name: name)
-            }
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(Theme.warn)
-        .controlSize(.small)
-        .help(accounts.count == 1
-              ? "Ouvre la page de connexion de « \(name) » pour \(accounts[0].displayName) dans ton navigateur"
-              : "Ouvre la page de connexion de « \(name) » pour chaque compte, l'un après l'autre")
-    }
-
-    private var retryMenu: some View {
-        Menu("Réessayer") {
-            ForEach(summary.failed) { account in
-                Section(account.displayName) {
-                    Button("Reconnecter", systemImage: "arrow.clockwise") {
-                        Task { await store.mcpConnect(name: name, accountId: account.id, path: path, force: true) }
-                    }
-                    Button("Vérifier de nouveau", systemImage: "arrow.triangle.2.circlepath") {
-                        // un MCP du Mac : vérifié seul (quelques secondes) ; d'un projet : le relevé de ce dossier
-                        Task {
-                            if path == nil { await store.verifyMCP([name], accountId: account.id) }
-                            else { await store.mcpCheck(accountId: account.id, path: path) }
-                        }
-                    }
-                }
-            }
-        }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .fixedSize()
     }
 }

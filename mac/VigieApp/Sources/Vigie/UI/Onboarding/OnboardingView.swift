@@ -145,17 +145,24 @@ struct OnboardingView: View {
             header("chevron.left.forwardslash.chevron.right", "Codex",
                    "Deux choses à faire une seule fois. Sans elles, Vigie ne peut rien accepter pour Codex.")
             if codexAccount == nil {
-                Label("Codex n'a pas encore été ouvert sur ton Mac : ouvre-le une fois, puis reviens ici.", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(Theme.warn)
+                // une phrase : seule l'icône prend la couleur
+                Label {
+                    Text("Codex n'a pas encore été ouvert sur ton Mac : ouvre-le une fois, puis reviens ici.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                }
             } else {
                 CodexSetupSteps(account: codexAccount, tools: choice)
                     .padding(14)
                     .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             }
             if codexSkipped && !codexReady {
-                Label("Sans ces deux étapes, Vigie ne peut rien accepter pour Codex. Tu pourras les faire plus tard dans Comptes.", systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(Theme.warn)
+                Label {
+                    Text("Sans ces deux étapes, Vigie ne peut rien accepter pour Codex. Tu pourras les faire plus tard dans Comptes.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                }
+                .font(.callout)
             }
         }
     }
@@ -260,19 +267,20 @@ struct OnboardingView: View {
                           "Dans toutes tes conversations, sur tous tes comptes Claude.")
                 Divider()
                 mcpFamily("folder", "MCP des projets", mcp.map { _ in Fmt.count(projectCount, "MCP", "MCP") },
-                          "Seulement quand Claude travaille dans le dossier du projet (fichier .mcp.json).")
+                          "Seulement quand Claude travaille dans le dossier du projet.")
                 Divider()
                 mcpFamily("person.crop.circle", "MCP du compte (claude.ai)", mcp.map { Fmt.count($0.connectors.count, "MCP", "MCP") },
                           "Branchés à ton compte sur claude.ai (Gmail, Drive…).") {
-                    // dans la ligne du compte : c'est bien eux qu'on allume ou qu'on coupe
+                    // dans la ligne du compte : c'est bien eux qu'on active ou qu'on coupe
                     Toggle(isOn: $store.connectorsDefaultOn) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Activés dans les nouvelles conversations")
-                            Text("Ils arrivent dans chaque nouvelle conversation. Coupe-les si le compte est partagé : ce seraient aussi ceux des autres. Tu peux toujours les allumer ou les couper pour une conversation précise.")
+                            Text("Ils arrivent dans chaque nouvelle conversation. Coupe-les si le compte est partagé : ce seraient aussi ceux des autres. Tu peux toujours les activer ou les couper pour une conversation précise.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .toggleStyle(.switch)
                     .padding(10)
@@ -348,7 +356,7 @@ struct OnboardingView: View {
                         "Vigie installe tout seul ses nouvelles versions et te montre ce qui a changé.",
                         isOn: $store.autoUpdate)
                 Divider()
-                setting("Arrêter seuls les Chrome sans fenêtre oubliés",
+                setting("Vigie arrête les Chrome sans fenêtre oubliés",
                         "Les agents en ouvrent pour des captures ou des tests, et les laissent souvent tourner. Vigie les arrête quand leur conversation est fermée depuis 6 h et qu'ils ne consomment plus rien. Le reste attend ton clic dans En fond.",
                         isOn: $store.stopForgotten)
                 Divider()
@@ -398,12 +406,14 @@ struct OnboardingView: View {
                 }
                 .padding(12)
                 if notifications == .denied {
-                    Label("macOS les a refusées pour Vigie : dans Réglages Système › Notifications › Vigie, active « Autoriser les notifications », puis reviens ici.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(Theme.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding([.horizontal, .bottom], 12)
+                    Label {
+                        Text("macOS les a refusées pour Vigie : dans Réglages Système › Notifications › Vigie, active « Autoriser les notifications », puis reviens ici.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                    }
+                    .font(.callout)
+                    .padding([.horizontal, .bottom], 12)
                 }
             }
             .background(.quinary, in: .rect(cornerRadius: Theme.corner))
@@ -448,7 +458,7 @@ struct OnboardingView: View {
             case .failed:
                 AsyncButton("Installation non aboutie : réessayer", systemImage: "exclamationmark.triangle") { await store.runSetup() }
                     .glassButton()
-                    .foregroundStyle(Theme.warn)
+                    .foregroundStyle(Theme.warnText)
                     .padding(.leading, 10)
             case .idle:
                 EmptyView()
@@ -519,7 +529,7 @@ struct OnboardingView: View {
                 if let note {
                     Text(note)
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -528,6 +538,8 @@ struct OnboardingView: View {
 
     private func setting(_ title: String, _ text: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
+            // le libellé prend toute la largeur : les interrupteurs forment une colonne au bord droit, comme les
+            // lignes « Agents » et « Notifications »
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(text)
@@ -535,6 +547,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .toggleStyle(.switch)
         .padding(12)
@@ -553,12 +566,19 @@ struct OnboardingAccountRow: View {
                 .foregroundStyle(account.isConnected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             VStack(alignment: .leading, spacing: 1) {
                 Text(account.displayName).font(.headline)
-                Text(account.email ?? account.expectedEmail ?? (account.isConnected ? "Connecté" : "Pas encore connecté"))
+                Text(AccountCard.address(account) ?? (account.isConnected ? "Connecté" : "Pas encore connecté"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if account.isConnected {
+            if account.wrongAccount == true {
+                // connecté avec une autre adresse que celle prévue : jamais « Connecté » à côté
+                Chip("Mauvaise adresse", symbol: "exclamationmark.triangle.fill", tone: .alert)
+                    .help(AccountCard.wrongAddressText(account))
+                AsyncButton("Reconnecter") { await store.connectAccount(account.id) }
+                    .glassButton(.primary)
+                    .help("Sur claude.ai, passe d'abord sur le bon compte : la connexion reprend celui du navigateur")
+            } else if account.isConnected {
                 Label("Connecté", systemImage: "checkmark")
                     .foregroundStyle(.secondary)
             } else {
@@ -588,11 +608,13 @@ struct OnboardingAddAccountSheet: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Adresse e-mail du compte (facultatif)", text: $email, prompt: Text("toi@exemple.fr"))
                 .textFieldStyle(.roundedBorder)
-            Label("Avant : sur claude.ai, dans ton navigateur, sois connecté avec CE compte (sinon passe dessus, ou déconnecte-toi). La connexion reprend le compte ouvert dans le navigateur : avec un autre, Vigie connecterait un compte qu'il a peut-être déjà.",
-                  systemImage: "exclamationmark.triangle")
-                .font(.callout)
-                .foregroundStyle(Theme.warn)
-                .fixedSize(horizontal: false, vertical: true)
+            Label {
+                Text("Avant : sur claude.ai, dans ton navigateur, sois connecté avec CE compte (sinon passe dessus, ou déconnecte-toi). La connexion reprend le compte ouvert dans le navigateur : avec un autre, Vigie connecterait un compte qu'il a peut-être déjà.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+            }
+            .font(.callout)
             Text("Ton navigateur s'ouvre ensuite sur la page de connexion de Claude. Avec l'adresse, Vigie vérifie que c'est le bon compte.")
                 .font(.callout)
                 .foregroundStyle(.secondary)

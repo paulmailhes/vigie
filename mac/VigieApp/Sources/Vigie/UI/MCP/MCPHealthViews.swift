@@ -13,11 +13,12 @@ enum MCPStatusStyle {
         }
     }
 
+    /// Couleur du mot de l'état (« en échec », « à connecter ») : les couleurs de TEXTE, lisibles en mode clair.
     static func color(_ status: MCPStatus) -> Color {
         switch status {
         case .connected: .secondary            // tout va bien : neutre, la couleur ne signale qu'un problème
-        case .needsAuth, .pendingApproval: Theme.warn
-        case .failed: Theme.alert
+        case .needsAuth, .pendingApproval: Theme.warnText
+        case .failed: Theme.alertText
         case .disabled, .unknown: .secondary
         }
     }

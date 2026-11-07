@@ -9,7 +9,7 @@ struct UpdateBanner: View {
             HStack(spacing: 12) {
                 Image(systemName: update.lastError != nil && update.available == true ? "exclamationmark.arrow.triangle.2.circlepath" : "arrow.down.circle.fill")
                     .font(.title2)
-                    .foregroundStyle(update.lastError != nil && update.available == true ? Theme.warn : Color.accentColor)
+                    .foregroundStyle(update.lastError != nil && update.available == true ? Theme.warn : Theme.action)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title(update)).font(.headline)
                     Text(detail(update))
@@ -120,7 +120,8 @@ struct UpdateSettingsView: View {
                 }
                 LabeledContent("Version installée") {
                     if let update = store.updateStatus, update.available != true, let checked = update.checkedAt {
-                        Text("\(update.current ?? "…") · à jour, vérifié \(Fmt.when(checked, now: store.now))")
+                        Text("\(update.current ?? "…") · à jour, dernière recherche \(Fmt.ago(checked, now: store.now))")
+                            .help("Nouvelle version cherchée \(Fmt.when(checked, now: store.now))")
                     } else {
                         Text(store.updateStatus?.current ?? "…")
                     }
@@ -129,18 +130,22 @@ struct UpdateSettingsView: View {
                     LabeledContent("Disponible", value: latest)
                 }
                 HStack {
-                    AsyncButton("Vérifier maintenant") { await store.checkUpdate() }
+                    AsyncButton("Chercher une mise à jour") { await store.checkUpdate() }
+                        .glassButton()
                     if store.updateStatus?.available == true {
                         AsyncButton("Mettre à jour") { await store.installUpdate() }
+                            .glassButton(.primary)
                             .disabled(store.updateStatus?.installing == true)
                     }
                     if let releases = store.updateStatus?.releases, !releases.isEmpty {
                         Button("Nouveautés") { store.whatsNew = releases }
+                            .glassButton()
                     }
                 }
             }
         }
-        .pageForm()
+        // fenêtre Réglages : le Form natif, centré
+        .formStyle(.grouped)
         .task { await store.refreshUpdate() }
     }
 }

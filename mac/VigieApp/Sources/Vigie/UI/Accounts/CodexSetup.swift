@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Codex en deux étapes : se connecter (navigateur), puis approuver le hook de Vigie dans Codex.
-/// Sans la deuxième étape, Codex ne laisse pas Vigie valider à ta place : pas d'auto-accept.
+/// Sans la deuxième étape, Codex ne laisse pas Vigie accepter à ta place : pas d'auto-accept.
 struct CodexSetupSteps: View {
     @Environment(VigieStore.self) private var store
     let account: Account?

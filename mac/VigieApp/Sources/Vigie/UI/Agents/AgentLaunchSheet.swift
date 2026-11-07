@@ -174,7 +174,7 @@ struct AgentLaunchSheet: View {
             let note = folderNote
             Text(note.text)
                 .font(.caption)
-                .foregroundStyle(note.warn ? AnyShapeStyle(Theme.warn) : AnyShapeStyle(.secondary))
+                .foregroundStyle(note.warn ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -355,7 +355,7 @@ struct AgentLaunchSheet: View {
             if let issue = legacyFilesIssue ?? filesIssue {
                 Text(issue)
                     .font(.caption)
-                    .foregroundStyle(Theme.warn)
+                    .foregroundStyle(Theme.warnText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -375,20 +375,15 @@ struct AgentLaunchSheet: View {
                 .monospacedDigit()
                 .fixedSize()
             Spacer(minLength: 8)
-            Button {
+            IconButton("Retirer \(item.name)", systemImage: "xmark", help: "Retirer ce fichier (il reste là où il est)") {
                 remove(item)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
             .disabled(launching)
-            .help("Retirer ce fichier (il reste là où il est)")
-            .accessibilityLabel("Retirer \(item.name)")
         }
         .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        .padding(.vertical, 1)
         .background(.quinary, in: .rect(cornerRadius: 8))
     }
 
@@ -488,11 +483,15 @@ struct AgentLaunchSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             notes
             if let launchIssue {
-                Label(launchIssue, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(Theme.alert)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Label {
+                    Text(launchIssue)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.alert)
+                }
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 12) {
                 surfaceChoice
@@ -545,10 +544,12 @@ struct AgentLaunchSheet: View {
         .help("Vigie prépare le dossier et y copie les fichiers joints, puis ouvre \(chosenSurface?.label ?? "la conversation") avec le message à envoyer")
     }
 
-    /// Le compte sur lequel partira la conversation, ce qui reste à remplir (les MCP ont leur bloc, « Outils »).
+    /// Le compte sur lequel partira la conversation (et s'il est presque plein), ce qui reste à remplir (les MCP ont
+    /// leur bloc, « Outils »).
     @ViewBuilder
     private var notes: some View {
         let account = store.agentsState?.account?.displayName
+        let accountID = store.agentsState?.account?.id
         if !autoSend {
             HStack(spacing: 8) {
                 Label("Pour que l'agent démarre tout seul, autorise Vigie dans Accessibilité (une fois) : il appuiera sur Entrée dans le champ de Claude, et fera confiance au dossier du projet dans VS Code.",
@@ -575,10 +576,15 @@ struct AgentLaunchSheet: View {
                 } else if let account {
                     Label("Partira sur le compte \(account) (celui des nouvelles conversations).", systemImage: Icon.account)
                         .foregroundStyle(.secondary)
+                    // compte presque plein : le dire avant de lancer (un conseil, rien ne change sans toi)
+                    AgentAccountWarning(accountID: accountID)
                 }
                 if let surfaceIssue {
-                    Label(surfaceIssue, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Theme.warn)
+                    Label {
+                        Text(surfaceIssue)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                    }
                 }
                 if !missing.isEmpty {
                     Label("À remplir : " + missing.map(\.label).formatted(.list(type: .and).locale(Fmt.locale)) + ".",
