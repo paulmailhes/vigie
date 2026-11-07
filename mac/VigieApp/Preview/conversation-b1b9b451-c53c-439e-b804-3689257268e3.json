@@ -17,7 +17,23 @@
     "needsYou": 3,
     "headline": "Étape L2.24 sur L2.29",
     "branch": "v1.4",
-    "startedAt": "2026-10-19T08:41:00.000Z"
+    "startedAt": "2026-10-19T08:41:00.000Z",
+    "checks": {
+      "verdict": "verified",
+      "label": "tests verts après la dernière modification",
+      "lastTestAt": "2026-10-19T23:09:00.000Z",
+      "lastCodeAt": "2026-10-19T23:02:00.000Z",
+      "uncommitted": 0,
+      "unpushed": 1,
+      "notes": [
+        "1 commit pas envoyé"
+      ]
+    },
+    "compactions": {
+      "count": 2,
+      "auto": 2,
+      "lastAt": "2026-10-19T19:12:00.000Z"
+    }
   },
   "contextTokens": 182000,
   "now": {
@@ -971,7 +987,11 @@
   "limits": [
     {
       "ts": "2026-10-19T21:41:00.000Z",
-      "text": "You've hit your session limit · resets 3:40am"
+      "text": "You've hit your session limit · resets 3:40am",
+      "title": "Limite de session atteinte",
+      "detail": "Remise à zéro à 03:40",
+      "scope": "session",
+      "resetsAt": "2026-10-20T01:40:00.000Z"
     }
   ],
   "current": {

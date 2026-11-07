@@ -425,5 +425,13 @@ struct TokenState: Decodable, Equatable, Sendable {
 
 struct LimitHit: Decodable, Equatable, Sendable {
     @FlexDate var ts: Date?
+    /// Message brut de Claude Code, en anglais : à ne pas montrer (title et detail à la place).
     var text: String?
+    /// « Limite de session atteinte » (facultatif).
+    var title: String?
+    /// « Remise à zéro à 03:40 » (facultatif).
+    var detail: String?
+    /// session ou week (facultatif).
+    var scope: String?
+    @FlexDate var resetsAt: Date?
 }

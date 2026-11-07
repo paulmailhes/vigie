@@ -833,3 +833,92 @@ test('titre d\'une ancienne conversation, lu une fois dans son transcript (outil
   assert.equal(ix.conversationInfo('f0f0f0f0-0000-4000-8000-00000000dead'), null);
   fs.rmSync(path.dirname(p), { recursive: true });
 });
+
+test('fini, mais pas vérifié : verdict par règles, fichiers pas commités, commits pas envoyés ; contexte résumé ; limite en français', async () => {
+  const sid = 'f0f0f0f0-0000-4000-8000-0000000000c1';
+  const DIR = path.join(TMP, 'home', 'Code', 'verif');
+  const F = mk(sid, { cwd: DIR });
+  const p = path.join(PROJECTS, '-Users-alex-Code-verif', `${sid}.jsonl`);
+  const code = path.join(DIR, 'src', 'paiement.ts');
+  const ok = (cmd, ts, content = 'ok') => F.call('Bash', { command: cmd }, { ts, content });
+  const edit = (ts) => F.call('Edit', { file_path: code, old_string: 'a', new_string: 'b' }, { ts, tur: { filePath: code } });
+  const compact = (ts, trigger, headFirst = false) => {
+    const line = { parentUuid: null, logicalParentUuid: uid(), isSidechain: false, userType: 'external', cwd: DIR, sessionId: sid, version: '2.1.301', gitBranch: 'main',
+      type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', isMeta: false, timestamp: ts, uuid: uid(), level: 'info',
+      compactMetadata: { trigger, preTokens: 160_000 } };
+    if (!headFirst) return line;
+    const { type, subtype, ...rest } = line;
+    return { type, subtype, ...rest }; // forme « {"type":"system"… » : la seule ligne système lue
+  };
+  const summary = (ts) => F.user('This session is being continued from a previous conversation that ran out of context.', ts, { isCompactSummary: true, isVisibleInTranscriptOnly: true });
+  write(p, [
+    F.human('Refais la page de paiement avec le nouveau tunnel', T(0)),
+    F.call('Write', { file_path: code, content: 'x' }, { ts: T(1), tur: { type: 'create', filePath: code } }),
+    ok('npx vitest run', T(2), 'Tests 3 passed'),
+    edit(T(3)),                                                                           // code modifié après les tests
+    F.call('Write', { file_path: path.join(DIR, 'notes.md'), content: 'x' }, { ts: T(4), tur: { filePath: path.join(DIR, 'notes.md') } }),
+    ok('git add -A && git commit -m "paiement"', T(5), '[main 1a2b3c4] paiement'),
+    ok('git push origin main', T(6)),
+    ok('git commit -am "suite"', T(7), '[main 5d6e7f8] suite'),                           // pas envoyé
+    edit(T(8)),                                                                           // pas commité
+    F.call('Bash', { command: 'git commit -m "rien"' }, { ts: T(8.5), content: 'nothing to commit', isError: true }), // raté : ne compte pas
+    compact(T(9), 'auto'), summary(T(9.1)),                                               // un seul résumé
+    F.say('Fait.', T(9.5)),
+  ]);
+  const ix = newIndexer();
+  await ix.refresh();
+  const conv = createConversations(ix);
+  const sum = () => conv.summaries().find((x) => x.id === sid);
+  let c = sum().checks;
+  assert.deepEqual([c.verdict, c.label, c.lastTestAt, c.lastCodeAt], ['changedAfterTests', 'modifié après les tests', T(2), T(8)]);
+  assert.deepEqual([c.uncommitted, c.unpushed], [1, 1]);
+  assert.deepEqual(c.notes, ['1 fichier modifié après le dernier commit', '1 commit pas envoyé']);
+  assert.deepEqual(sum().compactions, { count: 1, auto: 1, lastAt: T(9) }, 'la ligne système et son message de résumé : un seul résumé');
+
+  // tests en échec, puis verts après la dernière modification ; un build vert ne compte pas comme des tests
+  write(p, [F.call('Bash', { command: 'npx vitest run' }, { ts: T(10), content: 'Tests 1 failed | 2 passed', isError: true })], true);
+  await ix.refresh();
+  assert.equal(sum().checks.verdict, 'testsFailed');
+  write(p, [ok('npm run build', T(10.5), 'built in 2s'), ok('npx vitest run', T(11), 'Tests 3 passed'),
+    compact(T(25), 'manual', true), summary(T(45)),                                       // un /compact, puis un résumé sans sa ligne système
+    F.asst([{ type: 'text', text: 'You\'ve hit your session limit · resets 3:40am' }], T(12), { stop: 'stop_sequence', usage: U(0, 0, 0, 0), more: { isApiErrorMessage: true, error: 'rate_limit' } }),
+    F.human('Autre chose maintenant, merci', T(30)), F.say('Ok.', T(31))], true);
+  await ix.refresh();
+  assert.deepEqual(sum().compactions, { count: 3, auto: 1, lastAt: T(45) });
+  // la demande en cours n'a rien écrit ni testé : pas de verdict, mais le commit et le push manquent encore
+  c = sum().checks;
+  assert.deepEqual([c.verdict, c.uncommitted, c.unpushed], [null, 1, 1]);
+  // la fin de la première demande : ses faits commencent par le verdict
+  const r = conv.reports(new Date(BASE - 60_000).toISOString()).find((x) => x.conversationId === sid && x.kind === 'missionDone');
+  assert.equal(r.checks.verdict, 'verified');
+  assert.equal(r.detail, '2 commits · tests verts après la dernière modification · 1 fichier modifié après le dernier commit · 1 commit pas envoyé');
+
+  // la limite, en français dans le fil et le détail (le texte brut reste à part, pas à montrer)
+  const d = conv.detail(sid);
+  const lim = d.milestones.find((m) => m.kind === 'limit');
+  assert.equal(lim.title, 'Limite de session atteinte');
+  assert.match(lim.detail, /^Remise à zéro à 03:40$/);
+  assert.deepEqual([d.limits[0].title, d.limits[0].scope], ['Limite de session atteinte', 'session']);
+  assert.equal(d.summary.compactions.count, 3);
+
+  // même projet, autre conversation : du code écrit sans test alors que le projet en a → « aucun test lancé »
+  const sid2 = 'f0f0f0f0-0000-4000-8000-0000000000c2';
+  const G = mk(sid2, { cwd: DIR });
+  write(path.join(PROJECTS, '-Users-alex-Code-verif', `${sid2}.jsonl`), [G.human('Corrige le bouton payer', T(40)),
+    G.call('Edit', { file_path: code, old_string: 'b', new_string: 'c' }, { ts: T(41), tur: { filePath: code } }), G.say('Corrigé.', T(42))]);
+  // projet sans aucun test : rien à dire
+  const sid3 = 'f0f0f0f0-0000-4000-8000-0000000000c3';
+  const OTHER = path.join(TMP, 'home', 'Code', 'sans-tests');
+  const K = mk(sid3, { cwd: OTHER });
+  write(path.join(PROJECTS, '-Users-alex-Code-sans-tests', `${sid3}.jsonl`), [K.human('Change la couleur du titre', T(40)),
+    K.call('Edit', { file_path: path.join(OTHER, 'site.css'), old_string: 'a', new_string: 'b' }, { ts: T(41), tur: { filePath: path.join(OTHER, 'site.css') } }), K.say('Fait.', T(42))]);
+  const ix2 = newIndexer();
+  await ix2.refresh();
+  const all = createConversations(ix2).summaries();
+  assert.equal(all.find((x) => x.id === sid2).checks.verdict, 'noTests');
+  assert.equal(all.find((x) => x.id === sid2).checks.label, 'aucun test lancé');
+  assert.equal(all.find((x) => x.id === sid3).checks, null);
+  assert.equal(all.find((x) => x.id === sid3).compactions, null);
+  fs.rmSync(path.dirname(p), { recursive: true });
+  fs.rmSync(path.join(PROJECTS, '-Users-alex-Code-sans-tests'), { recursive: true });
+});

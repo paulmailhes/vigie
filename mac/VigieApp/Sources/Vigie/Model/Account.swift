@@ -4,6 +4,9 @@ struct UsageWindow: Decodable, Equatable, Sendable {
     var label: String?
     var pct: Double?
     @FlexDate var resetsAt: Date?
+    /// Semaine seulement : quand elle serait pleine au rythme des dernières 24 h (au quart d'heure). nil : elle tient
+    /// jusqu'à la remise à zéro, ou pas de quoi mesurer (moteur plus ancien compris).
+    @FlexDate var fullAt: Date?
 }
 
 struct AccountUsage: Decodable, Equatable, Sendable {

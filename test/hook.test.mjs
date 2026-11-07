@@ -334,7 +334,7 @@ test('questions en mode auto : option recommandée tout de suite, question enreg
   assert.equal(h.questionId, rec.id);
   const plan = run({ hook_event_name: 'PreToolUse', tool_name: 'ExitPlanMode', tool_input: { plan: 'x' } });
   assert.equal(plan.hookSpecificOutput.permissionDecision, 'allow');
-  assert.equal(jsonl(QUESTIONS_FILE)[1].items[0].chosen, 'Valider le plan');
+  assert.equal(jsonl(QUESTIONS_FILE)[1].items[0].chosen, 'Approuver le plan');
   assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
 });
 

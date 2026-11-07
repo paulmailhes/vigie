@@ -129,6 +129,8 @@ function seed() {
   w(VSC, '{\n  // réglages de test\n  "editor.fontSize": 13,\n}\n');
   wj(path.join(DATA, 'state.json'), { version: 1, autoAccept: true, questions: 'ask', questionWaitMin: 20, guard: { enabled: true, waitMin: 10 }, sessions: {} });
   wj(path.join(DATA, 'ui.json'), { lastSeen: iso(-90) });
+  // relevés du % de la semaine : 10 % il y a 30 h (donc encore il y a 24 h), 40 % maintenant → pleine dans 48 h
+  wj(path.join(DATA, 'usage', 'semaine.json'), { travail1: [{ t: iso(-30 * 60), pct: 10, resetsAt: iso(3 * 24 * 60) }] });
   const h = (min, event, extra) => ({ ts: iso(min), event, sessionId: SID_A, cwd: CWD, ...extra });
   const sudo = { rule: 'Commande administrateur (sudo)', ruleId: 'sudo' };
   // ancienne forme d'une question dans le journal : l'entrée brute de l'outil, en JSON coupé à 600 caractères
@@ -288,12 +290,14 @@ function check(v, s, at = '$', errs = []) {
   return errs;
 }
 const ISO = 'iso';
-const Window = { pct: 'number', resetsAt: opt(ISO) };
+const Window = { pct: 'number', resetsAt: opt(ISO), fullAt: opt(ISO) };
 const AccountSummary = {
   id: 'string', label: 'string', email: opt('string'), connected: 'bool', isDefault: 'bool',
   usage: { session: opt(Window), week: opt(Window), weekModel: opt({ label: 'string', pct: 'number', resetsAt: opt(ISO) }), observedAt: opt(ISO) },
 };
 const DECISION = oneOf('auto', 'you', 'blocked', 'waiting', 'denied');
+const Checks = { verdict: opt(oneOf('verified', 'changedAfterTests', 'testsFailed', 'noTests')), label: opt('string'), lastTestAt: opt(ISO), lastCodeAt: opt(ISO),
+  uncommitted: opt('int'), unpushed: opt('int'), notes: arr('string') };
 const ITEM_KIND = oneOf('command', 'commit', 'push', 'file', 'web', 'mcp', 'agent', 'question', 'other');
 // Identifiant de service (icône) : minuscules, jamais l'ancien « other » (remplacé par « autre »).
 const SERVICE = 'service';
@@ -311,12 +315,16 @@ const ConversationSummary = {
     failures: opt(arr({ title: 'string', line: opt('string'), kind: oneOf('tests', 'e2e', 'types', 'lint', 'build'), ts: ISO, by: opt('string') })) },
   accepted: { today: 'int', sinceSeen: 'int' },
   artifacts: { count: 'int', last: opt({ title: 'string', url: opt('string'), ts: opt(ISO) }) },
+  // la demande en cours (vérifiée, commitée, envoyée ?) et le contexte résumé
+  checks: opt(Checks),
+  compactions: opt({ count: 'int', auto: 'int', lastAt: opt(ISO) }),
 };
 const Overview = {
   now: ISO,
   settings: { autoAccept: 'bool', questionsAuto: 'bool', questionWaitMin: 'int', connectorsDefault: oneOf('on', 'off'),
     guard: { enabled: 'bool', waitMin: 'int', rules: arr({ id: 'string', label: 'string', disabled: 'bool' }) } },
   since: ISO,
+  sinceWindow: { from: ISO, to: ISO, capped: 'bool' },
   sinceSummary: { accepted: 'int', questionsAuto: 'int', blocked: 'int', reports: 'int', testsFailed: 'int', limits: 'int' },
   toReview: arr({
     id: 'string', kind: oneOf('question', 'blocked', 'waiting', 'limit'), conversationId: opt('string'), conversationTitle: opt('string'),
@@ -325,8 +333,11 @@ const Overview = {
     // garde-fou (kind = blocked)
     state: opt(oneOf('waiting', 'blocked', 'awaiting')), approvalId: opt('string'), approved: opt('bool'), pendingId: opt('string'), expiresAt: opt(ISO), rule: opt('string'), command: opt('string'),
     byAgent: opt('string'), cwd: opt('string'), needsPassword: opt('bool'),
+    // limite (kind = limit)
+    scope: opt(oneOf('session', 'week')), resetsAt: opt(ISO), accountId: opt('string'),
   }),
-  reports: arr({ kind: oneOf('artifact', 'missionDone', 'workflowDone', 'agentDone'), conversationId: 'string', conversationTitle: 'string', title: 'string', detail: opt('string'), url: opt('string'), ts: ISO }),
+  reports: arr({ kind: oneOf('artifact', 'missionDone', 'workflowDone', 'agentDone'), conversationId: 'string', conversationTitle: 'string', title: 'string', detail: opt('string'), url: opt('string'), ts: ISO,
+    checks: opt(Checks) }),
   accounts: arr(AccountSummary), conversations: arr(ConversationSummary),
   recentAccepted: arr({ ts: ISO, conversationId: opt('string'), conversationTitle: opt('string'), project: opt('string'), kind: ITEM_KIND,
     title: 'string', detail: opt('string'), decision: DECISION, agent: opt('string'), service: opt(SERVICE) }),
@@ -356,7 +367,7 @@ const Detail = {
   mcp: arr({ name: 'string', scope: oneOf('project', 'user', 'local', 'connector', 'plugin', 'unknown'), uses: 'int', enabled: opt('bool'),
     service: SERVICE, status: oneOf(...HEALTH_STATUSES) }),
   tokens: { today: Tokens, total: Tokens },
-  limits: arr({ ts: ISO, text: 'string' }),
+  limits: arr({ ts: ISO, text: 'string', title: 'string', detail: opt('string'), scope: oneOf('session', 'week'), resetsAt: opt(ISO) }),
 };
 const Health = arr({ accountId: 'string', status: oneOf(...HEALTH_STATUSES), checkedAt: opt(ISO) });
 const Server = { name: 'string', type: oneOf('stdio', 'http', 'sse', 'ws', 'sdk'), target: 'string', service: SERVICE, uses7d: 'int', health: Health };
@@ -419,7 +430,14 @@ test('vue d\'ensemble : contrat, conversation bloquée par un garde-fou, attente
   // limites : celle de A court encore, celle de B est déjà remise à zéro
   const limits = o.toReview.filter((x) => x.kind === 'limit');
   assert.deepEqual(limits.map((x) => x.conversationId), [SID_A]);
-  assert.match(limits[0].detail, /session limit/);
+  // en français, jamais le texte de Claude Code : le compte, l'heure de remise à zéro (heure du Mac)
+  const reset = new Date(NOW + 120 * 60_000);
+  const hhmm = `${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`;
+  const label = o.accounts.find((x) => x.id === 'travail1').label;
+  assert.deepEqual([limits[0].title, limits[0].detail, limits[0].scope, limits[0].accountId],
+    [`Limite de session atteinte · ${label}`, `Remise à zéro à ${hhmm}`, 'session', 'travail1']);
+  assert.ok(Math.abs(Date.parse(limits[0].resetsAt) - (NOW + 120 * 60_000)) < 60_000);
+  assert.ok(!r.text.includes('hit your session limit'), 'le message anglais ne sort plus dans la vue d\'ensemble');
   assert.equal(a.needsYou, o.toReview.filter((x) => x.conversationId === SID_A).length);
   assert.equal(a.needsYou, 5);
   assert.equal(b.needsYou, 0, 'limite remise à zéro : plus rien à regarder');
@@ -778,6 +796,41 @@ test('depuis une heure : fenêtre glissante, rien à remettre à zéro', async (
   assert.ok(Math.abs(Date.parse(o.since) - (Date.now() - 3600_000)) < 2 * 60_000, 'il y a une heure');
   assert.ok(o.toReview.some((x) => x.id.startsWith('g:')), 'ce qui attend maintenant reste');
   assert.equal((await post('/api/v2/seen', {})).status, 404, 'plus de « J\'ai tout vu »');
+  assert.equal(o.sinceWindow.from, o.since);
+  assert.equal(o.sinceWindow.capped, false);
+});
+
+test('pendant ton absence : « Depuis… » sur la fenêtre demandée, bornée à 24 h, et la fenêtre utilisée renvoyée', async () => {
+  const at = NOW - 90 * 60_000;
+  let r = await get(`/api/v2/overview?since=${encodeURIComponent(new Date(at).toISOString())}`);
+  assert.equal(r.status, 200);
+  conforms(r.body, Overview);
+  const o = r.body;
+  assert.equal(o.since, new Date(Math.floor(at / 60_000) * 60_000).toISOString(), 'à la minute');
+  assert.deepEqual([o.sinceWindow.from, o.sinceWindow.capped], [o.since, false]);
+  assert.ok(Math.abs(Date.parse(o.sinceWindow.to) - Date.now()) < 60_000);
+  // depuis 90 min : les trois acceptations d'il y a 65 à 80 min comptent (aucune depuis une heure)
+  assert.equal(o.sinceSummary.accepted, 3);
+  assert.equal(o.conversations.find((c) => c.id === SID_A).accepted.sinceSeen, 4, 'et la question choisie d\'il y a 50 min');
+  // plus de 24 h : bornée
+  r = await get(`/api/v2/overview?since=${encodeURIComponent(new Date(NOW - 3 * 24 * 3600_000).toISOString())}`);
+  assert.equal(r.body.sinceWindow.capped, true);
+  assert.ok(Math.abs(Date.parse(r.body.since) - (Date.now() - 24 * 3600_000)) < 2 * 60_000);
+  // illisible : refusée ; vide : comme sans
+  assert.equal((await get('/api/v2/overview?since=hier')).status, 400);
+  r = await get('/api/v2/overview?since=');
+  assert.ok(Math.abs(Date.parse(r.body.since) - (Date.now() - 3600_000)) < 2 * 60_000);
+});
+
+test('jusqu\'où tient chaque compte : week.fullAt d\'après les relevés de la semaine (vue d\'ensemble et comptes)', async () => {
+  const o = (await get('/api/v2/overview')).body;
+  const week = o.accounts.find((a) => a.id === 'travail1').usage.week;
+  assert.ok(Math.abs(Date.parse(week.fullAt) - (Date.now() + 48 * 3600_000)) < 20 * 60_000, '30 points en 24 h : les 60 restants en 48 h');
+  const a = (await get('/api/v2/accounts')).body.accounts.find((x) => x.id === 'travail1');
+  assert.equal(a.usage.week.fullAt, week.fullAt);
+  // le relevé du moment est gardé avec les autres
+  const log = rj(path.join(DATA, 'usage', 'semaine.json'));
+  assert.ok(log.travail1.some((p) => p.pct === 40));
 });
 
 test('MCP : projet, coupure pour un projet, Mac via la CLI (fichiers temporaires)', async () => {
@@ -991,6 +1044,10 @@ test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à aut
     ['blocked', 'awaiting', 'sudo ls /var', 'Commande administrateur (sudo)', SID_A, true, false]);
   assert.equal(v.find((x) => x.approvalId === B_ID).byAgent, 'agent-verif');
   assert.ok(o.conversations.find((c) => c.id === SID_A).needsYou >= 2);
+  // Journal : une action retenue dans Vigie attend ta décision (« waiting », comme dans l'Historique)
+  const heldTitles = new Set([va.command, 'git push --force origin main']);
+  const held = async () => (await get(`/api/v2/conversation/${SID_A}`)).body.accepted.filter((x) => heldTitles.has(x.title));
+  assert.deepEqual((await held()).map((x) => x.decision), ['waiting', 'waiting']);
   // erreurs
   assert.equal((await post('/api/v2/approvals', { approvalId: A_ID, decision: 'peut-être' })).status, 400);
   assert.equal((await post('/api/v2/approvals', {})).status, 400);
@@ -1012,12 +1069,18 @@ test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à aut
   r = await post('/api/v2/approvals', { approvalId: B_ID, decision: 'deny' });
   assert.equal(r.body.ok, true);
   assert.deepEqual((await items()).map((x) => x.approvalId), [], 'A autorisée (sortie), B refusée (sortie)');
+  // Journal : A autorisée par toi (pas encore relancée), B refusée par toi
+  assert.deepEqual(Object.fromEntries((await held()).map((x) => [x.title, x.decision])), { 'git push --force origin main': 'denied', [va.command]: 'you' });
   // la relance consomme l'autorisation (ligne du hook) : l'élément sort aussi
   fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'garde-fou-autorise-vigie', sessionId: SID_A,
     tool: 'Bash', action: 'sudo ls /var', approvalId: A_ID, hash: A_ID.repeat(4), pid: deadPid }) + '\n');
   await new Promise((res) => setTimeout(res, 4500)); // le serveur relit l'historique du hook toutes les 4 s
   assert.equal((await post('/api/v2/approvals', { approvalId: A_ID })).status, 404, 'déjà utilisée');
   assert.deepEqual(await items(), []);
+  // Journal : la relance a sa propre ligne (autorisée par toi) ; la ligne d'attente n'y est plus
+  const after = await held();
+  assert.deepEqual(after.filter((x) => x.title === va.command).map((x) => x.decision), ['you']);
+  assert.equal(after.filter((x) => x.decision === 'waiting').length, 0);
 });
 
 // ---------- connexions vues par le coffre (lib/vault.mjs : data/connexions.json) ----------

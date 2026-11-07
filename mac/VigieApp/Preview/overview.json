@@ -43,6 +43,11 @@
     }
   },
   "since": "2026-10-19T15:40:00.000Z",
+  "sinceWindow": {
+    "from": "2026-10-19T15:40:00.000Z",
+    "to": "2026-10-19T23:20:00.000Z",
+    "capped": false
+  },
   "sinceSummary": {
     "accepted": 1284,
     "questionsAuto": 2,
@@ -59,7 +64,7 @@
       "pendingId": "91234",
       "expiresAt": "2026-10-19T23:28:00.000Z",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "title": "Envoyer la facture F-2026-118 par e-mail",
       "rule": "Envoi d'e-mails",
       "detail": "Envoi d'e-mails · sinon refusée dans 8 min",
@@ -157,7 +162,7 @@
       "id": "b:5521",
       "kind": "blocked",
       "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
-      "conversationTitle": "Portail · front",
+      "conversationTitle": "Portail/front",
       "title": "git push --force sur main",
       "detail": "Garde-fou : Claude a continué le reste",
       "ts": "2026-10-19T21:10:00.000Z",
@@ -172,7 +177,7 @@
       "id": "w:c3d2e1f0",
       "kind": "waiting",
       "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
-      "conversationTitle": "Portail · front",
+      "conversationTitle": "Portail/front",
       "title": "T'attend depuis 23:12",
       "detail": "« Je peux pousser la branche paiement ? »",
       "ts": "2026-10-19T21:12:00.000Z"
@@ -183,8 +188,11 @@
       "conversationId": "b1b9b451-c53c-439e-b804-3689257268e3",
       "conversationTitle": "Atelier",
       "title": "Limite de session atteinte · Travail 1",
-      "detail": "Reprise à 03:40",
-      "ts": "2026-10-19T21:41:00.000Z"
+      "detail": "Remise à zéro à 03:40",
+      "ts": "2026-10-19T21:41:00.000Z",
+      "scope": "session",
+      "resetsAt": "2026-10-20T01:40:00.000Z",
+      "accountId": "travail1"
     },
     {
       "id": "b:4e0c8a7d:1760906400000",
@@ -206,7 +214,7 @@
     {
       "kind": "workflowDone",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "title": "Workflow « contrat-adresse » terminé",
       "detail": "11 agents, 48 tests réussis, contrat d'API corrigé",
       "ts": "2026-10-19T22:02:00.000Z"
@@ -217,7 +225,18 @@
       "conversationTitle": "Boutique",
       "title": "Lot 5 terminé",
       "detail": "La page /songeries est en brouillon. Restent à toi : le mot de passe, puis publier.",
-      "ts": "2026-10-19T19:48:00.000Z"
+      "ts": "2026-10-19T19:48:00.000Z",
+      "checks": {
+        "verdict": "changedAfterTests",
+        "label": "modifié après les tests",
+        "lastTestAt": "2026-10-19T19:31:00.000Z",
+        "lastCodeAt": "2026-10-19T19:44:00.000Z",
+        "uncommitted": 2,
+        "unpushed": null,
+        "notes": [
+          "2 fichiers modifiés après le dernier commit"
+        ]
+      }
     },
     {
       "kind": "artifact",
@@ -245,7 +264,8 @@
         },
         "week": {
           "pct": 39,
-          "resetsAt": "2026-10-26T19:00:00.000Z"
+          "resetsAt": "2026-10-26T19:00:00.000Z",
+          "fullAt": "2026-10-24T14:00:00.000Z"
         },
         "weekModel": {
           "label": "Fable",
@@ -284,7 +304,8 @@
         "session": null,
         "week": {
           "pct": 8,
-          "resetsAt": "2026-10-23T17:59:00.000Z"
+          "resetsAt": "2026-10-23T17:59:00.000Z",
+          "fullAt": null
         },
         "weekModel": null,
         "observedAt": "2026-10-19T20:05:00.000Z",
@@ -388,7 +409,23 @@
         ],
         "trend": "up"
       },
-      "alert": null
+      "alert": null,
+      "checks": {
+        "verdict": "verified",
+        "label": "tests verts après la dernière modification",
+        "lastTestAt": "2026-10-19T23:09:00.000Z",
+        "lastCodeAt": "2026-10-19T23:02:00.000Z",
+        "uncommitted": 0,
+        "unpushed": 1,
+        "notes": [
+          "1 commit pas envoyé"
+        ]
+      },
+      "compactions": {
+        "count": 2,
+        "auto": 2,
+        "lastAt": "2026-10-19T19:12:00.000Z"
+      }
     },
     {
       "id": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
@@ -673,7 +710,7 @@
       "detail": "npx tsc -b",
       "decision": "auto",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "agent": null,
       "service": null
     },
@@ -684,7 +721,7 @@
       "detail": "Relire le contrat d'adresse",
       "decision": "auto",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "agent": null,
       "service": null
     },
@@ -728,7 +765,7 @@
       "detail": "supabase · execute_sql",
       "decision": "auto",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "agent": null,
       "service": "supabase"
     },
@@ -739,7 +776,7 @@
       "detail": "git push origin lot-10",
       "decision": "auto",
       "conversationId": "9a7f3c21-5b8e-4d0a-a6f2-3e1c8b7d4f60",
-      "conversationTitle": "Portail · back",
+      "conversationTitle": "Portail/back",
       "agent": null,
       "service": null
     },

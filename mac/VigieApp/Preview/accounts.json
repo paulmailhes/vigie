@@ -15,7 +15,8 @@
         },
         "week": {
           "pct": 39,
-          "resetsAt": "2026-10-26T19:00:00.000Z"
+          "resetsAt": "2026-10-26T19:00:00.000Z",
+          "fullAt": "2026-10-24T14:00:00.000Z"
         },
         "weekModel": {
           "label": "Fable",
@@ -60,7 +61,8 @@
         "session": null,
         "week": {
           "pct": 8,
-          "resetsAt": "2026-10-23T17:59:00.000Z"
+          "resetsAt": "2026-10-23T17:59:00.000Z",
+          "fullAt": null
         },
         "weekModel": null,
         "observedAt": "2026-10-19T20:05:00.000Z",

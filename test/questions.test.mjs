@@ -133,10 +133,10 @@ test('relecture : erreurs claires, rien d\'enregistré', () => {
 test('plan validé à la place de l\'utilisateur : relisible et corrigeable', () => {
   const w = world();
   const p = w.add(RUNNING, { plan: '# Plan\n1. Refaire la charte' }, {}, 'ExitPlanMode');
-  assert.equal(p.items[0].chosen, 'Valider le plan');
+  assert.equal(p.items[0].chosen, 'Approuver le plan');
   assert.match(p.items[0].options[0].description, /Refaire la charte/);
-  const r = w.q.review(p.id, { action: 'change', answers: { 'Valider le plan ?': 'Revoir le plan' } });
-  assert.match(r.correction, /je préfère finalement « Revoir le plan » au lieu de « Valider le plan »/);
+  const r = w.q.review(p.id, { action: 'change', answers: { 'Approuver le plan ?': 'Revoir le plan' } });
+  assert.match(r.correction, /je préfère finalement « Revoir le plan » au lieu de « Approuver le plan »/);
 });
 
 test('de bout en bout : le hook enregistre, la relecture le retrouve', () => {

@@ -16,7 +16,7 @@ import { createMcp, usageFromSessions, toolKey, connectorName, service as mcpSer
 import { createQuestions, reviewEntry } from './lib/questions.mjs';
 import { pendingGuards, recentBlocked, decide, MAX_COMMAND, writeAnswer, readDecisions } from './lib/decisions.mjs';
 import { ROOT, DATA, AGENTS, AGENT_AUTO_MS, HISTORY_FILE, readState, writeState, effective, questionsAuto, questionsMode, DEFAULT_GUARDS, QUESTION_MODES } from './lib/state.mjs';
-import { awaitingApprovals, approve } from './lib/approvals.mjs';
+import { awaitingApprovals, approve, APPROVALS_FILE } from './lib/approvals.mjs';
 import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
@@ -24,7 +24,8 @@ import { createAgents, folderConversations } from './lib/agents.mjs';
 import { createRuns } from './lib/agent-runs.mjs';
 import { createProcesses } from './lib/processes.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
-import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio } from './lib/usage.mjs';
+import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio, weekFullAt } from './lib/usage.mjs';
+import { limitResetAt, limitView } from './lib/limits.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
 const HOST = '127.0.0.1';
@@ -549,14 +550,18 @@ function mcpCheckPaths() {
 }
 
 // ---------- vues v2 ----------
-function context() {
+// since (ms, facultatif) : début voulu de « Depuis… » (« Pendant ton absence », GET /api/v2/overview?since=).
+function context({ since = null } = {}) {
   const state = readState();
   const now = Date.now();
   const u = ui();
   // « Depuis une heure » : fenêtre glissante (à la minute, pour les caches), plus de « J'ai tout vu » à cliquer.
   // Ce qui a mal tourné (refus, échecs, limites) reste 24 h, ou jusqu'à ce que l'utilisateur le retire.
-  const lastSeen = new Date(Math.floor((now - HOUR) / 60_000) * 60_000).toISOString();
-  return { state, now, lastSeen, reviewSince: new Date(now - DAY).toISOString(), dismissed: dismissedOf(u), wrapperActive: accounts.wrapperActive(),
+  // Avec since : la fenêtre demandée, bornée aux dernières 24 h (et jamais dans le futur).
+  const start = since === null ? now - HOUR : Math.min(now, Math.max(since, now - DAY));
+  const lastSeen = new Date(Math.floor(start / 60_000) * 60_000).toISOString();
+  return { state, now, lastSeen, sinceCapped: since !== null && since < now - DAY,
+    reviewSince: new Date(now - DAY).toISOString(), dismissed: dismissedOf(u), wrapperActive: accounts.wrapperActive(),
     model: accounts.load(), accSums: accounts.summaries(), waits: pendingWaits(state, now), week: new Map() };
 }
 
@@ -604,38 +609,6 @@ const questionText = (action) => firstLine(questionAction(action)).replace(/\s*\
 const what = (h) => (h.description ? short(h.description, 100) : short(mask(firstLine(h.action ?? h.command)), 100)) || 'Action';
 const minutesLeft = (deadline, now) => Math.ceil((deadline - now) / 60_000);
 const agentName = (sid, agentId) => (agentId ? (indexer.sessions.get(sid)?.agentLabel(agentId) || null) : null);
-
-// Remise à zéro d'une limite atteinte, lue dans le texte de Claude Code (heure locale du Mac) :
-// « resets 11:40pm », « resets Oct 26, 7pm », « resets Oct 22 at 9am », « will reset at 3pm (Europe/Paris) ».
-// Sans heure lisible : 5 h pour une limite de session, sinon 7 jours. Renvoie une date en ms, ou null.
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const RESET_RE = /\breset(?:s)?\s+(?:at\s+|on\s+)?(?:([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?m\b\.?)?/i;
-function limitResetAt(text, ts) {
-  const t0 = Date.parse(ts || '');
-  if (!Number.isFinite(t0)) return null;
-  const m = RESET_RE.exec(String(text || ''));
-  if (m && (m[4] || m[5])) {
-    let h = Number(m[3]);
-    const min = Number(m[4] || 0);
-    if (m[5]) h = (h % 12) + (m[5].toLowerCase() === 'p' ? 12 : 0);
-    if (h <= 23 && min <= 59) {
-      const d = new Date(t0);
-      if (m[1] && m[2]) {
-        const mon = MONTHS.indexOf(m[1].slice(0, 3).toLowerCase());
-        if (mon >= 0) {
-          const r = new Date(d.getFullYear(), mon, Number(m[2]), h, min);
-          if (r.getTime() < t0 - DAY) r.setFullYear(r.getFullYear() + 1);
-          return r.getTime();
-        }
-      } else {
-        const r = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, min);
-        if (r.getTime() <= t0) r.setDate(r.getDate() + 1);
-        return r.getTime();
-      }
-    }
-  }
-  return t0 + (/session|5-hour|5h\b/i.test(String(text || '')) ? 5 * HOUR : WEEK);
-}
 
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
 const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office (réglage : toujours refuser)', 'sous-agent': 'Refusée : un agent ne peut pas demander une action sensible', echec: 'Autorisée, mais elle a échoué' };
@@ -702,7 +675,7 @@ function reviewItems(ctx, sums) {
       if (w.question) {
         const answerable = Array.isArray(w.questions) && w.questions.length && w.pid;
         live.push({ id: `w:${sid}:${w.ts}`, kind: 'waiting', conversationId: sid, conversationTitle: title(sid),
-          title: short(w.tool === 'ExitPlanMode' ? 'Plan à valider' : questionText(w.action) || 'Question de Claude', 120),
+          title: short(w.tool === 'ExitPlanMode' ? 'Plan à approuver' : questionText(w.action) || 'Question de Claude', 120),
           detail: w.ask ? (answerable ? `Réponds ici ou dans ${where(sid)}.` : `Réponds dans ${where(sid)}.`)
             : `Réponds ${answerable ? 'ici ou ' : ''}dans ${where(sid)}, sinon Vigie choisit l'option recommandée ${when}.`,
           ...(answerable ? { pendingId: String(w.pid), questions: w.questions } : {}), ts: w.ts });
@@ -721,9 +694,7 @@ function reviewItems(ctx, sums) {
       title: `Attend ta réponse dans ${where(s.id)}`, detail: s.headline || null, ts: s.lastActivity || new Date(ctx.now).toISOString() });
   }
   // Codex : actions sensibles retenues dans Vigie (lib/approvals.mjs), à autoriser ici (une fois, pour l'appel exact).
-  let awaiting = [];
-  try { awaiting = awaitingApprovals({ history, now: ctx.now }); } catch (e) { console.error('[vigie] autorisations :', clean(e)); }
-  for (const a of awaiting) {
+  for (const a of awaitingOf(ctx)) {
     if (a.sessionId && conv.isThrowaway(a.sessionId) && !indexer.live.has(a.sessionId)) continue;
     if (a.approved) continue; // autorisée : plus rien à décider
     live.push({ id: `v:${a.approvalId}`, kind: 'blocked', state: 'awaiting', approvalId: a.approvalId,
@@ -764,11 +735,22 @@ function reviewItems(ctx, sums) {
   }
   // Limite atteinte ces dernières 24 h, tant qu'elle n'est pas remise à zéro.
   // (conversations ouvertes seulement : une conversation fermée n'attend rien, la carte du compte dit déjà la limite)
+  // Texte en français (lib/limits.mjs), jamais le message anglais de Claude Code : « Limite de session atteinte ·
+  // Travail 1 », « Remise à zéro à 03:40 ». Le compte : celui de l'organisation de la conversation, sinon le sien.
+  let byOrg = null;
+  const accountOf = (s) => {
+    byOrg ??= accountByOrg(ctx.model);
+    const id = (s.org && byOrg.get(s.org)) || chosenAccount(ctx.model, s.id);
+    return { id, label: ctx.accSums.find((a) => a.id === id)?.label || ctx.model.accounts.find((a) => a.id === id)?.label || null };
+  };
   for (const s of indexer.sessions.values()) {
     if (conv.isThrowaway(s.id) || !indexer.live.has(s.id)) continue;
     const l = s.limits.reduce((m, x) => (x.ts >= ctx.reviewSince && (!m || x.ts > m.ts) ? x : m), null);
     if (!l || !(limitResetAt(l.text, l.ts) > ctx.now)) continue;
-    past.push({ id: `l:${s.id}:${l.ts}`, kind: 'limit', conversationId: s.id, conversationTitle: title(s.id), title: 'Limite atteinte', detail: short(l.text, 200), ts: l.ts });
+    const acc = accountOf(s);
+    const v = limitView(l.text, l.ts, acc.label);
+    past.push({ id: `l:${s.id}:${l.ts}`, kind: 'limit', conversationId: s.id, conversationTitle: title(s.id), title: v.title, detail: v.detail,
+      scope: v.scope, resetsAt: v.resetsAt, accountId: acc.id, ts: l.ts });
   }
   const shown = (it) => { const at = ctx.dismissed[it.id]; return !at || String(it.ts || '') > at; };
   return [...live.filter(shown).sort(byTsDesc), ...past.filter(shown).sort(byTsDesc)].slice(0, MAX_REVIEW);
@@ -864,6 +846,9 @@ function decorate(sum, ctx, needs, accepted) {
     tests,
     accepted: accepted.get(sum.id) || { today: 0, sinceSeen: 0 },
     artifacts: sum.artifacts ?? null,
+    // la demande en cours : vérifiée, commitée, envoyée ? ; contexte résumé par Claude Code (lib/conversations.mjs)
+    checks: sum.checks ?? null,
+    compactions: sum.compactions ?? null,
   };
   if (typeof sum.waitingFor === 'string') out.waitingFor = sum.waitingFor;
   if (stopped) {
@@ -884,8 +869,33 @@ function backgroundSummary() {
     autoStopped: v.autoStopped.slice(0, 5) };
 }
 
-function overviewV2() {
-  const ctx = context();
+// « Jusqu'où tient chaque compte » : usage.week.fullAt (lib/usage.mjs, weekFullAt), d'après les vrais relevés du % de
+// la semaine (data/usage/semaine.json), notés ici pour chaque compte (pas seulement ceux qui ont une conversation).
+function withForecast(sums, now) {
+  return sums.map((a) => {
+    const w = a?.usage?.week;
+    if (!w || typeof w.pct !== 'number' || !Number.isFinite(w.pct) || !w.resetsAt) return a;
+    let at = null;
+    try {
+      noteWeek(a.id, w, a.usage.observedAt, now);
+      at = weekFullAt(weekLog?.[a.id], w, now);
+    } catch (e) { console.error('[vigie] prévision de la semaine :', clean(e)); }
+    return { ...a, usage: { ...a.usage, week: { ...w, fullAt: at === null ? null : new Date(at).toISOString() } } };
+  });
+}
+
+// GET /api/v2/overview?since=<ISO> : « Depuis… » calculé sur cette fenêtre (bornée à 24 h) au lieu de la dernière heure.
+function overviewRoute(url) {
+  const raw = url.searchParams.get('since');
+  if (raw === null || raw === '') return [200, overviewV2()];
+  // un « + » de fuseau non encodé arrive en espace
+  const since = raw.length <= 40 ? Date.parse(raw.replace(/ /g, '+')) : NaN;
+  if (!Number.isFinite(since)) return bad('Début de la période illisible : une date ISO est attendue.');
+  return [200, overviewV2({ since })];
+}
+
+function overviewV2(opts = {}) {
+  const ctx = context(opts);
   const sums = conv.summaries();
   const codexSums = safeCodex(() => codex.summaries(), []);
   const review = reviewItems(ctx, [...sums, ...codexSums]);
@@ -899,6 +909,8 @@ function overviewV2() {
     now: new Date(ctx.now).toISOString(),
     settings: settingsView(ctx.state),
     since: ctx.lastSeen,
+    // la fenêtre de « Depuis… » réellement utilisée : de since à maintenant ; capped : since demandé il y a plus de 24 h
+    sinceWindow: { from: ctx.lastSeen, to: new Date(ctx.now).toISOString(), capped: ctx.sinceCapped },
     sinceSummary: {
       accepted: ev['auto-accepte'] || 0,
       questionsAuto: ev['question-auto'] || 0,
@@ -914,7 +926,7 @@ function overviewV2() {
     reports: [...conv.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo),
       ...safeCodex(() => codex.reports(ctx.lastSeen < dayAgo ? ctx.lastSeen : dayAgo), [])]
       .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || ''))).slice(0, MAX_REPORTS),
-    accounts: withCodexAccount(ctx.accSums),
+    accounts: withCodexAccount(withForecast(ctx.accSums, ctx.now)),
     conversations: [...sums.map((s) => decorate(s, ctx, needs, accepted)), ...codexSums.map((s) => decorateCodex(s, ctx, needs, accepted))],
     recentAccepted: recentAccepted(ctx, sums),
     background: backgroundSummary(),
@@ -924,6 +936,8 @@ function overviewV2() {
 }
 
 // Décisions de Vigie (history.jsonl) -> accepted[] du contrat.
+// Une action retenue dans Vigie (« garde-fou-en-attente-vigie ») attend ta décision : « waiting », comme dans
+// l'Historique (HISTORY_STATUS), tant qu'elle est à autoriser (heldDecision).
 const DECISIONS = {
   'auto-accepte': 'auto', 'question-auto': 'auto',
   'garde-fou-bloque': 'blocked',
@@ -932,9 +946,29 @@ const DECISIONS = {
   'refus-classifieur-pour-toi': 'you', 'demande-pour-toi': 'you', 'question-pour-toi': 'you', 'garde-fou-pour-toi': 'you',
   'garde-fou-rendu': 'you', 'question-rendue': 'you', 'reponse-perdue': 'you',
   'garde-fou-autorise-app': 'you', 'garde-fou-refuse-app': 'denied',
-  'garde-fou-en-attente-vigie': 'blocked', 'garde-fou-autorise-vigie': 'you',
+  'garde-fou-en-attente-vigie': 'waiting', 'garde-fou-autorise-vigie': 'you',
+  'garde-fou-refuse-vigie': 'denied', 'garde-fou-delai-vigie': 'blocked',
   'refuse-mode-auto': 'denied',
 };
+// Suites d'une action retenue dans Vigie (même approvalId) : elles ont leur propre ligne.
+const HELD_FOLLOW = new Set(['garde-fou-autorise-vigie', 'garde-fou-refuse-vigie', 'garde-fou-delai-vigie', 'garde-fou-vigie-clos']);
+// Actions retenues dans Vigie encore à autoriser (lib/approvals.mjs), lues une fois par requête.
+function awaitingOf(ctx) {
+  if (!ctx.awaiting) {
+    try { ctx.awaiting = awaitingApprovals({ history, now: ctx.now }); } catch (e) { console.error('[vigie] autorisations :', clean(e)); ctx.awaiting = []; }
+  }
+  return ctx.awaiting;
+}
+// Décision du Journal pour une action retenue dans Vigie sans suite dans le journal : « waiting » tant qu'elle est à
+// autoriser ; sinon ce que tu as décidé dans l'app (refusée : « denied », autorisée mais pas encore relancée : « you »),
+// ou « blocked » : refusée sur le moment, jamais autorisée (refusée d'office).
+function heldDecision(h, ctx) {
+  ctx.heldOpen ??= new Set(awaitingOf(ctx).filter((a) => !a.approved).map((a) => a.approvalId));
+  if (ctx.heldOpen.has(h.approvalId)) return 'waiting';
+  ctx.heldDecided ??= (() => { try { return readDecisions(APPROVALS_FILE); } catch { return {}; } })();
+  const d = ctx.heldDecided[h.approvalId]?.decision;
+  return d === 'deny' ? 'denied' : d === 'allow' ? 'you' : 'blocked';
+}
 const SHELL = new Set(['Bash', 'PowerShell', 'Monitor']);
 const VERBS = { Write: 'Écrit', Edit: 'Modifie', MultiEdit: 'Modifie', NotebookEdit: 'Modifie', Read: 'Lit' };
 const AUTO_SUFFIX = / — choisi automatiquement par Vigie \(utilisateur absent\)$/;
@@ -942,7 +976,7 @@ const AUTO_SUFFIX = / — choisi automatiquement par Vigie \(utilisateur absent\
 function acceptedTitle(h) {
   const tool = String(h.tool || '');
   if (tool === 'AskUserQuestion') return short(questionText(h.action) || 'Question de Claude', 120);
-  if (tool === 'ExitPlanMode') return 'Valider le plan';
+  if (tool === 'ExitPlanMode') return 'Approuver le plan';
   if (h.description) return short(h.description, 120);
   if (VERBS[tool]) return `${VERBS[tool]} ${path.basename(String(h.action || ''))}`;
   if (tool.startsWith('mcp__')) {
@@ -978,13 +1012,19 @@ function acceptedService(h) {
 const pendingTs = (ctx) => new Set([...ctx.waits.values()].flat().map((w) => `${w.sessionId}\u0000${w.ts}`));
 function acceptedFor(sid, ctx) {
   const pending = pendingTs(ctx);
+  const followed = new Set(); // approvalId dont la suite est déjà passée (plus récente : lue avant)
   const out = [];
   for (let i = history.length - 1; i >= 0 && out.length < MAX_ACCEPTED; i--) {
     const h = history[i];
     if (h.sessionId !== sid) continue;
-    const decision = DECISIONS[h.event];
+    if (HELD_FOLLOW.has(h.event) && h.approvalId) followed.add(h.approvalId);
+    let decision = DECISIONS[h.event];
     if (!decision) continue;
     if (WAIT_EVENTS.has(h.event) && !pending.has(`${sid}\u0000${h.ts}`)) continue;
+    if (h.event === 'garde-fou-en-attente-vigie') {
+      if (followed.has(h.approvalId)) continue;
+      decision = heldDecision(h, ctx);
+    }
     out.push({ ts: h.ts, kind: acceptedKind(h), title: acceptedTitle(h), detail: acceptedDetail(h), decision,
       agent: agentName(sid, h.agentId), service: acceptedService(h) });
   }
@@ -995,13 +1035,19 @@ function acceptedFor(sid, ctx) {
 function recentAccepted(ctx, sums) {
   const byId = new Map(sums.map((s) => [s.id, s]));
   const pending = pendingTs(ctx);
+  const followed = new Set();
   const out = [];
   for (let i = history.length - 1; i >= 0 && out.length < MAX_RECENT_ACCEPTED; i--) {
     const h = history[i];
-    const decision = DECISIONS[h.event];
+    if (HELD_FOLLOW.has(h.event) && h.approvalId) followed.add(h.approvalId);
+    let decision = DECISIONS[h.event];
     if (!decision || !h.ts) continue;
     const sid = typeof h.sessionId === 'string' ? h.sessionId : null;
     if (WAIT_EVENTS.has(h.event) && !pending.has(`${sid}\u0000${h.ts}`)) continue;
+    if (h.event === 'garde-fou-en-attente-vigie') {
+      if (followed.has(h.approvalId)) continue;
+      decision = heldDecision(h, ctx);
+    }
     if (sid && conv.isThrowaway(sid)) continue;
     const s = sid ? byId.get(sid) : null;
     const s2 = sid && !s ? indexer.sessions.get(sid) : null;
@@ -1836,14 +1882,14 @@ async function postProcessesStop(b) {
 const S = '([^/]{1,120})';
 const ROUTES = [
   // v2 : l'app Mac
-  ['GET', /^\/api\/v2\/overview$/, () => [200, overviewV2()]],
+  ['GET', /^\/api\/v2\/overview$/, (_, __, url) => overviewRoute(url)],
   ['GET', new RegExp(`^/api/v2/conversation/${S}$`), ([id]) => {
     const d = UUID.test(id) ? conversationV2(id) : null;
     return d ? [200, d] : bad('Conversation introuvable : plus de 48 h, ou inconnue.', 404);
   }],
   ['GET', /^\/api\/v2\/mcp$/, () => [200, { ...mcp.inventory({ connectorsDefault: readState().connectorsDefault }), gateway: gateway.status() }]],
   ['POST', /^\/api\/v2\/gateway$/, (_, b) => postGateway(b)],
-  ['GET', /^\/api\/v2\/accounts$/, () => { const v = accounts.view(); return [200, { ...v, accounts: withCodexAccount(v.accounts || []) }]; }],
+  ['GET', /^\/api\/v2\/accounts$/, () => { const v = accounts.view(); return [200, { ...v, accounts: withCodexAccount(withForecast(v.accounts || [], Date.now())) }]; }],
   ['GET', /^\/api\/v2\/health$/, () => [200, health()]],
   ['GET', /^\/api\/v2\/usage\/series$/, (_, __, url) => usageSeries(url)],
   ['POST', /^\/api\/v2\/settings$/, (_, b) => postSettings(b)],

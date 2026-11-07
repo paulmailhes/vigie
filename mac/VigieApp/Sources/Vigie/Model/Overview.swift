@@ -17,6 +17,15 @@ struct Overview: Decodable, Equatable, Sendable {
     @Tolerant var update: UpdateStatus?
     /// Ce que les conversations ont laissé tourner (dernier relevé).
     @Tolerant var background: BackgroundSummary?
+    /// La fenêtre de « Depuis… » réellement utilisée (GET /overview?since=, bornée à 24 h).
+    @Tolerant var sinceWindow: SinceWindow?
+}
+
+/// Fenêtre de « Depuis… » : de `from` à `to` ; `capped` : le début demandé datait de plus de 24 h.
+struct SinceWindow: Decodable, Equatable, Sendable {
+    @FlexDate var from: Date?
+    @FlexDate var to: Date?
+    var capped: Bool?
 }
 
 struct UpdateStatus: Decodable, Equatable, Sendable {
@@ -130,6 +139,10 @@ struct ReviewItem: Decodable, Equatable, Sendable, Identifiable {
     var reason: String?
     /// Codex (state = awaiting) : identifiant pour POST /api/v2/approvals.
     @FlexString var approvalId: String?
+    /// Limite (kind = limit) : session ou week, sa remise à zéro et le compte touché.
+    var scope: String?
+    @FlexDate var resetsAt: Date?
+    var accountId: String?
 
     var reviewKind: ReviewKind { ReviewKind(raw: kind) }
 
@@ -207,6 +220,8 @@ struct Report: Decodable, Equatable, Sendable {
     var durationMs: Double?
     var url: String?
     @FlexDate var ts: Date?
+    /// Fin de demande : vérifiée, commitée, envoyée ? (facultatif).
+    @Tolerant var checks: RequestChecks?
 
     var reportKind: ReportKind { ReportKind(raw: kind) }
 

@@ -19,7 +19,7 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
   "isDefault": true,                // compte des nouvelles conversations (et de celles jamais associées)
   "usage": {
     "session":   { "pct": 100, "resetsAt": "2026-10-20T00:40:00.000Z" },   // ? fenêtre de 5 h
-    "week":      { "pct": 39,  "resetsAt": "2026-10-26T19:00:00.000Z" },   // ?
+    "week":      { "pct": 39,  "resetsAt": "2026-10-26T19:00:00.000Z", "fullAt": null },   // ? fullAt : voir « Jusqu'où tient chaque compte »
     "weekModel": { "label": "Fable", "pct": 55, "resetsAt": "2026-10-26T18:59:00.000Z" }, // ?
     "observedAt": "2026-10-20T00:12:00.000Z",  // ? âge du relevé (affiché « il y a 12 min »)
     "source": "session"             // session (relevé écrit par une vraie session) | ping (petite requête de relevé) ; null si aucun
@@ -63,7 +63,8 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
     "guard": { "enabled": true, "waitMin": 10,
                "rules": [ { "id": "sudo", "label": "Commande administrateur (sudo)", "disabled": false } ] }
   },
-  "since": "2026-10-19T21:40:00.000Z",          // dernier passage de l'utilisateur (POST /api/v2/seen)
+  "since": "2026-10-19T21:40:00.000Z",          // début de « Depuis… » : il y a une heure, ou ?since= (voir « Pendant ton absence »)
+  "sinceWindow": { "from": "2026-10-19T21:40:00.000Z", "to": "…", "capped": false },  // la fenêtre réellement utilisée
   "sinceSummary": { "accepted": 1284, "questionsAuto": 2, "blocked": 1, "reports": 2, "testsFailed": 3, "limits": 0 },
   "toReview": [
     { "id": "q:7f3a…", "kind": "question",      // question | blocked | waiting | limit
@@ -86,7 +87,8 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
     { "kind": "missionDone", "id": "fin:<conv>:<demande>",  // une seule fin par demande, relances comprises
       "conversationId": "…", "conversationTitle": "Atelier",
       "title": "Les 29 étapes du plan 1.4 sont faites.",  // ce que Claude a fait (« En bref : », sinon 1re phrase utile)
-      "detail": "8 commits · tests verts · 11 agents, 1 en échec",  // ? 4 faits au plus
+      "detail": "8 commits · tests verts après la dernière modification · 11 agents, 1 en échec",  // ? 4 faits au plus
+      "checks": { "verdict": "verified", "label": "tests verts après la dernière modification", "uncommitted": 0, "unpushed": null, "notes": [] },  // ? voir « Fini, mais pas vérifié »
       "prompt": "Applique la charte 1.4 à tous les écrans…", // la vraie demande, sans « continue » ni « ok donc »
       "question": "Je publie maintenant ?",       // ? le compte rendu finit par cette question
       "toYou": "relire la planche",               // ? ce que Claude laisse à l'utilisateur (« À toi : … »)
@@ -149,7 +151,8 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
                "title": "Lancer vitest et tsc", "command": "…", "by": "refuter:L2.22" } ],
   "mcp": [ { "name": "figma-perso", "scope": "user", "uses": 350, "enabled": true } ],   // scope : project | user | local | connector | plugin
   "tokens": { "today": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }, "total": { /* idem */ } },
-  "limits": [ { "ts": "…", "text": "You've hit your session limit · resets 11:40pm" } ]
+  "limits": [ { "ts": "…", "text": "You've hit your session limit · resets 11:40pm",   // text : brut, en anglais, à ne pas montrer
+                "title": "Limite de session atteinte", "detail": "Remise à zéro à 23:40", "scope": "session", "resetsAt": "…" } ]
 }
 ```
 
@@ -192,7 +195,6 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
 | `POST /api/v2/settings` | `{ autoAccept?, questionsAuto?, questionWaitMin?, connectorsDefault?, guard?: { enabled?, waitMin?, rules?: [{id, disabled}] } }` | réglages généraux |
 | `POST /api/v2/conversation/:id/settings` | `{ autoAccept?: bool\|null, accountId?: string, connectors?: "on"\|"off"\|null }` | réglages de la conversation ; changer `accountId` renvoie `{ ok, switch: { state: "done"\|"pending", message } }` |
 | `POST /api/v2/questions/:id/review` | `{ action: "ok" }` ou `{ action: "change", answers: { "<question>": "<label>" } }` | `change` renvoie `{ ok, correction: "texte à envoyer", delivered: bool, openUrl? }` |
-| `POST /api/v2/seen` | `{}` | « j'ai tout vu » |
 | `POST /api/v2/mcp/user` | `{ action: "add"\|"update"\|"remove", name, config?, accounts?: [ids] }` | via `claude mcp … --scope user` par compte |
 | `POST /api/v2/mcp/project` | `{ action: "add"\|"update"\|"remove", path, name, config? }` | édite `<path>/.mcp.json` (sauvegarde) |
 | `POST /api/v2/mcp/disable` | `{ path, name, disabled: bool }` | coupe ou rallume un MCP pour un projet |
@@ -234,18 +236,18 @@ Ce qui attend l'utilisateur maintenant d'abord (plus récent d'abord), puis ce q
 | `id` | `kind` | Quand |
 |---|---|---|
 | `g:<conv>:<ts>` | `blocked` | garde-fou en attente dans VS Code (`detail` : « … sinon refusée dans N min ») |
-| `w:<conv>:<ts>` | `waiting` | question en attente (« … Claude choisit l'option recommandée dans N min ») |
+| `w:<conv>:<ts>` | `waiting` | question en attente (« … Claude choisit l'option recommandée dans N min ») ; un plan proposé (`ExitPlanMode`) a pour titre « Plan à approuver » (« Plan à valider » avant le 2026-11-07) |
 | `c:<conv>` | `waiting` | conversation que Claude Code dit en attente de l'utilisateur |
 | `s:<conv>:<ts>` | `waiting` | bascule de compte faite : envoyer un message pour relancer la conversation |
 | `q:<id>` | `question` | question répondue à la place de l'utilisateur, pas encore relue |
 | `b:<conv>:<ts>` | `blocked` | action refusée par un garde-fou depuis `since` : à faire soi-même |
-| `l:<conv>:<ts>` | `limit` | limite atteinte depuis `since` (la plus récente par conversation ; `detail` = texte de Claude Code) |
+| `l:<conv>:<ts>` | `limit` | limite atteinte depuis `since` (la plus récente par conversation), en français : `title` « Limite de session atteinte · Travail 1 » ou « Limite de la semaine atteinte · Travail 1 », `detail` « Remise à zéro à 03:40 » (« Remise à zéro lun. 26 oct. à 20:00 » au-delà de 20 h) ; champs `scope` (`session` \| `week`), `resetsAt`, `accountId` |
 Une attente n'est plus listée si son délai est passé (+ 2 min), si le processus du hook est mort, si la conversation est fermée, ou si un événement de fin a suivi. Ainsi, une réponse de l'utilisateur dans VS Code ne laisse pas d'« attente fantôme ».
 `reports` : tout depuis `since`, et au moins les dernières 24 h, 60 au plus. `sinceSummary.reports` ne compte que depuis `since`.
 `engine.notices` (? liste de phrases) : réparations des dossiers de comptes à signaler.
 
 ### Détail d'une conversation
-- `accepted[].decision` d'après le journal du hook : `auto-accepte`, `question-auto` → `auto` ; `garde-fou-bloque` → `blocked` ; `*-attente` encore en cours → `waiting` (une attente finie n'a pas de ligne : sa suite en a une) ; `*-tu-as-repondu`, `*-pour-toi`, `*-rendu(e)`, `refus-classifieur-pour-toi`, `reponse-perdue` → `you` ; `refuse-mode-auto` → `denied`. `detail` est masqué (clés, jetons). Pour un garde-fou, il commence par le nom de la règle (`« règle » · commande`). Pour une question : `Choisi : <option>`. Champ ajouté : `agent` (? nom de l'agent).
+- `accepted[].decision` d'après le journal du hook : `auto-accepte`, `question-auto` → `auto` ; `garde-fou-bloque`, `garde-fou-delai-vigie` → `blocked` ; `*-attente` encore en cours → `waiting` (une attente finie n'a pas de ligne : sa suite en a une) ; `garde-fou-en-attente-vigie` → voir « Journal des actions retenues dans Vigie » ; `garde-fou-refuse-vigie` → `denied` ; `*-tu-as-repondu`, `*-pour-toi`, `*-rendu(e)`, `refus-classifieur-pour-toi`, `reponse-perdue` → `you` ; `refuse-mode-auto` → `denied`. `detail` est masqué (clés, jetons). Pour un garde-fou, il commence par le nom de la règle (`« règle » · commande`). Pour une question : `Choisi : <option>`. Champ ajouté : `agent` (? nom de l'agent).
 - `mcp[]` : tout ce qui est branché pour le dossier et le compte de la conversation (même non utilisé, `uses: 0`), plus ce qu'elle a utilisé. `scope` peut aussi valoir `unknown` (serveur utilisé mais introuvable aujourd'hui dans les configurations, ex. retiré depuis, ou `claude-vscode` ajouté par l'extension), avec `enabled: null`. Connecteur : `enabled` = connecteurs de la conversation activés. Champs ajoutés : `service`, `lastTs`.
 - `tests[]` : champs ajoutés `pending` (test de fond pas encore fini, `ok: null`), `expectedFail` (étape rouge voulue, à montrer neutre, non comptée dans `testsFailed`), `line`.
 
@@ -258,7 +260,6 @@ Champs ajoutés : sur chaque serveur `config` (configuration masquée, pour pré
 | `POST /api/v2/settings` | `{ ok, settings }` (même forme que `overview.settings`) |
 | `POST /api/v2/conversation/:id/settings` | `{ ok, switch?: { state, message, estimate? }, conversation: { autoAccept, autoAcceptOverride, connectors, accountId } }` |
 | `POST /api/v2/questions/:id/review` | `{ ok, correction, delivered: false, openUrl }` : copier `correction`, puis ouvrir `openUrl` s'il n'est pas `null` |
-| `POST /api/v2/seen` | `{ ok, since }` ; `{ ts }` facultatif (pas dans le futur) |
 | `POST /api/v2/mcp/user`, `/disable` | `{ ok, results: [{ accountId, ok, changed?, skipped?, error? }] }` ; en échec, `error` = « Compte : raison · Compte : raison » |
 | `POST /api/v2/mcp/project` | `{ ok, changed?, file?, backup? }` (sauvegarde rangée dans les données de Vigie, pas dans le projet) |
 | `POST /api/v2/accounts` | ce que renvoie le module des comptes (`{ ok, message?, account?, … }`) ; `create` accepte aussi `email?`, `health` répare les liens |
@@ -363,7 +364,7 @@ Mêmes règles que `accepted[]` du détail : attentes finies écartées, `detail
 **À regarder**
 - `g:` (`state: "waiting"`) : listée seulement si le hook vit et est bien un `hook.mjs` (vérifié par `ps`), si `ts + guard.waitMin` (réglage actuel) n'est pas passé, si aucune ligne suivante du même `pid` (ni ligne de fin de la même action) ne l'a close, et si la conversation est ouverte. Champs : `pendingId` (pid du hook), `expiresAt`, `rule`, `ruleId`, `command` (masquée : clés remplacées par `••••` ; 4000 caractères au plus), `byAgent` (? nom de l'agent), `cwd`, `needsPassword`. `detail` : « … · décide ici ou dans VS Code, sinon refusée dans N min. ».
 - `b:` (`state: "blocked"`) : refus d'un garde-fou depuis `since` ; mêmes champs sans `pendingId` ni `expiresAt`, plus `reason` : `delai` | `jamais` | `sous-agent`. Un refus de l'utilisateur depuis l'app (`garde-fou-refuse-app`) n'est pas « à faire toi-même » et n'y figure pas. Pour « Voir » : `command` + `cwd` → `POST /open` (terminal), `conversationId` → `POST /open` (conversation).
-- `l:` : une limite dont la remise à zéro est passée n'est plus listée ni comptée dans `needsYou`. L'heure est lue dans le texte de Claude Code (« resets 11:40pm », « resets Oct 26, 7pm », heure du Mac) ; sans heure lisible : 5 h pour une limite de session, 7 jours sinon. `sinceSummary.limits` compte toujours toutes les limites depuis `since`.
+- `l:` : une limite dont la remise à zéro est passée n'est plus listée ni comptée dans `needsYou`. L'heure est lue dans le texte de Claude Code (« resets 11:40pm », « resets Oct 26, 7pm », « …|1760917200 », heure du Mac, `lib/limits.mjs`) ; sans heure lisible : 5 h pour une limite de session, 7 jours sinon. Le texte de Claude Code n'est jamais renvoyé dans `title` ni `detail`. `sinceSummary.limits` compte toujours toutes les limites depuis `since`.
 - Élément écarté (`POST /review/:id/dismiss`) : caché tant qu'il ne change pas (son `ts` n'est pas plus récent que la date de l'écart). Liste dans `data/ui.json` (`dismissed`, gardée 14 jours, 500 au plus). Écarter un `q:` le note aussi relu, comme « Ça me va ».
 
 **Réponses des écritures du tour 2**
@@ -450,7 +451,7 @@ L'utilisateur refuse : `POST /api/v2/approvals` `{ approvalId, decision: "deny" 
 - Élément `toReview` : `id` = `v:<approvalId>`, `kind: "blocked"`, `state: "awaiting"`, `approvalId`, `command` (masquée), `rule`, `ruleId`, `conversationId`, `cwd`, `byAgent`, `needsPassword`, `approved` (autorisée, relance pas encore faite), `approvedUntil`. Un seul élément par appel identique (le dernier refus), listé 24 h, rangé avec ce qui attend l'utilisateur maintenant. Retiré une fois l'appel relancé avec l'autorisation (`garde-fou-autorise-vigie`), refusé par l'utilisateur, ou écarté (`POST /review/v:<id>/dismiss`). Une autorisation expirée sans relance : l'élément redevient simplement à autoriser. `needsYou` le compte ; `status` de la conversation n'est pas changé (elle continue).
 - `POST /api/v2/approvals` : `{ ok, approvalId, decision: "allow", expiresAt, message, delivered: false, openUrl, needsPassword }` ; `openUrl` = `vscode://anthropic.claude-code/open?session=<uuid>&prompt=<message>` (encodé pour survivre aux deux décodages, comme `questions/:id/review`), `null` si l'identifiant de conversation n'est pas un UUID. Refus : `{ ok, approvalId, decision: "deny", message }` (une autorisation pas encore utilisée pour le même appel est retirée). Erreurs : 400 décision autre que `allow`/`deny` ou `approvalId` illisible ; 404 élément introuvable, déjà relancé, refusé ou de plus de 24 h ; 503 fichier verrouillé.
 - `data/approvals.json` : `{ "<approvalId>": { decision, sessionId, tool, hash, ts, expiresAt? } }`, écrit sous verrou ; le hook retire l'autorisation qu'il consomme (usage unique). Comme `decisions.json`, les garde-fous `config-claude`, `config-claude-shell`, `api-vigie` et `jeton-vigie` retiennent une conversation qui l'écrirait ou lirait le jeton. Limite : une conversation dont les commandes sont acceptées d'office a les droits de l'utilisateur ; un agent décidé à contourner Vigie (un script écrit puis lancé) le peut. Les garde-fous protègent des erreurs et des consignes piégées ordinaires, pas d'un programme hostile.
-- Journal : `garde-fou-en-attente-vigie` → `accepted[].decision = "blocked"` et compté dans `sinceSummary.blocked` ; `garde-fou-autorise-vigie` → `you`.
+- Journal : `garde-fou-en-attente-vigie` → `accepted[].decision = "waiting"` tant qu'elle est à autoriser (voir « Journal des actions retenues dans Vigie », 2026-11-07) ; pas comptée dans `sinceSummary.blocked` (qui ne compte que `garde-fou-bloque` et `garde-fou-delai-vigie`) ; `garde-fou-autorise-vigie` → `you`.
 
 ## Ajouts du 2026-10-20 (bascule de compte)
 
@@ -684,3 +685,61 @@ Réglage `stopForgotten` (POST /api/v2/settings, vrai d'office) : un groupe `chr
 
 ### Vue d'ensemble et conversations
 `overview.background` : `{ scannedAt, forgotten, forgottenProcesses, forgottenMb, groups, forgottenLabels[3], autoStopped[5] }` (dernier relevé, sans en refaire). `ConversationSummary.background` : `{ count, memoryMb, label, state }` ou `null`.
+
+## Ajouts du 2026-11-07 (audit de lecture)
+
+Tous facultatifs : un moteur plus ancien ne les envoie pas, l'app les lit comme absents.
+
+### Fini, mais pas vérifié (`ConversationSummary.checks`, `reports[].checks`)
+
+```jsonc
+"checks": {
+  "verdict": "changedAfterTests",        // ? verified | changedAfterTests | testsFailed | noTests ; null : rien à dire
+  "label": "modifié après les tests",    // ? phrase du verdict, prête à afficher
+  "lastTestAt": "…", "lastCodeAt": "…",  // ? dernier test (tests, e2e) et dernière écriture de code de la demande
+  "uncommitted": 3,                      // ? fichiers de code modifiés après le dernier commit ; null : la conversation n'a jamais commité
+  "unpushed": 2,                         // ? commits pas envoyés ; null : la conversation n'a jamais poussé
+  "notes": ["3 fichiers modifiés après le dernier commit", "2 commits pas envoyés"]   // phrases prêtes, seulement pour un compte > 0
+}
+```
+- Dans `ConversationSummary` : la demande en cours (la vraie demande et ses relances, jusqu'à maintenant). Dans un rapport `missionDone` : cette demande-là (jusqu'à la demande suivante). `null` quand il n'y a ni verdict, ni commit, ni push.
+- Règles, sans lire le code. Ne comptent que les vrais tests (`tests`, `e2e` : pas un build, un contrôle des types ni un lint), hors étape rouge voulue et tests pas finis, et les fichiers de code du projet (`code`, `style` : pas un `.md`, des données, ni un brouillon hors du projet).
+  | `verdict` | `label` | Quand |
+  |---|---|---|
+  | `verified` | tests verts après la dernière modification | le dernier test de la demande a réussi, et aucun code n'a été écrit après lui |
+  | `changedAfterTests` | modifié après les tests | du code a été écrit après le dernier test |
+  | `testsFailed` | tests en échec | le dernier test a échoué, rien d'écrit après |
+  | `noTests` | aucun test lancé | du code écrit sans aucun test, dans un projet (racine du dépôt) où des tests ont déjà été lancés |
+- `uncommitted` : fichiers de code du projet écrits après le dernier commit réussi de la conversation (jusqu'à la fin de la demande). `unpushed` : commits réussis après le dernier push réussi. Un commit raté (« nothing to commit ») ou un push refusé ne compte pas ; `git commit … && git push` compte comme commit et push. Ce que l'utilisateur commite lui-même ailleurs n'est pas vu.
+- `reports[].detail` (fin de demande) : `commits réussis · label · notes · déployé · agents`, 4 faits au plus. L'ancien « tests verts » (dernier test seulement) n'existe plus.
+- Calculé au fil de l'indexation (heures d'écriture des fichiers de code, commits et push réussis) et gardé tant que la conversation ne change pas.
+
+### Contexte résumé (`ConversationSummary.compactions`)
+
+`{ "count": 2, "auto": 2, "lastAt": "…" }` ou `null` (jamais résumé). Claude Code résume le contexte quand il déborde (`auto`) ou sur `/compact` : après un résumé, Claude peut oublier une consigne du début. Compté sur la ligne système `compact_boundary` du transcript (`compactMetadata.trigger` : `auto` | `manual`) ; un transcript sans elle, sur le message de résumé qui la suit (`isCompactSummary`). Une ligne et son message de résumé à moins de 10 min l'un de l'autre font un seul résumé. `auto` : combien l'ont été automatiquement.
+
+### Jusqu'où tient chaque compte (`AccountSummary.usage.week.fullAt`)
+
+Date ISO à laquelle la semaine du compte serait pleine au rythme des dernières 24 h, au quart d'heure ; `null` si elle tient jusqu'à la remise à zéro, ou s'il n'y a pas de quoi mesurer. Vue d'ensemble et `GET /api/v2/accounts`.
+- D'après les vrais relevés du % de la semaine (`data/usage/semaine.json` : un point à chaque changement, 8 jours gardés), notés pour chaque compte à chaque lecture.
+- Pente : hausse depuis le % d'il y a 24 h (le dernier relevé d'avant ; sinon le premier des 24 h, à son heure), au moins 3 points, rapportée au temps écoulé jusqu'à maintenant (les heures calmes comptent). Relevés d'une autre semaine (autre `resetsAt`) ignorés.
+- Déjà à 100 % : l'heure du premier relevé à 100 %.
+
+### Pendant ton absence (`GET /api/v2/overview?since=<ISO>`)
+
+- `since` : début de l'absence. `sinceSummary`, `reports` comptés depuis (`sinceSummary.reports`), `conversations[].accepted.sinceSeen` sont calculés sur cette fenêtre au lieu de la dernière heure. Bornée aux dernières 24 h (et jamais après maintenant), arrondie à la minute.
+- Réponse : `since` = début utilisé ; `sinceWindow: { from, to, capped }` (`to` = maintenant ; `capped` : le début demandé datait de plus de 24 h). Sans `since` (ou vide) : rien ne change, la dernière heure, `capped: false`.
+- `since` illisible : 400 « Début de la période illisible : une date ISO est attendue. »
+- `POST /api/v2/seen` n'existe plus (404) : plus de « J'ai tout vu ».
+
+### Limites en français
+
+`toReview` `l:` (voir plus haut), `milestones[]` de kind `limit` (`title` « Limite de session atteinte », `detail` « Remise à zéro à 03:40 ») et `limits[]` du détail (`title`, `detail`, `scope`, `resetsAt` ; `text` reste le message brut de Claude Code, en anglais, à ne pas montrer). Une limite d'un seul modèle : « Limite Opus de la semaine atteinte ». `lib/limits.mjs`.
+
+### Journal des actions retenues dans Vigie (`accepted[]`, `recentAccepted[]`)
+
+`garde-fou-en-attente-vigie` (action refusée sur le moment, à autoriser dans Vigie) : `waiting` tant qu'elle est à autoriser, comme dans l'Historique. Une fois sa suite écrite dans le journal (même `approvalId` : `garde-fou-autorise-vigie` → `you`, `garde-fou-refuse-vigie` → `denied`, `garde-fou-delai-vigie` → `blocked`, `garde-fou-vigie-clos`), seule la suite est listée. Sans suite : `denied` si l'utilisateur l'a refusée dans l'app, `you` s'il l'a autorisée et qu'elle n'est pas encore relancée, sinon `blocked` (refusée d'office, jamais autorisée).
+
+### Plan à approuver
+
+Un plan proposé (`ExitPlanMode`) : « Plan à approuver » dans `toReview`, « Approuver le plan » dans le Journal et les questions choisies pour toi (« Approuver le plan ? ») ; « valider » n'est plus employé. Les anciennes lignes du journal gardent leur texte.

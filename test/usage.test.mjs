@@ -1,7 +1,7 @@
 // Consommation en direct (rate) et alerte « s'emballe » (lib/usage.mjs) : calculs purs, sans fichier.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rateOf, runawayAlert, RATE_MINUTES, seriesFrom, seriesPoints, weekRatio, toWeekPct } from '../lib/usage.mjs';
+import { rateOf, runawayAlert, RATE_MINUTES, seriesFrom, seriesPoints, weekRatio, toWeekPct, weekFullAt } from '../lib/usage.mjs';
 
 const NOW = Date.parse('2026-10-20T12:00:30.000Z');
 const iso = (min) => new Date(NOW + min * 60_000).toISOString();
@@ -81,4 +81,31 @@ test('part de la semaine : un compte entamé ailleurs ne compte pas tout son pou
   assert.equal(weekRatio(t1, [{ measured: null, upper: 100 / 9000, tier: 'max_20x', pct: 100 }]), 78 / 1000);
   assert.equal(toWeekPct(50, { ratio: 78 / 1000 }), 3.9);
   assert.equal(toWeekPct(50, { den: 50, pct: 49 }), 49, 'ancien calcul sans ratio');
+});
+
+test('jusqu\'où tient le compte : pente des dernières 24 h d\'après les vrais relevés, au quart d\'heure', () => {
+  const H = 3600_000;
+  const reset = new Date(NOW + 72 * H).toISOString();
+  const pt = (h, pct, resetsAt = reset) => ({ t: new Date(NOW + h * H).toISOString(), pct, resetsAt });
+  const week = (pct) => ({ pct, resetsAt: reset });
+  // 10 % il y a 30 h (donc encore il y a 24 h), 40 % maintenant : 30 points en 24 h → les 60 restants en 48 h
+  const full = weekFullAt([pt(-30, 10), pt(-10, 25), pt(-1, 40)], week(40), NOW);
+  assert.ok(full > NOW + 48 * H - 60_000 && full <= NOW + 48 * H + 15 * 60_000, 'pleine vers dans 48 h');
+  assert.equal(full % (15 * 60_000), 0, 'au quart d\'heure');
+  // même hausse, mais une remise à zéro dans 40 h : elle tient
+  const soon = new Date(NOW + 40 * H).toISOString();
+  assert.equal(weekFullAt([pt(-30, 10, soon), pt(-1, 40, soon)], { pct: 40, resetsAt: soon }, NOW), null);
+  // pas de relevé d'avant les 24 h : la pente part du premier relevé des 24 h, à son heure
+  const fromFirst = weekFullAt([pt(-6, 70), pt(-1, 85)], week(85), NOW);
+  assert.ok(Math.abs(fromFirst - (NOW + 6 * H)) <= 15 * 60_000, '15 points en 6 h → les 15 restants en 6 h');
+  // moins de 3 points de hausse : rien à mesurer
+  assert.equal(weekFullAt([pt(-30, 38), pt(-1, 40)], week(40), NOW), null);
+  // relevés d'une autre semaine ignorés
+  assert.equal(weekFullAt([pt(-30, 10, new Date(NOW - 100 * H).toISOString())], week(40), NOW), null);
+  // déjà pleine : le premier relevé à 100 %
+  assert.equal(weekFullAt([pt(-5, 90), pt(-2, 100)], week(100), NOW), Date.parse(pt(-2, 100).t));
+  // rien de lisible
+  assert.equal(weekFullAt([], { pct: null, resetsAt: reset }, NOW), null);
+  assert.equal(weekFullAt(null, week(40), NOW), null);
+  assert.equal(weekFullAt([pt(-30, 10)], { pct: 40, resetsAt: new Date(NOW - H).toISOString() }, NOW), null, 'semaine déjà remise à zéro');
 });

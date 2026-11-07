@@ -57,6 +57,10 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     @Tolerant var account: ConversationAccount?
     /// Arrêtée pour changer de compte : elle repart sur `to` au prochain message de l'utilisateur dans VS Code.
     @Tolerant var resume: ResumeInfo?
+    /// La demande en cours : vérifiée, commitée, envoyée ? (facultatif ; nil : rien à dire).
+    @Tolerant var checks: RequestChecks?
+    /// Contexte résumé par Claude Code (facultatif ; nil : jamais).
+    @Tolerant var compactions: ContextCompactions?
 
     var state: ConversationStatus { ConversationStatus(raw: status) }
     var isCodex: Bool { agent == "codex" }
@@ -170,6 +174,43 @@ struct CardArtifact: Decodable, Equatable, Sendable {
     var title: String?
     var url: String?
     @FlexDate var ts: Date?
+}
+
+/// « Fini, mais pas vérifié » : ce que le moteur sait d'une demande, par règles, sans lire le code.
+struct RequestChecks: Decodable, Equatable, Sendable {
+    enum Verdict: String, Sendable {
+        /// Tests verts après la dernière modification.
+        case verified
+        /// Du code écrit après le dernier test.
+        case changedAfterTests
+        /// Le dernier test a échoué.
+        case testsFailed
+        /// Du code écrit sans test, dans un projet qui en a.
+        case noTests
+        /// Rien à dire, ou verdict inconnu de cette version.
+        case unknown
+    }
+
+    var verdict: String?
+    /// Phrase du verdict, prête à afficher (« modifié après les tests »).
+    var label: String?
+    @FlexDate var lastTestAt: Date?
+    @FlexDate var lastCodeAt: Date?
+    /// Fichiers de code modifiés après le dernier commit ; nil : la conversation n'a jamais commité.
+    var uncommitted: Int?
+    /// Commits pas envoyés ; nil : la conversation n'a jamais poussé.
+    var unpushed: Int?
+    /// Phrases prêtes (« 3 fichiers modifiés après le dernier commit », « 2 commits pas envoyés »).
+    @Lossy var notes: [String]
+
+    var verdictKind: Verdict { verdict.flatMap(Verdict.init(rawValue:)) ?? .unknown }
+}
+
+/// Contexte résumé par Claude Code : combien de fois, dont combien automatiquement, et le dernier.
+struct ContextCompactions: Decodable, Equatable, Sendable {
+    var count: Int?
+    var auto: Int?
+    @FlexDate var lastAt: Date?
 }
 
 enum ProjectName {

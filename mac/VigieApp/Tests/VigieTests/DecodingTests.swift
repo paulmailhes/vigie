@@ -166,6 +166,82 @@ struct DecodingTests {
         #expect(series.accounts.isEmpty)
     }
 
+    /// Audit de lecture (2026-11-07) : vérifications d'une demande, contexte résumé, prévision de la semaine, fenêtre
+    /// de « Depuis… », limite en français. Tout est facultatif : absent ou illisible = nil, le reste se lit.
+    @Test func decodesReadingAuditFields() throws {
+        let json = """
+        { "since": "2026-10-19T15:40:00.000Z",
+          "sinceWindow": { "from": "2026-10-19T15:40:00.000Z", "to": "2026-10-19T23:20:00.000Z", "capped": true },
+          "toReview": [ { "id": "l:c1:1", "kind": "limit", "title": "Limite de session atteinte · Travail 1",
+                          "detail": "Remise à zéro à 03:40", "scope": "session", "resetsAt": "2026-10-20T01:40:00.000Z",
+                          "accountId": "travail1" } ],
+          "reports": [ { "kind": "missionDone", "id": "fin:c1:d1",
+                         "checks": { "verdict": "changedAfterTests", "label": "modifié après les tests", "uncommitted": 2,
+                                     "unpushed": null, "notes": ["2 fichiers modifiés après le dernier commit", 3] } },
+                       { "kind": "missionDone", "id": "fin:c1:d2", "checks": "oups" } ],
+          "accounts": [ { "id": "travail1", "usage": { "week": { "pct": 40, "resetsAt": "2026-10-26T19:00:00Z",
+                                                                  "fullAt": "2026-10-24T14:00:00.000Z" } } },
+                        { "id": "perso", "usage": { "week": { "pct": 8, "fullAt": null } } } ],
+          "conversations": [
+            { "id": "c1", "checks": { "verdict": "verified", "label": "tests verts après la dernière modification",
+                                      "lastTestAt": "2026-10-19T23:09:00Z", "lastCodeAt": "2026-10-19T23:02:00Z",
+                                      "uncommitted": 0, "unpushed": 1, "notes": ["1 commit pas envoyé"] },
+              "compactions": { "count": 2, "auto": 2, "lastAt": "2026-10-19T19:12:00.000Z" } },
+            { "id": "c2", "checks": { "verdict": "nouveau" }, "compactions": null },
+            { "id": "c3" } ] }
+        """
+        let overview = try JSONDecoder().decode(Overview.self, from: Data(json.utf8))
+        #expect(overview.sinceWindow?.capped == true)
+        #expect(overview.sinceWindow?.from == overview.since)
+        #expect(overview.sinceWindow?.to != nil)
+
+        let limit = try #require(overview.toReview.first)
+        #expect(limit.reviewKind == .limit)
+        #expect(limit.detail == "Remise à zéro à 03:40")
+        #expect(limit.scope == "session" && limit.accountId == "travail1" && limit.resetsAt != nil)
+
+        #expect(overview.reports.first?.checks?.verdictKind == .changedAfterTests)
+        #expect(overview.reports.first?.checks?.uncommitted == 2)
+        #expect(overview.reports.first?.checks?.unpushed == nil)
+        #expect(overview.reports.first?.checks?.notes == ["2 fichiers modifiés après le dernier commit"])
+        #expect(overview.reports.count == 2 && overview.reports.last?.checks == nil)
+
+        #expect(overview.accounts.first?.usage?.week?.fullAt != nil)
+        #expect(overview.accounts.last?.usage?.week?.fullAt == nil)
+        #expect(overview.accounts.last?.usage?.week?.pct == 8)
+
+        let first = try #require(overview.conversations.first)
+        #expect(first.checks?.verdictKind == .verified)
+        #expect(first.checks?.label == "tests verts après la dernière modification")
+        #expect(first.checks?.lastTestAt != nil && first.checks?.lastCodeAt != nil)
+        #expect(first.checks?.notes == ["1 commit pas envoyé"])
+        #expect(first.compactions?.count == 2 && first.compactions?.auto == 2 && first.compactions?.lastAt != nil)
+        #expect(overview.conversations[1].checks?.verdictKind == .unknown)
+        #expect(overview.conversations[1].compactions == nil)
+        #expect(overview.conversations[2].checks == nil && overview.conversations[2].compactions == nil)
+
+        let detail = try JSONDecoder().decode(ConversationDetail.self, from: Data("""
+        { "summary": { "id": "c1" },
+          "limits": [ { "ts": "2026-10-19T21:41:00Z", "text": "You've hit your session limit · resets 3:40am",
+                        "title": "Limite de session atteinte", "detail": "Remise à zéro à 03:40", "scope": "session",
+                        "resetsAt": "2026-10-20T01:40:00.000Z" },
+                      { "ts": "2026-10-19T20:00:00Z", "text": "ancien moteur" } ] }
+        """.utf8))
+        #expect(detail.limits.first?.title == "Limite de session atteinte")
+        #expect(detail.limits.first?.detail == "Remise à zéro à 03:40")
+        #expect(detail.limits.first?.resetsAt != nil)
+        #expect(detail.limits.last?.title == nil && detail.limits.last?.text == "ancien moteur")
+
+        // les exemples de l'app : la limite en français, plus « Reprise »
+        let data = try Data(contentsOf: Self.packageRoot.appending(path: "Preview/overview.json"))
+        let preview = try JSONDecoder().decode(Overview.self, from: data)
+        let previewLimit = try #require(preview.toReview.first { $0.reviewKind == .limit })
+        #expect(previewLimit.detail?.hasPrefix("Remise à zéro") == true)
+        #expect(preview.sinceWindow != nil)
+        #expect(preview.conversations.contains { $0.checks != nil && $0.compactions != nil })
+        #expect(!preview.toReview.contains { ($0.conversationTitle ?? "").contains(" · ") })
+    }
+
     /// GET /api/v2/agents : un champ, un MCP ou un agent illisible ne fait pas tomber la liste.
     @Test func decodesAgentsTolerantly() throws {
         let json = """
