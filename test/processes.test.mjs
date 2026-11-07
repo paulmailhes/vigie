@@ -19,6 +19,7 @@ function machine(list) {
   const env = (p) => `${p.pid} ${p.args} HOME=/Users/u SECRET_TOKEN=sk-ant-ne-doit-jamais-sortir${p.sid ? ` CLAUDE_CODE_SESSION_ID=${p.sid}` : ''}${p.cpid ? ` CLAUDE_PID=${p.cpid}` : ''} PATH=/bin`;
   const only = (args) => { const i = args.indexOf('-p'); return i < 0 ? null : new Set(args[i + 1].split(',').map(Number)); };
   state.run = async (cmd, args) => {
+    if (state.failPs && cmd === '/bin/ps' && args[0] === '-axo') return { ok: false, stdout: '' }; // Mac saturé
     const pick = only(args);
     const procs = state.list.filter((p) => !pick || pick.has(p.pid));
     if (cmd === '/bin/ps' && args.includes('-E')) return { ok: true, stdout: procs.map(env).join('\n') };
@@ -170,4 +171,67 @@ test('ménage automatique : Chrome oublié depuis 6 h et qui ne consomme plus ri
   busy.tick(11 * 60_000);
   await busy.p.tick();
   assert.deepEqual(busy.killed, []);
+});
+
+test('une app dont macOS ne voit plus la fenêtre (Docker sans interface) s\'arrête par ses processus, sur demande', async () => {
+  const docker = [
+    { pid: 600, ppid: 1, pgid: 600, comm: '/Applications/Docker.app/Contents/MacOS/com.docker.backend', args: 'com.docker.backend services', sid: SID_CLOSED, cpid: 3000 },
+    { pid: 601, ppid: 600, pgid: 600, comm: '/Applications/Docker.app/Contents/MacOS/com.docker.build', args: 'com.docker.build', sid: SID_CLOSED, cpid: 3000 },
+  ];
+  const { p, killed } = setup(docker);
+  const g = p.view(await p.snapshot()).groups[0];
+  assert.equal(g.kind, 'app');
+  assert.equal((await p.stop([g.id])).ok, false, 'sans app:true, une app se quitte depuis l\'app Mac');
+  assert.deepEqual(killed, []);
+  assert.equal((await p.stop([g.id], { app: true })).ok, true);
+  assert.deepEqual(killed, [[-600, 'SIGTERM']], 'le groupe 600 ne contient que Docker');
+});
+
+test('Mac saturé : un relevé qui échoue garde le précédent', async () => {
+  const { p, m } = setup(chromeTree);
+  const first = await p.snapshot();
+  assert.equal(first.groups.length, 1);
+  m.failPs = true;
+  const again = await p.snapshot({ fresh: true, withFootprint: true });
+  assert.equal(again.stale, true);
+  assert.equal(again.groups.length, 1);
+});
+
+test('Google Chrome piloté par un script de la conversation : rattaché au script, jamais pris pour ton Chrome ni pour une app', async () => {
+  const GC = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const HELPER = '/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)';
+  const list = [
+    { pid: 5100, ppid: 5000, pgid: 5100, comm: '/bin/zsh', args: '/bin/zsh -c eval node frames.mjs' },
+    { pid: 800, ppid: 5100, pgid: 5100, comm: '/opt/homebrew/bin/node', args: 'node anim/frames.mjs /blog', sid: SID_WORK, cpid: 5000, etime: '05:00' },
+    // Google Chrome : environnement illisible (runtime durci), donc sans marquage
+    { pid: 801, ppid: 800, pgid: 801, comm: GC, args: `${GC} --headless --enable-automation --user-data-dir=/var/folders/x/T/playwright_chromiumdev_profile-AB`, etime: '05:00', rssKb: 204800 },
+    { pid: 802, ppid: 801, pgid: 801, comm: HELPER, args: `${HELPER} --type=renderer --enable-automation --remote-debugging-pipe`, etime: '05:00', rssKb: 102400 },
+    // ton Chrome à toi : jamais listé
+    { pid: 900, ppid: 1, pgid: 900, comm: GC, args: GC },
+    { pid: 901, ppid: 900, pgid: 900, comm: HELPER, args: `${HELPER} --type=renderer` },
+    // un Chrome ouvert par un agent avec « open -a » (c'est ton Chrome, même marqué) : jamais listé
+    { pid: 950, ppid: 1, pgid: 950, comm: GC, args: `${GC} https://exemple.fr`, sid: SID_CLOSED, cpid: 3000 },
+    // Chrome piloté orphelin (son script est mort), sans marquage : oublié, conversation inconnue
+    { pid: 1000, ppid: 1, pgid: 1000, comm: GC, args: `${GC} --headless --enable-automation --user-data-dir=/var/folders/x/T/playwright_chromiumdev_profile-CD` },
+    { pid: 1001, ppid: 1000, pgid: 1000, comm: HELPER, args: `${HELPER} --type=gpu-process --headless` },
+    // le crochet de Vigie (une décision en attente) : jamais listé
+    { pid: 1100, ppid: 5000, pgid: 1100, comm: '/opt/homebrew/bin/node', args: 'node /Users/u/.vigie/hook.mjs', sid: SID_WORK, cpid: 5000 },
+  ];
+  const { p, killed } = setup(list);
+  const v = p.view(await p.snapshot());
+  const ids = v.groups.map((g) => g.processes + ':' + g.state + ':' + (g.conversationId ? 'conv' : 'inconnue'));
+  assert.equal(v.groups.length, 2, `seulement le script et le Chrome orphelin : ${ids.join(', ')}`);
+  const script = v.groups.find((g) => g.conversationId === SID_WORK);
+  assert.equal(script.processes, 3, 'le script, son Chrome et son annexe de rendu : une seule ligne');
+  assert.equal(script.kind, 'chrome');
+  assert.equal(script.memoryMb, 310);
+  assert.ok(v.groups.every((g) => g.kind !== 'app'), 'jamais une app « Google Chrome » à quitter');
+  const orphan = v.groups.find((g) => !g.conversationId);
+  assert.equal(orphan.state, 'forgotten');
+  assert.equal(orphan.kind, 'chrome');
+  assert.equal(orphan.processes, 2);
+  assert.ok(!JSON.stringify(v).includes('hook.mjs'));
+  // les sans-marquage s'arrêtent aussi (relus par numéro et heure de démarrage)
+  await p.stop([orphan.id]);
+  assert.deepEqual(killed, [[-1000, 'SIGTERM']]);
 });

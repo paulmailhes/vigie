@@ -71,16 +71,31 @@ extension VigieStore {
         return groups.filter { group in failed.contains { $0.id == group.id && $0.needsConfirm == true } }
     }
 
-    /// Une app ouverte par un agent : quittée comme avec ⌘Q (elle peut demander d'enregistrer).
+    /// Une app ouverte par un agent : quittée comme avec ⌘Q (elle peut demander d'enregistrer). Si macOS ne voit plus
+    /// sa fenêtre (Docker sans son interface, mais avec son moteur et sa machine virtuelle), ou si elle est encore là
+    /// 20 s plus tard, Vigie arrête ses processus : poliment, puis de force 30 s après.
     func quitBackgroundApp(_ group: BackgroundGroup) {
         guard let bundle = group.bundle else { return }
         let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.path.hasPrefix(bundle) == true }
-        guard !apps.isEmpty else {
-            show(error: "\(group.label ?? "Cette app") n'est plus ouverte")
-            return
-        }
         stoppedBackground[group.id] = .now
         background?.groups.removeAll { $0.id == group.id }
         for app in apps { app.terminate() }
+        Task { @MainActor in
+            if !apps.isEmpty {
+                try? await Task.sleep(for: .seconds(20))
+                let alive = (try? await stillRunning(group)) ?? false
+                guard alive else { return }
+            }
+            let body: JSONValue = .object(["ids": .array([.string(group.id)]), "app": .bool(true), "confirm": .bool(true)])
+            if let result = await write("/api/v2/processes/stop", body), let failed = result.results.first(where: { $0.ok == false }) {
+                show(error: failed.error ?? "\(group.label ?? "Cette app") ne s'est pas arrêtée")
+            }
+        }
+    }
+
+    /// Le groupe est-il encore dans le dernier relevé du moteur (même s'il est caché à l'écran depuis le clic) ?
+    private func stillRunning(_ group: BackgroundGroup) async throws -> Bool {
+        let list = try await client.get("/api/v2/processes", as: BackgroundList.self, patient: true)
+        return list.groups.contains { $0.id == group.id }
     }
 }

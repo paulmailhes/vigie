@@ -174,7 +174,7 @@ function watchRuns() {
   for (const d of dirs) {
     if (runWatchers.has(d)) continue;
     try {
-      const w = fs.watch(d, (_, f) => { if (!f || /^rapport-.*\.json$/.test(String(f))) stateChanged(); });
+      const w = fs.watch(d, (_, f) => { if (!f || /^rapport-.*\.json$/.test(String(f))) { runsCache = null; stateChanged(); } });
       w.on('error', () => { w.close(); runWatchers.delete(d); });
       w.unref?.();
       runWatchers.set(d, w);
@@ -183,19 +183,36 @@ function watchRuns() {
 }
 // GET /api/v2/agents/runs : les lancements, leur rapport, et la conversation à rouvrir (celle reprise, sinon la plus
 // récente du dossier depuis le lancement).
+// Gardée 20 s : conversationsIn parcourt toutes les sessions (et lit des fichiers) pour chaque lancement sans session.
+let runsCache = null;
 function runsView() {
-  return [200, { runs: runs.list().map((r) => {
+  if (runsCache && Date.now() - runsCache.at < 20_000) return runsCache.value;
+  const value = [200, { runs: runs.list().map((r) => {
     let conversation = r.session;
     if (!conversation) {
       try { conversation = conversationsIn(r.folder, 5).find((c) => !c.lastActivity || c.lastActivity >= r.at)?.id ?? null; } catch { conversation = null; }
     }
     return { ...r, conversation };
   }) }];
+  runsCache = { at: Date.now(), value };
+  return value;
+}
+// Le lancement d'agent Vigie d'une conversation, sans rien parcourir : celle qu'il a reprise, sinon une conversation du
+// même dossier commencée après lui. (L'app relit le détail toutes les 4 s : rien de lourd ici.)
+function agentRunOf(id) {
+  const s = indexer.sessions.get(id);
+  const dir = launchDirOf(id);
+  const start = s?.firstTs || null;
+  const same = (a, b) => { try { return path.resolve(a) === path.resolve(b); } catch { return false; } };
+  const mine = runs.list().filter((r) => r.session === id || (!r.session && dir && start && same(r.folder, dir) && start >= r.at));
+  if (!mine.length) return null;
+  mine.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return { ...mine[0], conversation: id };
 }
 function postRuns(body) {
   const r = body?.action === 'todo' ? runs.setTodo({ id: body.id, index: body.index, done: body.done })
     : body?.action === 'hide' ? runs.hide({ id: body.id }) : { ok: false, status: 400, error: 'Action : todo ou hide.' };
-  if (r.ok) { watchRuns(); stateChanged(); return [200, r]; }
+  if (r.ok) { runsCache = null; watchRuns(); stateChanged(); return [200, r]; }
   return bad(r.error, r.status || 400);
 }
 // Ouvreur : VS Code (le lien part quand la fenêtre du dossier est prête) ou l'app Claude (lib/opener.mjs).
@@ -1160,7 +1177,7 @@ function conversationV2(id) {
     // ce qu'elle a laissé tourner (outil En fond), d'après le dernier relevé
     processes: processes.view().groups.filter((g) => g.conversationId === id),
     // lancée par un agent de Vigie : son rapport
-    agentRun: runsView()[1].runs.find((r) => r.conversation === id) ?? null,
+    agentRun: agentRunOf(id),
   };
 }
 
@@ -1746,6 +1763,7 @@ async function postAgentLaunch(body) {
     writeState(s);
   } catch (e) { console.error('[vigie] surface, MCP et auto-accept des agents :', clean(e)); }
   try {
+    runsCache = null;
     runs.record({ agent: known?.id ?? body.id, name: known?.name ?? body.id, icon: known?.icon ?? null, folder: r.folder, surface, session });
     watchRuns();
     stateChanged();
@@ -1809,7 +1827,7 @@ async function processesView() {
 // POST /api/v2/processes/stop { ids, confirm? } → { ok, results: [{ id, ok, gone?, needsConfirm?, error? }] }
 async function postProcessesStop(b) {
   if (!PROCESSES) return bad('Relevé des processus coupé.', 409);
-  const r = await processes.stop(b?.ids, { confirm: b?.confirm === true });
+  const r = await processes.stop(b?.ids, { confirm: b?.confirm === true, app: b?.app === true });
   return r.status ? bad(r.error, r.status) : [200, r];
 }
 
