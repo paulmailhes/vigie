@@ -141,11 +141,14 @@ struct ReviewRow: View {
                     .help("Sans réponse, Vigie la refuse d'office \(Fmt.reset(expires, now: now))")
             } else if item.needsDecision {
                 // le même mot partout (fenêtre, barre des menus, liste « N à décider ») ; l'aide dit si elle attend en
-                // pause ou si elle a continué sans
-                Chip(Theme.label(for: .blocked), symbol: Icon.guardRule, tone: inConversation ? .neutral : .alert)
-                    .help(item.holding == true ? "En pause : elle attend ton accord ici"
-                          : item.isAwaitingApproval ? "Elle a continué sans cette action : autorise-la, elle pourra la relancer"
-                          : "Elle attend ton accord")
+                // pause ou si elle a continué sans. Pas dans la page de sa conversation : la tuile s'y intitule déjà
+                // « À autoriser » (ConversationVerdict), la puce le redirait.
+                if !inConversation {
+                    Chip(Theme.label(for: .blocked), symbol: Icon.guardRule, tone: .alert)
+                        .help(item.holding == true ? "En pause : elle attend ton accord ici"
+                              : item.isAwaitingApproval ? "Elle a continué sans cette action : autorise-la, elle pourra la relancer"
+                              : "Elle attend ton accord")
+                }
             } else if item.state == "waiting" {
                 Chip("À décider dans VS Code", tone: .alert)
             } else if item.failed {

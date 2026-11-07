@@ -611,7 +611,7 @@ const minutesLeft = (deadline, now) => Math.ceil((deadline - now) / 60_000);
 const agentName = (sid, agentId) => (agentId ? (indexer.sessions.get(sid)?.agentLabel(agentId) || null) : null);
 
 // Pourquoi un garde-fou a refusé (lib/decisions.mjs : by).
-const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office (réglage : toujours refuser)', 'sous-agent': 'Refusée : un agent ne peut pas demander une action sensible', echec: 'Autorisée, mais elle a échoué' };
+const BLOCKED_WHY = { delai: 'Refusée faute de réponse', jamais: 'Refusée d\'office, réglage « toujours refuser »', 'sous-agent': 'Refusée : un agent ne peut pas demander une action sensible', echec: 'Autorisée, mais elle a échoué' };
 
 // ---------- connexions des comptes (coffre, lib/vault.mjs) ----------
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });

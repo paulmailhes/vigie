@@ -111,7 +111,7 @@
       "title": "Supprimer la branche distante lot-4",
       "command": "git push origin --delete lot-4",
       "rule": "Suppression de branche distante",
-      "reason": "Refusée d'office (réglage : toujours refuser) (garde-fou : « Suppression de branche distante »)",
+      "reason": "Refusée d'office, réglage « toujours refuser » (garde-fou : « Suppression de branche distante »)",
       "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
       "conversationTitle": "Refonte du site de la boutique",
       "project": "boutique",

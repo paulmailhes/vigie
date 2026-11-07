@@ -30,12 +30,23 @@ struct MCPView: View {
     @Environment(VigieStore.self) private var store
     @State private var editor: MCPEditorRequest?
     @State private var showLibrary = false
+    @State private var addOpen = false
     @State private var removal: MCPRemoval?
     @State private var confirmRemoval = false
     /// Projets ouverts ou refermés à la main. Au départ, seuls ceux qui ont un MCP à régler sont ouverts (on voit la
     /// liste des projets, on ouvre celui qui intéresse).
     @State private var opened: Set<String> = []
     @State private var closed: Set<String> = []
+
+    /// Referme la bulle « Ajouter un MCP », puis ouvre la feuille choisie (une feuille ouverte pendant que la bulle se
+    /// ferme ne s'afficherait pas).
+    private func closeAddThen(_ open: @escaping @MainActor () -> Void) {
+        addOpen = false
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            open()
+        }
+    }
 
     var body: some View {
         Group {
@@ -60,19 +71,29 @@ struct MCPView: View {
                 .help("Copie une demande d'aide toute prête et ouvre VS Code : colle-la dans une conversation")
             }
             ToolbarItem {
-                Menu {
-                    Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { showLibrary = true }
-                    Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { editor = .addUser }
+                // un bouton et sa bulle, pas un Menu : dans une barre d'outils, un Menu n'y garde que son icône
+                Button {
+                    addOpen.toggle()
                 } label: {
-                    // une image et un texte : un Label dans une barre d'outils n'y garde que son icône
                     HStack(spacing: 6) {
                         Image(systemName: "plus")
                         Text("Ajouter un MCP")
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                     .fixedSize()
                 }
                 .accessibilityLabel("Ajouter un MCP")
                 .help("Depuis la bibliothèque des MCP officiels, ou à la main")
+                .popover(isPresented: $addOpen, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { closeAddThen { showLibrary = true } }
+                        Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { closeAddThen { editor = .addUser } }
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(14)
+                }
             }
         }
         .sheet(item: $editor) { request in

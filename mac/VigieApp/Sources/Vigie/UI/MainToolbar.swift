@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Barre d'outils de la fenêtre : Retour / Suivant en tête ; à droite, « 3 à décider » en rouge (absent quand rien ne
-/// t'attend), puis les réglages de toute l'app : Garde-fous, Questions (son état écrit en clair) et l'interrupteur
-/// Auto-accept (contrôle principal).
+/// t'attend), puis les réglages de toute l'app : Garde-fous, Questions (la bulle « ? », pleine quand Vigie choisit)
+/// et l'interrupteur Auto-accept (contrôle principal).
 struct MainToolbar: ToolbarContent {
     @Bindable var store: VigieStore
 
@@ -60,32 +60,40 @@ struct AutoAcceptSwitch: View {
     }
 }
 
-/// Le menu des questions : son état écrit dans la barre (« Questions : auto », « Questions : à toi »), pas seulement
-/// une bulle « ? » qui se lirait « Aide ».
+/// Les questions de Claude : la bulle « ? » ouvre ses réglages, avec l'état écrit en tête (« Vigie choisit pour
+/// toi », « C'est toi qui réponds »). Un bouton et sa bulle plutôt qu'un Menu, pour pouvoir y écrire cet état.
 struct QuestionsMenu: View {
     @Bindable var store: VigieStore
+    @State private var open = false
 
     var body: some View {
-        Menu {
-            Toggle("Quand tu n'es pas là, Vigie choisit l'option recommandée", isOn: $store.questionsAuto)
-            Picker("Attendre avant de choisir", selection: $store.questionWaitMin) {
-                ForEach([5, 10, 20, 30, 60], id: \.self) { minutes in
-                    Text("\(minutes) min").tag(minutes)
-                }
-            }
-            .disabled(!store.questionsAuto)
+        Button {
+            open.toggle()
         } label: {
-            // une image et un texte, comme Garde-fous : un Label dans une barre d'outils n'y garde que son icône
-            HStack(spacing: 6) {
-                Image(systemName: store.questionsAuto ? "questionmark.bubble.fill" : "questionmark.bubble")
-                Text(store.questionsAuto ? "Questions : auto" : "Questions : à toi")
-            }
-            .fixedSize()
+            // la bulle seule, pleine quand Vigie choisit ; l'état en clair dans l'aide, pour VoiceOver et dans la bulle
+            // ouverte. Un mot à côté (« Questions : auto ») poussait Auto-accept derrière le chevron » de la barre à
+            // 960 pt, et une largeur qui suit celle de la fenêtre fait se chevaucher les boutons (la barre ne refait
+            // pas sa mise en page quand un bouton change de largeur).
+            Image(systemName: store.questionsAuto ? "questionmark.bubble.fill" : "questionmark.bubble")
         }
         .accessibilityLabel(store.questionsAuto ? "Questions : Vigie choisit pour toi" : "Questions : c'est toi qui réponds")
         .help(store.questionsAuto
-              ? "Sans réponse de ta part, Vigie choisit l'option recommandée au bout de \(store.questionWaitMin) min"
-              : "Les questions de Claude t'attendent : Vigie ne choisit pas à ta place")
+              ? "Questions de Claude : sans réponse de ta part, Vigie choisit l'option recommandée au bout de \(store.questionWaitMin) min"
+              : "Questions de Claude : elles t'attendent, Vigie ne choisit pas à ta place")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                CardTitle("Questions de Claude", trailing: store.questionsAuto ? "Vigie choisit pour toi" : "C'est toi qui réponds")
+                Toggle("Quand tu n'es pas là, Vigie choisit l'option recommandée", isOn: $store.questionsAuto)
+                Picker("Attendre avant de choisir", selection: $store.questionWaitMin) {
+                    ForEach([5, 10, 20, 30, 60], id: \.self) { minutes in
+                        Text("\(minutes) min").tag(minutes)
+                    }
+                }
+                .disabled(!store.questionsAuto)
+            }
+            .padding(16)
+            .frame(width: 360, alignment: .leading)
+        }
     }
 }
 
