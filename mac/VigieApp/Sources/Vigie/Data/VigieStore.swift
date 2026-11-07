@@ -53,6 +53,8 @@ final class VigieStore {
     private(set) var absenceCapped = false
     /// Tes absences (fenêtre cachée, écrans en veille), gardées dans UserDefaults (jamais en démonstration).
     @ObservationIgnored private var absence = Absence()
+    /// « À relire » : les fins de demande déjà vues sous leur conversation ouverte, ou retirées d'un clic.
+    private(set) var seenEnds = SeenEnds()
 
     /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, les tokens relus et les
     /// compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit et la part de la
@@ -211,7 +213,10 @@ final class VigieStore {
 
     init(client: VigieClient) {
         self.client = client
-        if !client.isDemo { absence = Absence.load() }
+        if !client.isDemo {
+            absence = Absence.load()
+            seenEnds = SeenEnds.load()
+        }
     }
 
     // MARK: Sondage
@@ -287,6 +292,25 @@ final class VigieStore {
         absence = next
         absence.save()
         return returned
+    }
+
+    /// Le compte rendu d'une fin de demande s'affiche sous sa conversation ouverte, fenêtre à l'écran : une fois la
+    /// conversation fermée, « À relire » ne le remontre pas.
+    func noteEndSeen(_ report: Report) {
+        guard windowVisible, !isDemo else { return }
+        rememberEnd(report)
+    }
+
+    /// « Retirer » une fin de « À relire ».
+    func dismissEnd(_ report: Report) {
+        rememberEnd(report)
+    }
+
+    private func rememberEnd(_ report: Report) {
+        var next = seenEnds
+        guard next.insert(report.stableKey, at: .now) else { return }
+        seenEnds = next
+        if !isDemo { next.save() }
     }
 
     /// L'app se ferme : l'absence commence maintenant (au prochain lancement, elle comptera si elle a duré).

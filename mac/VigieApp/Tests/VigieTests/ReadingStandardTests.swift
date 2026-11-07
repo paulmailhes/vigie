@@ -158,11 +158,15 @@ struct ReadingStandardTests {
                         { "ts": "2026-11-07T10:00:10Z", "kind": "file", "title": "Lit b.ts" },
                         { "ts": "2026-11-07T10:00:20Z", "kind": "other", "title": "Chercher « jauge »" },
                         { "ts": "2026-11-07T10:00:30Z", "kind": "file", "title": "Modifier c.ts" },
-                        { "ts": "2026-11-07T10:00:40Z", "kind": "other", "title": "Chercher sur le web « vitest »" } ] }
+                        { "ts": "2026-11-07T10:00:40Z", "kind": "other", "title": "Chercher sur le web « vitest »" },
+                        { "ts": "2026-11-07T10:00:50Z", "kind": "command", "title": "Mettre à jour les dépendances" },
+                        { "ts": "2026-11-07T10:01:00Z", "kind": "push", "title": "Mettre à jour le dépôt distant" } ] }
         """
         let detail = try JSONDecoder().decode(ConversationDetail.self, from: Data(json.utf8))
-        // les lectures et recherches dans le code ne s'affichent pas (titres d'aujourd'hui ou d'un moteur plus ancien)
-        #expect(ConversationDetailModel(detail).feed.map(\.value.title) == ["Chercher sur le web « vitest »", "Modifier c.ts"])
+        // les lectures et recherches dans le code ne s'affichent pas (titres d'aujourd'hui ou d'un moteur plus ancien) ;
+        // une commande, si, même décrite à l'infinitif comme une lecture
+        #expect(ConversationDetailModel(detail).feed.map(\.value.title)
+                == ["Mettre à jour le dépôt distant", "Mettre à jour les dépendances", "Chercher sur le web « vitest »", "Modifier c.ts"])
     }
 
     /// Un Int dans un libellé de bouton est groupé selon la langue (« localhost:5 173 ») : toujours `String(port)`.

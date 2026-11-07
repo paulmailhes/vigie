@@ -32,21 +32,36 @@ extension VigieStore {
         let ends = reports.map(\.value).filter { $0.reportKind == .missionDone && $0.conversationId == conversation.id }
         guard let last = ends.max(by: { ($0.ts ?? .distantPast) < ($1.ts ?? .distantPast) }), let ts = last.ts,
               now.timeIntervalSince(ts) < 24 * 3600 else { return nil }
-        if let activity = conversation.lastActivity, activity.timeIntervalSince(ts) > 10 * 60 { return nil }
+        if let activity = conversation.lastActivity, activity.timeIntervalSince(ts) > Self.reportStaleAfter { return nil }
         return last
     }
 
+    /// Une activité plus de 10 min après la fin d'une demande rend son compte rendu caduc.
+    static let reportStaleAfter: TimeInterval = 10 * 60
+
     /// Les fins de demande des conversations fermées depuis (onglet VS Code fermé la nuit) : elles n'ont plus de rangée
     /// dans « Conversations », « À relire » les montre. La dernière par conversation, de moins de 24 h, la plus récente
-    /// d'abord.
+    /// d'abord ; ni une fin déjà vue sous sa conversation ouverte ou retirée (`seenEnds`), ni une fin caduque (la même
+    /// règle que `finishedReport`).
     func closedEnds() -> [Report] {
+        Self.closedEnds(reports.map(\.value), conversation: { self.conversation($0) }, seen: seenEnds, now: now)
+    }
+
+    static func closedEnds(_ reports: [Report], conversation: (String) -> ConversationSummary?, seen: SeenEnds,
+                           now: Date) -> [Report] {
         var latest: [String: Report] = [:]
-        for end in reports.map(\.value) where end.reportKind == .missionDone {
-            guard let id = end.conversationId, let ts = end.ts, now.timeIntervalSince(ts) < 24 * 3600,
-                  conversation(id)?.isOpen != true else { continue }
+        for end in reports where end.reportKind == .missionDone {
+            guard let id = end.conversationId, let ts = end.ts, now.timeIntervalSince(ts) < 24 * 3600 else { continue }
             if (latest[id]?.ts ?? .distantPast) < ts { latest[id] = end }
         }
-        return latest.values.sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
+        // la dernière fin seulement : vue ou caduque, elle n'est pas remplacée par une plus ancienne
+        return latest.compactMap { id, end -> Report? in
+            let summary = conversation(id)
+            guard summary?.isOpen != true, !seen.contains(end.stableKey), let ts = end.ts else { return nil }
+            if let activity = summary?.lastActivity, activity.timeIntervalSince(ts) > reportStaleAfter { return nil }
+            return end
+        }
+        .sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
     }
 }
 
@@ -95,6 +110,8 @@ struct ConversationListSection: View {
                                                                since: store.since, now: store.now))
                             if let report = store.finishedReport(for: conversation) {
                                 FinishedReportRow(conversation: conversation, report: report)
+                                    // vu ici, fenêtre à l'écran : « À relire » ne le remontre pas une fois l'onglet fermé
+                                    .task(id: "\(report.stableKey)|\(store.windowVisible)") { store.noteEndSeen(report) }
                             }
                         }
                     }
@@ -357,7 +374,8 @@ struct ConversationListRow: View {
 
 /// Sous une conversation finie depuis moins de 24 h : ce que Claude a fait, son verdict et ses faits, sa durée et son
 /// heure, « À toi : … » en gras, la question qui finit le compte rendu, puis « Voir » et « Répondre dans VS Code ».
-/// `standalone` : la fin d'une conversation fermée depuis, seule dans « À relire » (son nom en tête, son icône).
+/// `standalone` : la fin d'une conversation fermée depuis, seule dans « À relire » (son nom en tête, son icône), avec
+/// la croix « Retirer » à l'écart.
 struct FinishedReportRow: View {
     @Environment(VigieStore.self) private var store
     /// nil : une conversation que Vigie ne suit plus (fermée depuis plus de 48 h).
@@ -378,6 +396,9 @@ struct FinishedReportRow: View {
                     content
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                IconButton("Retirer", systemImage: "xmark", help: "Retirer de « À relire »") {
+                    store.dismissEnd(report)
+                }
             }
             .padding(.vertical, 2)
             .accessibilityElement(children: .contain)

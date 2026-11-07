@@ -3,7 +3,8 @@ import SwiftUI
 /// Vue d'ensemble, dans un ordre fixe (un bloc apparaît ou disparaît, il ne change pas de place) :
 /// 1. « À décider » : toutes les décisions, quelle que soit la conversation, la plus proche du refus d'abord ;
 /// 2. « À regarder » : ce qui a mal tourné ou que tu dois faire toi-même (refus d'office, commande à lancer toi-même,
-///    limite), juste dessous pour ne jamais tomber sous le bas de la fenêtre ;
+///    limite), juste dessous pour ne jamais tomber sous le bas de la fenêtre ; 4 lignes, puis « Tout afficher » (une
+///    rafale de refus d'office ne repousse pas les conversations) ;
 /// 3. « Conversations » : une rangée chacune, avec sa pastille, et le compte rendu de celles qui ont fini ;
 /// 4. « À relire » : la fin des conversations fermées depuis (elles n'ont plus de rangée), puis ce que Vigie a choisi
 ///    pour toi ; 3 lignes, puis « Tout afficher » ;
@@ -15,8 +16,10 @@ import SwiftUI
 struct OverviewView: View {
     @Environment(VigieStore.self) private var store
     @State private var showAllReread = false
+    @State private var showAllLook = false
 
     private static let rereadShown = 3
+    private static let lookShown = 4
 
     var body: some View {
         Group {
@@ -58,8 +61,11 @@ struct OverviewView: View {
 
             if !look.isEmpty {
                 CardSection("À regarder", count: look.count) {
-                    ForEach(look) { item in
+                    ForEach(showAllLook ? look : Array(look.prefix(Self.lookShown))) { item in
                         ReviewRow(item: item)
+                    }
+                    if !showAllLook && look.count > Self.lookShown {
+                        ShowAllButton(count: look.count) { showAllLook = true }
                     }
                 }
             }

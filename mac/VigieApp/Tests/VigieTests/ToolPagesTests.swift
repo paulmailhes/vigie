@@ -44,20 +44,20 @@ struct ToolPagesTests {
 
     @Test func wrongAddressSaysBothAddresses() throws {
         let list = try accounts("""
-        [ { "id": "a", "email": "bob@autre.fr", "expectedEmail": "alex.durand@gmail.com", "wrongAccount": true, "connected": true },
-          { "id": "b", "email": "alex.durand@gmail.com", "expectedEmail": "Alex.Durand@gmail.com", "wrongAccount": true, "connected": true },
+        [ { "id": "a", "email": "bob@autre.fr", "expectedEmail": "alex@perso-exemple.fr", "wrongAccount": true, "connected": true },
+          { "id": "b", "email": "alex@perso-exemple.fr", "expectedEmail": "Alex@Perso-Exemple.fr", "wrongAccount": true, "connected": true },
           { "id": "c", "email": "bob@autre.fr", "wrongAccount": true, "connected": true },
           { "id": "d", "wrongAccount": true, "connected": true },
-          { "id": "e", "email": "alex.durand@gmail.com", "expectedEmail": "alex.durand@gmail.com", "connected": true } ]
+          { "id": "e", "email": "alex@perso-exemple.fr", "expectedEmail": "alex@perso-exemple.fr", "connected": true } ]
         """)
-        #expect(AccountCard.wrongAddressText(list[0]) == "Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com.")
+        #expect(AccountCard.wrongAddressText(list[0]) == "Connecté avec bob@autre.fr. Adresse prévue : alex@perso-exemple.fr.")
         #expect(AccountCard.address(list[0]) == "bob@autre.fr")
         // l'adresse prévue recopiée n'est pas l'adresse connectée : on ne la montre pas comme telle
-        #expect(AccountCard.wrongAddressText(list[1]) == "Connecté avec une autre adresse que Alex.Durand@gmail.com.")
+        #expect(AccountCard.wrongAddressText(list[1]) == "Connecté avec une autre adresse que Alex@Perso-Exemple.fr.")
         #expect(AccountCard.address(list[1]) == "Adresse différente de celle prévue")
         #expect(AccountCard.wrongAddressText(list[2]) == "Connecté avec bob@autre.fr, pas avec l'adresse prévue.")
         #expect(AccountCard.wrongAddressText(list[3]) == "Connecté avec une autre adresse que celle prévue.")
-        #expect(AccountCard.address(list[4]) == "alex.durand@gmail.com")
+        #expect(AccountCard.address(list[4]) == "alex@perso-exemple.fr")
         #expect(SidebarAccountRow.wrongAddressHelp == "Mauvaise adresse : reconnecte-le dans Comptes")
     }
 
@@ -65,7 +65,7 @@ struct ToolPagesTests {
         let data = try Data(contentsOf: Self.previewFolder.appending(path: "accounts.json"))
         let state = try JSONDecoder().decode(AccountsState.self, from: data)
         let wrong = try #require(state.accounts.first { $0.wrongAccount == true })
-        #expect(AccountCard.wrongAddressText(wrong) == "Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com.")
+        #expect(AccountCard.wrongAddressText(wrong) == "Connecté avec bob@autre.fr. Adresse prévue : alex@perso-exemple.fr.")
         // un seul compte qui serait plein avant la remise à zéro, et c'est avant elle
         let forecasts = state.accounts.filter { $0.usage?.week?.fullAt != nil }
         #expect(forecasts.map(\.id) == ["travail1"])

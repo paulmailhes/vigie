@@ -83,7 +83,8 @@ struct ConversationDetailModel: Equatable, Sendable {
 
     private static func feed(accepted: [Row<AcceptedItem>], activity: [ActivityItem]) -> [Row<AcceptedItem>] {
         // lectures et tâches de fond, pas des actions à montrer : les titres du moteur, à l'infinitif (et ceux d'un
-        // moteur plus ancien, au présent)
+        // moteur plus ancien, au présent). Jamais pour une commande : son titre est la description de Claude, elle aussi
+        // à l'infinitif (« Mettre à jour les dépendances », « Lister les fichiers » restent dans le Journal).
         let skip = ["Lire ", "Chercher « ", "Lister ", "Mettre à jour", "Charger la compétence", "Ajouter une tâche", "Te poser une question",
                     "Lit ", "Cherche ", "Liste ", "Met à jour", "Charge la compétence", "Ajoute une tâche", "Te pose une question"]
         // décisions de Vigie, par sorte d'action et par seconde : une action vue à ±4 s y est déjà
@@ -92,8 +93,8 @@ struct ConversationDetailModel: Equatable, Sendable {
         var extra: [AcceptedItem] = []
         for action in activity {
             guard let ts = action.ts, let title = action.title else { continue }
-            if skip.contains(where: { title.hasPrefix($0) }) { continue }
             let kind = ItemKind(raw: action.kind)
+            if ![.command, .commit, .push].contains(kind), skip.contains(where: { title.hasPrefix($0) }) { continue }
             let second = Int(ts.timeIntervalSince1970)
             if (-4...4).contains(where: { decided.contains("\(kind)|\(second + $0)") }) { continue }
             extra.append(AcceptedItem(ts: ts, kind: action.kind, title: title, detail: action.detail, decision: "auto", agent: action.agent))

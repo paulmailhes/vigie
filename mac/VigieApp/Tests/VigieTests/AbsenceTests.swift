@@ -297,3 +297,60 @@ struct FinishedFactsTests {
         #expect(try checks(#"{ "verdict": "nouveau", "unpushed": 1 }"#).facts.map(\.text) == ["1 commit pas envoyé"])
     }
 }
+
+/// « À relire » : la fin des conversations fermées depuis, sauf celles déjà vues sous leur rangée, retirées ou caduques.
+@MainActor
+struct ClosedEndsTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func iso(_ hours: Double) -> String {
+        ISO8601DateFormatter().string(from: now.addingTimeInterval(hours * 3600))
+    }
+
+    private func end(_ id: String, _ conversation: String, _ hours: Double) throws -> Report {
+        try JSONDecoder().decode(Report.self, from: Data("""
+        { "kind": "missionDone", "id": "\(id)", "conversationId": "\(conversation)", "title": "Fini", "ts": "\(iso(hours))" }
+        """.utf8))
+    }
+
+    private func conversations() throws -> [ConversationSummary] {
+        try JSONDecoder().decode([ConversationSummary].self, from: Data("""
+        [ { "id": "atelier", "project": "Atelier", "status": "closed", "lastActivity": "\(iso(-2))" },
+          { "id": "boutique", "project": "Boutique", "status": "closed", "lastActivity": "\(iso(-1))" },
+          { "id": "portail", "project": "Portail", "status": "idle", "lastActivity": "\(iso(-1))" } ]
+        """.utf8))
+    }
+
+    @Test func onlyTheLastUnseenEndOfAClosedConversation() throws {
+        let list = try conversations()
+        let lookup: (String) -> ConversationSummary? = { id in list.first { $0.id == id } }
+        let reports = [
+            try end("fin:atelier:1", "atelier", -5), try end("fin:atelier:2", "atelier", -2),
+            // Boutique a fini à -4 h puis retravaillé jusqu'à -1 h sans finir : ce compte rendu n'est plus la conclusion
+            try end("fin:boutique:1", "boutique", -4),
+            // Portail est encore ouverte : son compte rendu est sous sa rangée
+            try end("fin:portail:1", "portail", -1),
+            // plus de 24 h
+            try end("fin:vieille:1", "vieille", -30),
+        ]
+        var seen = SeenEnds()
+        #expect(VigieStore.closedEnds(reports, conversation: lookup, seen: seen, now: now).map(\.stableKey) == ["fin:atelier:2"])
+        // vue sous sa rangée avant la fermeture (ou retirée) : elle part, et la fin plus ancienne ne prend pas sa place
+        seen.insert("fin:atelier:2", at: now)
+        #expect(VigieStore.closedEnds(reports, conversation: lookup, seen: seen, now: now).isEmpty)
+    }
+
+    @Test func seenEndsAreKeptADayAcrossLaunches() throws {
+        let suite = "vigie.essais.fins.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var seen = SeenEnds()
+        let added = seen.insert("fin:atelier:2", at: now)
+        let again = seen.insert("fin:atelier:2", at: now.addingTimeInterval(60))
+        #expect(added)
+        #expect(!again, "déjà vue : rien ne change")
+        seen.save(to: defaults)
+        #expect(SeenEnds.load(from: defaults, now: now.addingTimeInterval(3600)).contains("fin:atelier:2"))
+        #expect(!SeenEnds.load(from: defaults, now: now.addingTimeInterval(25 * 3600)).contains("fin:atelier:2"))
+    }
+}

@@ -321,7 +321,7 @@
       "id": "perso",
       "label": "Perso",
       "email": "bob@autre.fr",
-      "expectedEmail": "alex.durand@gmail.com",
+      "expectedEmail": "alex@perso-exemple.fr",
       "wrongAccount": true,
       "connected": true,
       "isDefault": false,

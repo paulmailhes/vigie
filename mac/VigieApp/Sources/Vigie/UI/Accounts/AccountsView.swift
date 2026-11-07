@@ -148,7 +148,7 @@ struct AccountCard: View {
         return email
     }
 
-    /// « Connecté avec bob@autre.fr. Adresse prévue : alex.durand@gmail.com. » (sans « au lieu de », qui demanderait
+    /// « Connecté avec bob@autre.fr. Adresse prévue : alex@perso-exemple.fr. » (sans « au lieu de », qui demanderait
     /// une élision devant une voyelle).
     nonisolated static func wrongAddressText(_ account: Account) -> String {
         switch (foundEmail(account), account.expectedEmail) {

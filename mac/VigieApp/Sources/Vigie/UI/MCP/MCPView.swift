@@ -30,23 +30,12 @@ struct MCPView: View {
     @Environment(VigieStore.self) private var store
     @State private var editor: MCPEditorRequest?
     @State private var showLibrary = false
-    @State private var addOpen = false
     @State private var removal: MCPRemoval?
     @State private var confirmRemoval = false
     /// Projets ouverts ou refermés à la main. Au départ, seuls ceux qui ont un MCP à régler sont ouverts (on voit la
     /// liste des projets, on ouvre celui qui intéresse).
     @State private var opened: Set<String> = []
     @State private var closed: Set<String> = []
-
-    /// Referme la bulle « Ajouter un MCP », puis ouvre la feuille choisie (une feuille ouverte pendant que la bulle se
-    /// ferme ne s'afficherait pas).
-    private func closeAddThen(_ open: @escaping @MainActor () -> Void) {
-        addOpen = false
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(200))
-            open()
-        }
-    }
 
     var body: some View {
         Group {
@@ -71,29 +60,11 @@ struct MCPView: View {
                 .help("Copie une demande d'aide toute prête et ouvre VS Code : colle-la dans une conversation")
             }
             ToolbarItem {
-                // un bouton et sa bulle, pas un Menu : dans une barre d'outils, un Menu n'y garde que son icône
-                Button {
-                    addOpen.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("Ajouter un MCP")
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .fixedSize()
-                }
-                .accessibilityLabel("Ajouter un MCP")
-                .help("Depuis la bibliothèque des MCP officiels, ou à la main")
-                .popover(isPresented: $addOpen, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { closeAddThen { showLibrary = true } }
-                        Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { closeAddThen { editor = .addUser } }
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(14)
-                }
+                // un Menu, pas un bouton et sa bulle : en fenêtre étroite, il passe derrière le chevron » et s'y ouvre
+                // en sous-menu (une bulle n'aurait plus où s'accrocher). Dans la barre, il ne garde que son icône :
+                // « Ajouter un MCP » est écrit en entier en tête de « Sur ton Mac ».
+                addMenu
+                    .help("Ajouter un MCP, depuis la bibliothèque des MCP officiels ou à la main")
             }
         }
         .sheet(item: $editor) { request in
@@ -151,6 +122,18 @@ struct MCPView: View {
         return "\(base) · \(Freshness.text(date: lastCheck, now: store.now))"
     }
 
+    /// « Ajouter un MCP » : la bibliothèque des MCP officiels, ou à la main. Le même menu dans la barre d'outils et en
+    /// tête de « Sur ton Mac » ; la feuille s'ouvre tout de suite.
+    private var addMenu: some View {
+        Menu {
+            Button("Bibliothèque de MCP officiels…", systemImage: "books.vertical") { showLibrary = true }
+            Button("À la main (avancé)…", systemImage: "slider.horizontal.3") { editor = .addUser }
+        } label: {
+            Label("Ajouter un MCP", systemImage: "plus")
+        }
+        .accessibilityLabel("Ajouter un MCP")
+    }
+
     private func content(_ mcp: MCPState) -> some View {
         let fixes = self.fixes
         let projects = mcp.projects + mcp.local
@@ -176,7 +159,13 @@ struct MCPView: View {
                 if mcp.user.isEmpty { EmptyRow(text: "Aucun MCP sur ton Mac") }
             } header: {
                 SectionHeader(Theme.title(for: .mac), count: mcp.user.count,
-                              note: "Dans toutes tes conversations, sur tous tes comptes Claude.", inset: PageMetrics.formHeaderInset)
+                              note: "Dans toutes tes conversations, sur tous tes comptes Claude.", inset: PageMetrics.formHeaderInset) {
+                    addMenu
+                        .menuStyle(.button)
+                        .fixedSize()
+                        .glassButton()
+                        .help("Depuis la bibliothèque des MCP officiels, ou à la main")
+                }
             }
 
             Section {

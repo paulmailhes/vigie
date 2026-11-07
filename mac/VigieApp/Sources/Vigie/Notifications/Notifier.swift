@@ -85,6 +85,9 @@ final class Notifier {
 
     private static let seenKey = "notify.seen"
     private static let seededKey = "notify.seeded"
+    /// Format des clés : 2 depuis la 0.3.28 (alerte de la semaine à l'heure près, avis du moteur sans heure).
+    private static let keysVersionKey = "notify.keysVersion"
+    private static let keysVersion = 2
     /// Un élément notifié est oublié au bout de 4 jours ; une alerte de la semaine d'un compte au bout de 8 (sinon
     /// elle repartait en fin de semaine, sa clé oubliée).
     private static func memory(for key: String) -> TimeInterval {
@@ -132,8 +135,22 @@ final class Notifier {
         if !defaults.bool(forKey: Self.seededKey) {
             for candidate in candidates { seen[candidate.key] = now; versions[candidate.key] = candidate.version }
             defaults.set(true, forKey: Self.seededKey)
+            defaults.set(Self.keysVersion, forKey: Self.keysVersionKey)
             save()
             return
+        }
+
+        // Mise à jour depuis la 0.3.27 : les alertes de la semaine et les avis du moteur ont changé de clé. Ceux déjà là
+        // sont considérés comme vus, une fois (sinon « Travail 1 passe 90 % de sa semaine » ou « Perso : à
+        // reconnecter » repartiraient à la mise à jour).
+        if defaults.integer(forKey: Self.keysVersionKey) < Self.keysVersion {
+            let notices = Set(store.toReview.filter { $0.reviewKind == .other }.map { "r:" + $0.id })
+            for candidate in candidates where candidate.key.hasPrefix("a:") || notices.contains(candidate.key) {
+                seen[candidate.key] = seen[candidate.key] ?? now
+                versions[candidate.key] = candidate.version
+            }
+            defaults.set(Self.keysVersion, forKey: Self.keysVersionKey)
+            save()
         }
 
         // La conversation a repris le travail : sa fin annoncée n'est plus vraie.
@@ -218,8 +235,10 @@ final class Notifier {
                                       conversationId: item.conversationId, reviewId: nil))
             case .other:
                 // un avis du moteur (compte à reconnecter, compte changé, module Codex) : son propre titre, jamais
-                // « … t'attend » (rien à décider dans une conversation)
+                // « … t'attend » (rien à décider dans une conversation), et sa conversation en sous-titre (après « Tout
+                // passer sur… », quatre « Compte changé » disent chacun laquelle relancer)
                 list.append(Candidate(key: "r:" + item.id, kind: .waiting, title: item.title ?? "Vigie",
+                                      subtitle: item.conversationId != nil ? conversation : "",
                                       body: item.detail ?? "", conversationId: item.conversationId, reviewId: nil,
                                       accountId: item.accountId))
             case .blocked:
