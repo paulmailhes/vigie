@@ -55,6 +55,9 @@ final class VigieStore {
     @ObservationIgnored private var absence = Absence()
     /// « À relire » : les fins de demande déjà vues sous leur conversation ouverte, ou retirées d'un clic.
     private(set) var seenEnds = SeenEnds()
+    /// « À régler » de la page MCP : les lignes masquées d'une croix. Changées seulement par `hideFix`,
+    /// `showHiddenFixes` et `pruneHiddenFixes` (HiddenFixes.swift).
+    var hiddenFixes = HiddenFixes()
 
     /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, les tokens relus et les
     /// compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit et la part de la
@@ -216,6 +219,7 @@ final class VigieStore {
         if !client.isDemo {
             absence = Absence.load()
             seenEnds = SeenEnds.load()
+            hiddenFixes = HiddenFixes.load()
         }
     }
 

@@ -95,8 +95,9 @@ struct MCPFix: Identifiable, Equatable {
     }
 }
 
-/// Une ligne de « À régler » : le MCP, ce qui ne va pas et d'où il vient, le geste. Fenêtre étroite : le geste passe
-/// sous le texte.
+/// Une ligne de « À régler » : le MCP, ce qui ne va pas et d'où il vient, le geste, puis la croix « Masquer » (ce MCP
+/// ne t'intéresse pas là : la ligne part tout de suite, sa puce reste sur la rangée du MCP). Fenêtre étroite : le
+/// geste passe sous le texte, la croix reste en haut à droite.
 struct MCPFixRow: View {
     @Environment(VigieStore.self) private var store
     let fix: MCPFix
@@ -107,6 +108,7 @@ struct MCPFixRow: View {
                 label
                     .frame(minWidth: 200, idealWidth: 320, maxWidth: .infinity, alignment: .leading)
                 action
+                hideButton
             }
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -114,9 +116,17 @@ struct MCPFixRow: View {
                     action
                 }
                 Spacer(minLength: 0)
+                hideButton
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var hideButton: some View {
+        IconButton("Masquer", systemImage: "xmark",
+                   help: "Masquer cette ligne. « \(fix.name) » garde sa puce plus bas dans la page.") {
+            store.hideFix(fix)
+        }
     }
 
     private var label: some View {
@@ -173,6 +183,32 @@ struct MCPFixRow: View {
             SystemActions.activateVSCode()
         }
         store.show(info: "Dans une conversation Claude de ce projet, accepte « \(fix.name) » quand il te le propose")
+    }
+}
+
+/// Sous « À régler », ou à sa place quand tout est masqué : « 3 masqués · Réafficher », discret.
+struct HiddenFixesLine: View {
+    @Environment(VigieStore.self) private var store
+    let count: Int
+    /// Toute la section est masquée : la ligne dit de quoi il s'agit (« 3 masqués dans « À régler » »).
+    var alone = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // le texte en gris, le lien dans sa couleur de lien
+            Group {
+                Text(alone ? "\(Fmt.count(count, "masqué")) dans « À régler »" : Fmt.count(count, "masqué"))
+                Text("·")
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(.secondary)
+            Button("Réafficher") { store.showHiddenFixes() }
+                .buttonStyle(.link)
+                .help("Remontre dans « À régler » les lignes que tu as masquées")
+        }
+        .font(.callout)
+        .lineLimit(1)
+        .padding(.top, 4)
     }
 }
 

@@ -23,9 +23,9 @@ struct MCPRemoval: Equatable {
     let projectPath: String?
 }
 
-/// MCP : d'abord ce qui est à régler (une ligne par MCP et par compte, avec son geste), puis les MCP de ton Mac, de
-/// tes projets et de ton compte claude.ai. Chaque rangée porte ses raccourcis : couper ou réactiver, reconnecter,
-/// modifier.
+/// MCP : d'abord ce qui est à régler (une ligne par MCP et par compte, avec son geste ; une croix masque ce qui ne
+/// t'intéresse pas, « Réafficher » le remontre), puis les MCP de ton Mac, de tes projets et de ton compte claude.ai.
+/// Chaque rangée porte ses raccourcis : couper ou réactiver, reconnecter, modifier.
 struct MCPView: View {
     @Environment(VigieStore.self) private var store
     @State private var editor: MCPEditorRequest?
@@ -89,11 +89,23 @@ struct MCPView: View {
             Text(removal.projectPath == nil ? "Il sera retiré de tous tes comptes." : "Il sera retiré de ce projet (une copie de sauvegarde est gardée).")
         }
         .task(id: store.windowVisible) { await store.followMCP() }
+        .onChange(of: allFixes.map(\.id), initial: true) { pruneHidden() }
     }
 
-    /// Ce qui est à régler, une ligne par MCP et par compte.
-    private var fixes: [MCPFix] {
+    /// Ce qui est à régler, une ligne par MCP et par compte, masqué ou non.
+    private var allFixes: [MCPFix] {
         store.mcp.map { MCPFix.all(in: $0, accounts: store.accounts) } ?? []
+    }
+
+    /// Ce qui reste dans « À régler » : sans les lignes masquées d'une croix.
+    private var fixes: [MCPFix] {
+        store.hiddenFixes.visible(allFixes)
+    }
+
+    /// Une fois les MCP et les comptes lus, les masquages qui ne correspondent plus à rien sont oubliés (24 h après).
+    private func pruneHidden() {
+        guard store.mcp != nil, !store.accounts.isEmpty, !store.hiddenFixes.ids.isEmpty else { return }
+        store.pruneHiddenFixes(current: Set(allFixes.map(\.id)))
     }
 
     /// Le dernier contrôle de l'état des MCP, tous comptes confondus.
@@ -104,7 +116,8 @@ struct MCPView: View {
         return health.compactMap(MCPStatusStyle.lastCheck).max()
     }
 
-    /// « 7 sur ton Mac · 5 dans tes projets · 3 à régler » ; rien à régler : la fraîcheur à la place.
+    /// « 7 sur ton Mac · 5 dans tes projets · 3 à régler » (sans les lignes masquées) ; rien à régler : la fraîcheur à
+    /// la place.
     private var subtitle: String {
         guard let mcp = store.mcp else { return "" }
         let projectCount = (mcp.projects + mcp.local).reduce(0) { $0 + $1.servers.count }
@@ -135,7 +148,9 @@ struct MCPView: View {
     }
 
     private func content(_ mcp: MCPState) -> some View {
-        let fixes = self.fixes
+        let allFixes = self.allFixes
+        let fixes = store.hiddenFixes.visible(allFixes)
+        let hiddenCount = allFixes.count - fixes.count
         let projects = mcp.projects + mcp.local
         return Form {
             if !fixes.isEmpty {
@@ -147,6 +162,14 @@ struct MCPView: View {
                     SectionHeader("À régler", count: fixes.count,
                                   note: lastCheck.map { Freshness.text(prefix: "État mis à jour", date: $0, now: store.now) },
                                   inset: PageMetrics.formHeaderInset)
+                } footer: {
+                    if hiddenCount > 0 { HiddenFixesLine(count: hiddenCount) }
+                }
+            } else if hiddenCount > 0 {
+                // tout est masqué : la section disparaît, une ligne discrète à sa place pour revenir en arrière
+                Section {
+                } footer: {
+                    HiddenFixesLine(count: hiddenCount, alone: true)
                 }
             }
 
@@ -170,8 +193,9 @@ struct MCPView: View {
 
             Section {
                 ForEach(projects) { project in
-                    let projectFixes = fixes.filter { $0.path == project.path }
-                    DisclosureGroup(isExpanded: expandedBinding(project.path, hasFixes: !projectFixes.isEmpty)) {
+                    // la puce du projet dit l'état réel (masqué ou non) ; seul ce qui reste à régler l'ouvre d'office
+                    let projectFixes = allFixes.filter { $0.path == project.path }
+                    DisclosureGroup(isExpanded: expandedBinding(project.path, hasFixes: fixes.contains { $0.path == project.path })) {
                         ForEach(project.servers) { server in
                             ProjectServerRow(project: project, server: server,
                                              edit: { editor = .editProject(path: project.path, server: server) },
