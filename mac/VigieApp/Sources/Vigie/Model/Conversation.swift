@@ -79,7 +79,7 @@ struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
     }
     var isOpen: Bool { state != .closed }
 
-    /// Titre court affiché dans les listes : le projet (« Atelier », « Portail · back »), sinon le titre.
+    /// Titre court affiché dans les listes : le projet (« Atelier », « Portail/back »), sinon le titre.
     var shortTitle: String {
         if let project, !project.isEmpty { return ProjectName.display(project, cwd: cwd) }
         return title ?? "Conversation"
@@ -179,7 +179,8 @@ enum ProjectName {
     ]
 
     /// « atelier » → « Atelier », « auto-accept » → « Auto-accept »,
-    /// « back » dans …/portail/back → « Portail · back ».
+    /// « back » dans …/portail/back → « Portail/back ». Le « · » ne sert qu'entre les infos d'une ligne, jamais dans
+    /// un nom.
     static func display(_ raw: String, cwd: String? = nil) -> String {
         let name = raw.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return raw }
@@ -189,7 +190,7 @@ enum ProjectName {
                 parent = String(parent.dropLast(name.count + 1))
             }
             if !parent.isEmpty, parent != "Code", parent != "/" {
-                return "\(readable(parent)) · \(name)"
+                return "\(readable(parent))/\(name)"
             }
         }
         return readable(name)

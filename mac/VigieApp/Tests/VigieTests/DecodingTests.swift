@@ -375,8 +375,8 @@ struct DecodingTests {
     @Test func projectNames() {
         #expect(ProjectName.display("atelier") == "Atelier")
         #expect(ProjectName.display("auto-accept") == "Auto-accept")
-        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail/back") == "Portail · back")
-        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail-back/back") == "Portail · back")
+        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail/back") == "Portail/back")
+        #expect(ProjectName.display("back", cwd: "/Users/alex/Code/portail-back/back") == "Portail/back")
         #expect(ProjectName.display("front", cwd: "/Users/alex/Code/front") == "Front")
     }
 

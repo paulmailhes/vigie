@@ -611,7 +611,69 @@ extension VigieStore {
         return accounts.first { $0.id == id } ?? accountsState?.accounts.first { $0.id == id }
     }
 
+    /// Tout « À regarder » du moteur, sans tri par sens. Ce n'est PAS le badge rouge : badge rouge = `decisionCount`
+    /// (la barre latérale, l'icône et le panneau de la barre des menus y passent).
     var toReviewCount: Int { toReview.count }
+
+    // MARK: Les trois listes : À décider · À regarder · À relire
+
+    /// Il faut un clic maintenant (autoriser, refuser, répondre) dans la conversation : action sensible en attente,
+    /// question posée, conversation qui t'attend.
+    static func isDecision(_ item: ReviewItem) -> Bool {
+        item.needsDecision || item.reviewKind == .waiting
+    }
+
+    /// A mal tourné ou à faire toi-même : refusée d'office (délai, règle), autorisée mais en échec, sudo à lancer
+    /// toi-même, limite atteinte. Se retire (« Retirer »).
+    static func isLook(_ item: ReviewItem) -> Bool {
+        (item.reviewKind == .blocked && !item.needsDecision) || item.reviewKind == .limit
+    }
+
+    /// « À décider » : LA liste du badge rouge, la même partout (barre latérale, icône, barre des menus, pages). Les
+    /// échéances les plus proches d'abord (refusée d'office dans 8 min), puis la plus récente.
+    var decisionItems: [ReviewItem] { decisionItems(for: nil) }
+
+    /// Le badge rouge : le nombre de décisions qui t'attendent, partout le même.
+    var decisionCount: Int { toReview.count(where: Self.isDecision) }
+
+    /// « À décider » d'une conversation (nil : toutes), triée comme `decisionItems`.
+    func decisionItems(for conversationID: String?) -> [ReviewItem] {
+        Self.byDeadline(toReview.filter { Self.isDecision($0) && Self.matches($0, conversationID) })
+    }
+
+    /// Échéance la plus proche d'abord (sans échéance : après), puis la plus récente ; l'ordre reçu départage.
+    static func byDeadline(_ items: [ReviewItem]) -> [ReviewItem] {
+        items.enumerated().sorted { a, b in
+            switch (a.element.expiresAt, b.element.expiresAt) {
+            case let (x?, y?) where x != y: return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: break
+            }
+            switch (a.element.ts, b.element.ts) {
+            case let (x?, y?) where x != y: return x > y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return a.offset < b.offset
+            }
+        }.map(\.element)
+    }
+
+    /// « À regarder » d'une conversation (nil : toutes) : refus d'office, échecs, sudo à lancer toi-même, limites ;
+    /// dans l'ordre du moteur (le plus récent d'abord). Avec « Voir » et « Retirer » (`dismissReview`).
+    func lookItems(for conversationID: String?) -> [ReviewItem] {
+        toReview.filter { Self.isLook($0) && Self.matches($0, conversationID) }
+    }
+
+    /// « À relire » d'une conversation (nil : toutes) : ce que Vigie a choisi pour toi (questions choisies pour toi),
+    /// sans urgence ; « Ça me va » ou « Changer ».
+    func rereadItems(for conversationID: String?) -> [ReviewItem] {
+        toReview.filter { !Self.isDecision($0) && !Self.isLook($0) && Self.matches($0, conversationID) }
+    }
+
+    private static func matches(_ item: ReviewItem, _ conversationID: String?) -> Bool {
+        conversationID == nil || item.conversationId == conversationID
+    }
 
     /// Ouvre la page Comptes sur un compte (chaque compte est une ligne de la barre latérale).
     func showAccounts(_ id: String?) {

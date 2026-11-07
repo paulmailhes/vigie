@@ -29,26 +29,15 @@ struct StatusDot: View {
     }
 }
 
-/// Étiquette courte et discrète (« Par toi », « Créé »). Rouge seulement pour ce qui t'attend.
+/// Ancienne étiquette (« Par toi », « Créé ») : désormais une simple `Chip` neutre, ou rouge pour ce qui t'attend.
+/// Gardée pour les écrans pas encore passés à `Chip` ; à remplacer par `Chip(text, symbol:, tone:)`.
 struct Pill: View {
     let text: String
     var alert = false
     var symbol: String?
 
     var body: some View {
-        HStack(spacing: 3) {
-            if let symbol {
-                Image(systemName: symbol)
-                    .imageScale(.small)
-            }
-            Text(text)
-        }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(alert ? AnyShapeStyle(Color.red.opacity(0.12)) : AnyShapeStyle(.quaternary), in: .capsule)
-        .fixedSize()
+        Chip(text, symbol: symbol, tone: alert ? .alert : .neutral)
     }
 }
 
@@ -82,23 +71,31 @@ struct RowIcon: View {
     }
 }
 
-/// Compteur « à regarder » : gris, rouge seulement quand quelque chose t'attend.
+/// Compteur en pastille : gris par défaut ; rouge (`urgent`) seulement pour les décisions qui t'attendent (« À
+/// décider » : le badge rouge a la même définition partout, `store.decisionCount`) ; orange (`warn`) pour ce qui est à
+/// surveiller sans urgence (« En fond »).
+/// Orange lisible : fond `Theme.warnText` (orange foncé en clair) et chiffre `Theme.onWarn` (blanc en clair, noir à
+/// 85 % en sombre) ; l'orange système sous un chiffre blanc ne faisait que 2,3:1.
+/// Dans un titre de section, un compteur qui n'est pas urgent s'écrit en chiffre gris (`SectionHeader(count:)`), pas
+/// en pastille.
 struct CountBadge: View {
     let count: Int
     var urgent = false
     /// À surveiller, sans urgence (orange).
     var warn = false
+    /// Ce que VoiceOver dit (« 3 à décider ») ; sinon déduit du ton.
+    var label: String? = nil
 
     var body: some View {
         Text(count, format: .number)
             .font(.caption.bold())
             .monospacedDigit()
-            .foregroundStyle(urgent || warn ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .foregroundStyle(urgent ? AnyShapeStyle(.white) : warn ? AnyShapeStyle(Theme.onWarn) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .frame(minWidth: 18)
-            .background(urgent ? AnyShapeStyle(Color.red) : warn ? AnyShapeStyle(Theme.warn) : AnyShapeStyle(.quaternary), in: .capsule)
-            .accessibilityLabel(urgent ? "\(count) à regarder, dont ce qui t'attend" : "\(count) à regarder")
+            .background(urgent ? AnyShapeStyle(Theme.alert) : warn ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.quaternary), in: .capsule)
+            .accessibilityLabel(label ?? (urgent ? "\(count) à décider" : warn ? "\(count) à surveiller" : "\(count) à regarder"))
     }
 }
 
@@ -125,7 +122,9 @@ struct UsageBar: View {
     }
 }
 
-/// « mis à jour il y a 12 min · 01:18 » : l'âge d'une information, tenu à jour toutes les 30 s.
+/// « mis à jour il y a 12 min · 01:18 » : l'âge d'une information, tenu à jour toutes les 30 s. Un seul verbe partout
+/// (« mis à jour », jamais « relevé » ni « vérifié » seul). Hors d'une vue (sous-titre de fenêtre, `.help`) :
+/// `Freshness.text(date: d, now: store.now)`.
 struct Freshness: View {
     @Environment(VigieStore.self) private var store
     let date: Date?
@@ -142,7 +141,9 @@ struct Freshness: View {
         }
     }
 
-    static func text(prefix: String, date: Date, now: Date) -> String {
+    /// Le même texte, pour un endroit qui n'accepte pas une vue (`.navigationSubtitle`, `.help`) : « mis à jour il y a
+    /// 12 min · 01:18 ». Il ne se met pas à jour tout seul : la vue qui l'appelle se redessine avec `store.now`.
+    static func text(prefix: String = "mis à jour", date: Date, now: Date) -> String {
         let head = prefix.isEmpty ? "" : prefix + " "
         return "\(head)\(Fmt.ago(date, now: now)) · \(Fmt.when(date, now: now))"
     }

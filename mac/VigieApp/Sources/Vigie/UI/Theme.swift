@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Couleurs, icônes et libellés partagés : une seule source pour toute l'app.
@@ -5,13 +6,31 @@ import SwiftUI
 /// Une couleur = un sens, partout :
 /// - vert (`live`) : travaille, consomme en ce moment ;
 /// - orange (`warn`) : à surveiller, sans urgence (s'emballe, limite proche, MCP à connecter) ;
-/// - rouge (`alert`) : t'attend ou bloqué, limite atteinte ;
-/// - bleu (`action`) : ce sur quoi on clique (boutons principaux, liens) ;
+/// - rouge (`alert`) : t'attend (à autoriser, à répondre), refusée d'office, en échec, limite atteinte ;
+/// - bleu (`action`) : ce sur quoi on clique (boutons principaux, liens, filtre choisi). Jamais `Color.accentColor`,
+///   qui suit la couleur d'accent du Mac (orange chez certains) et prendrait le sens d'un avertissement ;
 /// - violet (`you`) : ce que tu as écrit, dans l'Échange d'une conversation ;
 /// - le reste en neutres ; atténué (`dim`) ce qui est fermé, pas connecté ou coupé.
+///
+/// Deux familles par sens :
+/// - REMPLISSAGE : `live`, `warn`, `alert`, `you` (couleurs système). Pour les ronds, icônes, jauges, courbes et fonds
+///   teintés (`.opacity(0.12)`). Elles sont trop pâles pour du texte en mode clair (orange sur blanc : 2,3:1).
+/// - TEXTE : `liveText`, `warnText`, `alertText`, `youText`. Pour tout mot écrit en couleur (verdict, « à connecter »,
+///   « rien écrit depuis 10 min », titre d'une alerte). Mode clair : un ton plus foncé, au moins 4,5:1 sur fond blanc
+///   et sur le gris d'une carte (et sur une puce teintée) ; contraste élevé : plus foncé encore ; mode sombre : la
+///   couleur système, déjà lisible.
+/// Le texte coloré reste réservé aux mots courts : une phrase longue s'écrit en `.primary` ou `.secondary`, avec
+/// seulement son icône en couleur. Un texte qui informe ne descend jamais sous `.secondary` (`.tertiary` : les « · »
+/// décoratifs et les chevrons seulement).
 /// Les icônes sont des SF Symbols monochromes, sans tuile colorée.
 enum Theme {
+    /// Rayon des tuiles, sections et cartes posées sur la page (marge intérieure 12).
     static let corner: CGFloat = 12
+    /// Rayon de ce qui est posé DANS une tuile (bulle de l'Échange, tuile d'agent, carte d'alerte) : plus petit que le
+    /// rayon de la tuile, sinon les coins intérieurs paraissent trop ronds. Options d'une feuille : 8.
+    static let cornerInner: CGFloat = 6
+
+    // MARK: Remplissage (ronds, icônes, jauges, fonds teintés)
 
     static let live = Color.green
     static let warn = Color.orange
@@ -21,6 +40,63 @@ enum Theme {
     static let you = Color.purple
     /// Opacité de ce qui est fermé, pas connecté ou désactivé.
     static let dim: Double = 0.45
+
+    // MARK: Texte coloré (lisible en mode clair)
+
+    /// Vert pour un mot : « en direct », « prêt ».
+    static let liveText = textColor(light: 0x1A7230, highContrast: 0x145A26, dark: .systemGreen)
+    /// Orange pour un mot : « rien écrit depuis 10 min », « à connecter », « S'emballe ».
+    static let warnText = textColor(light: 0x9E4800, highContrast: 0x8A3F00, dark: .systemOrange)
+    /// Rouge pour un mot : « À autoriser », « en échec », titre d'une alerte.
+    static let alertText = textColor(light: 0xB8141A, highContrast: 0x9E1116, dark: .systemRed)
+    /// Violet pour un mot : « Toi · hier 17:18 ».
+    static let youText = textColor(light: 0x8E24AA, highContrast: 0x6F1C85, dark: .systemPurple)
+
+    /// Le chiffre écrit sur un fond `warnText` (compteur orange) : blanc en clair (6,2:1), noir à 85 % en sombre (sur
+    /// l'orange système, le blanc ne fait que 2,3:1).
+    static let onWarn = Color(nsColor: NSColor(name: "vigie.onWarn") { appearance in
+        isDark(appearance) ? NSColor.black.withAlphaComponent(0.85) : .white
+    })
+
+    // MARK: Surfaces
+
+    /// Surface « posée » sur une tuile (bulle de Claude, tuile d'agent, puce « À toi », puce sur une tuile teintée) :
+    /// plus claire que la tuile dans les deux modes. `.background.opacity(0.7)` paraissait posé en clair mais creusé en
+    /// sombre (presque noir sur une tuile grise).
+    static let raised = Color(nsColor: NSColor(name: "vigie.raised") { appearance in
+        isDark(appearance) ? NSColor.white.withAlphaComponent(0.06) : NSColor.white.withAlphaComponent(0.7)
+    })
+
+    /// Couleur de texte dynamique : un ton foncé fixe en clair (plus foncé encore en contraste élevé), la couleur
+    /// système en sombre (elle suit d'elle-même le contraste élevé).
+    private static func textColor(light: UInt32, highContrast: UInt32, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            switch appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua]) {
+            case NSAppearance.Name.darkAqua, NSAppearance.Name.accessibilityHighContrastDarkAqua: dark
+            case NSAppearance.Name.accessibilityHighContrastAqua: rgb(highContrast)
+            default: rgb(light)
+            }
+        })
+    }
+
+    private static func isDark(_ appearance: NSAppearance) -> Bool {
+        let match = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua])
+        return match == .darkAqua || match == .accessibilityHighContrastDarkAqua
+    }
+
+    private static func rgb(_ hex: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+
+    /// Couleur de TEXTE d'un état (le rond garde `color(for:)`).
+    static func textColor(for status: ConversationStatus) -> Color {
+        switch status {
+        case .working: liveText
+        case .waiting, .blocked: alertText
+        case .idle, .closed, .unknown: .secondary
+        }
+    }
 
     /// Couleur de la pastille d'état.
     static func color(for status: ConversationStatus) -> Color {
@@ -41,7 +117,8 @@ enum Theme {
         case .working: "Travaille"
         case .idle: "Au repos"
         case .waiting: "T'attend"
-        case .blocked: "Bloquée"
+        // une action sensible attend ta décision (« Bloquée » se lisait comme « déjà refusée »)
+        case .blocked: "À autoriser"
         case .closed: "Fermée"
         case .unknown: "État inconnu"
         }
@@ -73,12 +150,13 @@ enum Theme {
         }
     }
 
-    /// Libellé d'une décision ; rien pour « acceptée » (le cas normal), rouge pour ce qui t'attend.
+    /// Libellé d'une décision du Journal ; rien pour « acceptée » (le cas normal), rouge pour ce qui t'attend ou a été
+    /// refusé d'office. `blocked` = refusée par Vigie (délai, règle) : le moteur classe l'attente en `waiting`.
     static func decision(_ decision: Decision) -> (label: String?, alert: Bool) {
         switch decision {
         case .auto: (nil, false)
         case .you: ("Par toi", false)
-        case .blocked: ("Bloquée", true)
+        case .blocked: ("Refusée d'office", true)
         case .waiting: ("T'attend", true)
         case .denied: ("Refusée", false)
         case .unknown: (nil, false)
