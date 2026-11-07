@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Une petite tuile : un titre en petit, son chiffre à droite, puis quelques lignes. Un clic ouvre le détail.
+/// Une petite tuile : un surtitre qui dit ce qu'elle montre (« Plan », « Tests »), son chiffre à droite, puis
+/// quelques lignes. Un clic ouvre le détail.
 struct SmallTile<Content: View>: View {
     var title: String
     var trailing: String?
@@ -9,36 +10,26 @@ struct SmallTile<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        let tile = VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(tone == .alert ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                Spacer(minLength: 6)
-                if let trailing {
-                    Text(trailing)
-                        .font(.callout)
-                        .monospacedDigit()
-                        .foregroundStyle(tone == .alert ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
-                }
+        let tile = VStack(alignment: .leading, spacing: 6) {
+            CardTitle(title, trailing: trailing, alert: tone == .alert)
+            VStack(alignment: .leading, spacing: 4) {
+                content
             }
-            content
         }
         .font(.callout)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tone == .alert ? AnyShapeStyle(Theme.alert.opacity(0.08)) : AnyShapeStyle(.quinary), in: .rect(cornerRadius: Theme.corner))
         if let action {
-            Button(action: action) { tile.contentShape(.rect) }
-                .buttonStyle(.plain)
+            Button(action: action) { tile }
+                .buttonStyle(TileButtonStyle(cornerRadius: Theme.corner))
         } else {
             tile
         }
     }
 }
 
-/// La colonne de côté : deux tuiles au plus, ce qui cloche d'abord (tests rouges, commande de fond), puis le plan
+/// La colonne de côté : deux tuiles au plus, ce qui cloche d'abord (tests en échec, commande de fond), puis le plan
 /// (sinon les tâches, sinon la feuille de route), puis ce qui a été publié.
 struct SideTiles: View {
     @Environment(VigieStore.self) private var store
@@ -72,7 +63,7 @@ struct SideTiles: View {
         return list
     }
 
-    /// Le dernier test : rouge depuis moins de 2 h, sans réussite depuis.
+    /// Le dernier test : en échec depuis moins de 2 h, sans réussite depuis.
     static func redTest(_ model: ConversationDetailModel, now: Date) -> TestRun? {
         guard let last = model.tests.map(\.value).first(where: { $0.outcome != .pending && $0.outcome != .unknown }),
               last.outcome == .failed, now.timeIntervalSince(last.ts ?? .distantPast) < 7200 else { return nil }
@@ -92,87 +83,132 @@ struct SideTiles: View {
     @ViewBuilder
     private func tile(_ kind: Kind) -> some View {
         let detail = model.raw
+        let now = store.now
         switch kind {
         case .tests:
-            if let test = Self.redTest(model, now: store.now) {
-                SmallTile(title: redTitle(test), trailing: test.ts.map { "depuis \(Fmt.time($0))" }, tone: .alert, action: { open(.tests) }) {
+            if let test = Self.redTest(model, now: now) {
+                SmallTile(title: failedTitle(test), trailing: test.ts.map { "depuis \(Fmt.when($0, now: now))" }, tone: .alert,
+                          action: { open(.tests) }) {
                     Text(test.title ?? "Tests").lineLimit(1)
                     if let line = test.line, !line.isEmpty {
-                        Text(line).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        CodeLine(line)
                     }
-                    if let by = test.by { Text("par \(by)").foregroundStyle(.secondary).lineLimit(1) }
+                    if let by = test.by { Text("Par \(by)").foregroundStyle(.secondary).lineLimit(1) }
                 }
             }
         case .commands:
-            let list = Self.commands(model, now: store.now)
+            let list = Self.commands(model, now: now)
             if let first = list.first {
-                SmallTile(title: "Commande de fond", trailing: first.startedAt.map { "depuis \(Fmt.age(since: $0, now: store.now))" },
+                SmallTile(title: "Commande de fond", trailing: first.startedAt.map { "depuis \(Fmt.age(since: $0, now: now))" },
                           action: { open(.background) }) {
                     Text(first.description ?? "Commande").lineLimit(1)
                     if let command = first.command {
-                        Text(command).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        CodeLine(command)
                     }
                     if list.count > 1 { Text("+\(list.count - 1) autres").foregroundStyle(.secondary) }
                 }
             }
         case .plan:
             if let plan = detail.now?.plan {
-                SmallTile(title: plan.title.map { Self.cleanTitle($0) } ?? "Plan", trailing: "\(plan.doneCount)/\(plan.totalCount)",
-                          action: { open(.plan) }) {
+                // le surtitre dit ce que c'est ; le nom du plan est sa première ligne
+                SmallTile(title: "Plan", trailing: "\(plan.doneCount)/\(plan.totalCount) étapes", action: { open(.plan) }) {
+                    if let name = plan.title.map(Self.cleanTitle), !name.isEmpty {
+                        Text(name)
+                            .textRole(.item)
+                            .lineLimit(1)
+                            .help(plan.file.map(Fmt.shortPath) ?? name)
+                    }
                     ProgressView(value: Double(min(plan.doneCount, plan.totalCount)), total: Double(max(plan.totalCount, 1)))
                         .progressViewStyle(.linear)
                         .tint(.secondary)
+                        .accessibilityLabel("\(plan.doneCount) étapes faites sur \(plan.totalCount)")
                     if let index = plan.currentIndex {
                         Text("▸ \(plan.steps[index].label)").lineLimit(1)
                         if let next = plan.steps.dropFirst(index + 1).first(where: { $0.state != .done }) {
                             Text("Ensuite : \(next.label)").foregroundStyle(.secondary).lineLimit(1)
                         }
                     } else if plan.doneCount >= plan.totalCount {
-                        Text("✓ fini\((plan.progressAt ?? plan.updatedAt).map { " à \(Fmt.time($0))" } ?? "")").foregroundStyle(.secondary)
+                        let end = plan.progressAt ?? plan.updatedAt
+                        Text(end.map { "Fini \(ConversationVerdict.at($0, now: now))" } ?? "Fini")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                     if let task = detail.now?.tasks.first(where: { $0.state == .doing })?.text {
                         let tasks = detail.now?.tasks ?? []
-                        Text("Tâches \(tasks.count { $0.state == .done })/\(tasks.count) · \(task)").foregroundStyle(.secondary).lineLimit(1)
+                        Text("Tâches \(tasks.count { $0.state == .done })/\(tasks.count) · \(task)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
                     }
                 }
             }
         case .tasks:
             let tasks = detail.now?.tasks ?? []
-            SmallTile(title: "Ses tâches", trailing: "\(tasks.count { $0.state == .done })/\(tasks.count)", action: { open(.plan) }) {
+            SmallTile(title: "Tâches", trailing: "\(tasks.count { $0.state == .done })/\(tasks.count)", action: { open(.plan) }) {
                 if let doing = tasks.first(where: { $0.state == .doing }) ?? tasks.first(where: { $0.state == .todo }) {
                     Text("▸ \(doing.text ?? "")").lineLimit(2)
                 }
             }
         case .roadmap:
             if let doc = detail.trackingDoc {
-                SmallTile(title: (doc.path as NSString).lastPathComponent, trailing: doc.updatedAt.map { Fmt.ago($0, now: store.now) },
-                          action: { open(.plan) }) {
-                    Text(Self.roadmapLine(doc)).lineLimit(2).foregroundStyle(.secondary)
+                SmallTile(title: "Feuille de route", trailing: doc.updatedAt.map { Fmt.when($0, now: now) }, action: { open(.plan) }) {
+                    Text((doc.path as NSString).lastPathComponent)
+                        .textRole(.item)
+                        .lineLimit(1)
+                        .help(Fmt.shortPath(doc.path))
+                    let line = Self.roadmapLine(doc)
+                    if !line.isEmpty {
+                        Text(line).lineLimit(2).foregroundStyle(.secondary)
+                    }
                 }
             }
         case .published:
-            if let artifact = Self.published(model, now: store.now) {
-                SmallTile(title: "Publié", trailing: artifact.ts.map(Fmt.time)) {
-                    HStack {
-                        Text(artifact.title ?? "Rapport").lineLimit(1)
-                        Spacer(minLength: 6)
-                        if let url = artifact.url, !url.isEmpty {
-                            Button("Ouvrir") { SystemActions.open(url) }.glassButton()
+            if let artifact = Self.published(model, now: now) {
+                SmallTile(title: "Publié", trailing: artifact.ts.map { Fmt.when($0, now: now) }) {
+                    let name = artifact.title ?? "Page publiée"
+                    if let link = Self.webLink(artifact.url) {
+                        // le bouton passe sous le titre quand la colonne est étroite
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                Text(name).lineLimit(1)
+                                Spacer(minLength: 6)
+                                openButton(link)
+                            }
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(name).lineLimit(2)
+                                openButton(link)
+                            }
                         }
+                    } else {
+                        Text(name).lineLimit(2)
                     }
                 }
             }
         }
     }
 
-    private func redTitle(_ test: TestRun) -> String {
-        if let failed = test.failed, failed > 0 { return "\(Fmt.count(failed, "test rouge", "tests rouges"))" }
-        return "Tests rouges"
+    private func openButton(_ link: String) -> some View {
+        Button("Ouvrir dans ton navigateur") { SystemActions.open(link) }
+            .glassButton()
+            .fixedSize()
+            .help(link)
     }
 
-    /// « Plan 1.4 — refonte » → « Plan 1.4 — refonte », sans le # ni le « Plan : ».
+    /// Une adresse web (http, https) ; un autre schéma, venu d'un agent, ne s'ouvre pas.
+    static func webLink(_ url: String?) -> String? {
+        guard let url, let scheme = URL(string: url)?.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return nil }
+        return url
+    }
+
+    private func failedTitle(_ test: TestRun) -> String {
+        if let failed = test.failed, failed > 0 { return Fmt.count(failed, "test en échec", "tests en échec") }
+        return "Tests en échec"
+    }
+
+    /// « # Plan : Livre, lot 6 » → « Livre, lot 6 » : sans les # ni le « Plan : ».
     static func cleanTitle(_ title: String) -> String {
-        String(title.replacing(/^#+\s*/, with: "").prefix(36))
+        title.replacing(/^#+\s*/, with: "").replacing(/^[Pp]lan\s*:\s*/, with: "")
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// La 1re phrase de « où on en est » (ou de son introduction).
@@ -188,10 +224,21 @@ struct SideTiles: View {
 // MARK: Au travail : workflows et agents
 
 /// Un agent, en 4 lignes : nom lisible (l'étape du plan), sa phase et ce qu'on lui a demandé, ce qu'il fait (ou ce
-/// qu'il a rendu), depuis quand et, quand c'est honnête, combien il lui reste.
+/// qu'il a rendu), depuis quand et, quand c'est honnête, combien il lui reste. Une barre de 3 pt à gauche dit son état
+/// (vert en cours, orange muet, rouge en échec, gris fini).
 struct AgentTile: View {
+    enum Look: Sendable {
+        /// Un agent seul, posé sur la page : une carte.
+        case card
+        /// Un agent d'un workflow, dans la tuile du workflow : ni fond ni contour, la barre seule.
+        case row
+    }
+
     @Environment(VigieStore.self) private var store
     let agent: AgentRun
+    /// Les étapes du plan de sa conversation : un agent sans nom prend le libellé de l'étape qu'il fait.
+    var planSteps: [PlanStep] = []
+    var look: Look = .card
     let open: (ConversationPanel) -> Void
 
     /// Rien écrit depuis 6 min : orange.
@@ -201,58 +248,74 @@ struct AgentTile: View {
         Button { open(.agent(agent.id)) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    if agent.status == "failed" {
-                        Image(systemName: "xmark").font(.caption.bold()).foregroundStyle(Theme.alert)
-                    } else {
-                        Circle().fill(dot).frame(width: 7, height: 7)
+                    if failed {
+                        Image(systemName: "xmark")
+                            .font(.caption.bold())
+                            .foregroundStyle(Theme.alert)
+                            .accessibilityLabel("En échec")
                     }
-                    Text(agent.name ?? agent.title ?? "Agent")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(agent.status == "failed" ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.primary))
+                    Text(Fmt.agentTitle(name: agent.name, title: agent.title, id: agent.id, planSteps: planSteps))
+                        .textRole(.item, alert: failed)
                         .lineLimit(1)
                 }
-                Text(asked).foregroundStyle(.secondary).lineLimit(1)
+                if !asked.isEmpty {
+                    Text(asked).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Text(doing).foregroundStyle(.secondary).lineLimit(1)
                 Text(timing)
-                    .foregroundStyle(silent ? AnyShapeStyle(Theme.warn) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(silent ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
                     .monospacedDigit()
                     .lineLimit(1)
             }
             .font(.callout)
-            .padding(10)
+            .padding(.leading, look == .card ? 14 : 11)
+            .padding(.trailing, look == .card ? 12 : 6)
+            .padding(.vertical, look == .card ? 10 : 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background.opacity(0.7), in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(agent.status == "failed" ? AnyShapeStyle(Theme.alert.opacity(0.5)) : AnyShapeStyle(.quaternary)))
-            .contentShape(.rect)
+            .background(alignment: .leading) {
+                if look == .card {
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(failed ? AnyShapeStyle(Theme.alert.opacity(0.08)) : AnyShapeStyle(.quinary))
+                        Rectangle().fill(barColor).frame(width: 3)
+                    }
+                    .clipShape(.rect(cornerRadius: Theme.corner))
+                } else {
+                    Capsule().fill(barColor).frame(width: 3)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .help(agent.title ?? "")
+        .buttonStyle(TileButtonStyle(cornerRadius: look == .card ? Theme.corner : Theme.cornerInner))
+        .help(agent.title ?? agent.id)
     }
 
     private var running: Bool { agent.status == "running" }
+    private var failed: Bool { agent.status == "failed" }
     private var silent: Bool { running && store.now.timeIntervalSince(agent.lastAt ?? store.now) > Self.quiet }
 
-    private var dot: Color {
-        if !running { return Color.secondary.opacity(0.6) }
+    private var barColor: Color {
+        if failed { return Theme.alert }
+        if !running { return Color.secondary.opacity(0.4) }
         return silent ? Theme.warn : Theme.live
     }
 
+    /// « Faire · poser les doubles pages » : sa phase, puis ce qu'on lui a demandé (sinon son workflow, lisible).
     private var asked: String {
         let prompt = agent.prompt.map { $0.prefix(1).lowercased() + $0.dropFirst() }
-        return [agent.phase, prompt ?? agent.workflow].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+        let parts = [agent.phase, prompt ?? agent.workflow.map(Fmt.workflowTitle)].compactMap { $0?.isEmpty == false ? $0 : nil }
+        return ConversationVerdict.sentence(parts.joined(separator: " · "))
     }
 
     private var doing: String {
-        if running { return agent.lastAction.map { "▸ \($0)" } ?? "▸ démarre" }
-        if agent.status == "failed" { return agent.result ?? "en échec" }
-        return agent.result ?? agent.lastAction ?? "fini"
+        if running { return "▸ \(ConversationVerdict.sentence(agent.lastAction ?? "démarre"))" }
+        if failed { return ConversationVerdict.sentence(agent.result ?? "en échec") }
+        return ConversationVerdict.sentence(agent.result ?? agent.lastAction ?? "fini")
     }
 
     private var timing: String {
         if running {
-            guard let start = agent.startedAt else { return "en cours" }
-            if silent, let last = agent.lastAt { return "rien écrit depuis \(Fmt.age(since: last, now: store.now))" }
-            var text = "depuis \(Fmt.age(since: start, now: store.now))"
+            guard let start = agent.startedAt else { return "En cours" }
+            if silent, let last = agent.lastAt { return "Rien écrit depuis \(Fmt.age(since: last, now: store.now))" }
+            var text = "Depuis \(Fmt.age(since: start, now: store.now))"
             if let estimate = agent.estimate, let ends = estimate.endsAt {
                 if estimate.longer == true || ends <= store.now {
                     text += " · plus long que les autres"
@@ -263,43 +326,47 @@ struct AgentTile: View {
             }
             return text
         }
+        if failed { return "En échec\(agent.lastAt.map { " \(ConversationVerdict.at($0, now: store.now))" } ?? "")" }
         let duration = Fmt.duration(ms: agent.durationMs)
-        if agent.status == "failed" { return "en échec\(agent.lastAt.map { " à \(Fmt.time($0))" } ?? "")" }
-        return duration.isEmpty ? "fini" : "fini · \(duration)"
+        return duration.isEmpty ? "Fini" : "Fini · \(duration)"
     }
 }
 
-/// Un workflow : son nom et ses phases, l'avancée de ses agents (une barre, un segment par agent), puis ses agents en
-/// cours ; fini, la 1re phrase de son résultat.
+/// Un workflow : son nom lisible et ses phases, l'avancée de ses agents (une barre, un segment par agent), puis ses
+/// agents en cours ; fini, la 1re phrase de son résultat.
 struct WorkflowTile: View {
     @Environment(VigieStore.self) private var store
     let workflow: Workflow
     let agents: [AgentRun]
+    /// Les étapes du plan de sa conversation, pour nommer ses agents.
+    var planSteps: [PlanStep] = []
     let open: (ConversationPanel) -> Void
 
     private static let shownAgents = 3
 
     var body: some View {
+        let raw = workflow.name ?? workflow.id
         VStack(alignment: .leading, spacing: 8) {
             Button { open(.workflow(workflow.id)) } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline) {
-                        (Text("Workflow ").foregroundStyle(.secondary) + Text(workflow.name ?? workflow.id).bold()
-                            + Text(workflow.phases.isEmpty ? "" : " · " + workflow.phases.joined(separator: " → ")).foregroundStyle(.secondary))
+                    CardTitle("Workflow", trailing: trailing, alert: failed)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Fmt.workflowTitle(raw))
+                            .textRole(.item)
                             .lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(trailing)
-                            .foregroundStyle(failed ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
-                            .monospacedDigit()
+                            .help(raw)
+                        if !InfoLine.text(infoParts).isEmpty {
+                            InfoLine(parts: infoParts)
+                        }
                     }
                     if running {
                         ViewThatFits(in: .horizontal) {
                             HStack {
-                                Text(countLine)
+                                Text(countLine).monospacedDigit()
                                 Spacer(minLength: 8)
                                 segments
                             }
-                            Text(countLine)
+                            Text(countLine).monospacedDigit()
                         }
                         if agents.isEmpty, let log = workflow.lastLog {
                             Text(log).foregroundStyle(.secondary).lineLimit(1)
@@ -308,18 +375,22 @@ struct WorkflowTile: View {
                         Text(result).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                .contentShape(.rect)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // un peu d'air autour du fond de survol, sans décaler le contenu
+                .padding(6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(TileButtonStyle())
+            .padding(-6)
             if running && !agents.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 8)], alignment: .leading, spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], alignment: .leading, spacing: 8) {
                     ForEach(agents.prefix(Self.shownAgents)) { agent in
-                        AgentTile(agent: agent, open: open)
+                        AgentTile(agent: agent, planSteps: planSteps, look: .row, open: open)
                     }
                 }
                 if agents.count > Self.shownAgents {
                     Text("+\(agents.count - Self.shownAgents) agents\(oldest.map { " · le plus ancien depuis \($0)" } ?? "")")
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
             }
         }
@@ -332,15 +403,20 @@ struct WorkflowTile: View {
     private var running: Bool { workflow.status == "running" }
     private var failed: Bool { workflow.status == "failed" || workflow.status == "killed" }
 
+    /// À droite du surtitre : depuis quand (en cours), sinon comment il a fini et combien de temps il a pris.
     private var trailing: String {
         if running { return workflow.startedAt.map { "depuis \(Fmt.age(since: $0, now: store.now))" } ?? "en cours" }
-        var parts: [String] = []
-        if let agents = workflow.agents { parts.append(Fmt.count(agents, "agent")) }
-        if let failedCount = workflow.counts?.failed, failedCount > 0 { parts.append("\(failedCount) en échec") }
-        let duration = Fmt.duration(ms: workflow.durationMs)
-        if !duration.isEmpty { parts.append(duration) }
         let outcome = workflow.status == "failed" ? "en échec" : workflow.status == "killed" ? "arrêté" : "fini"
-        return ([outcome] + parts).joined(separator: " · ")
+        let duration = Fmt.duration(ms: workflow.durationMs)
+        return duration.isEmpty ? outcome : "\(outcome) · \(duration)"
+    }
+
+    /// Sous le nom : ses phases ; fini, combien d'agents et d'échecs.
+    private var infoParts: [String?] {
+        let phases = workflow.phases.isEmpty ? nil : workflow.phases.joined(separator: " → ")
+        guard !running, let count = workflow.agents else { return [phases] }
+        let failedCount = workflow.counts?.failed ?? 0
+        return [phases, "\(Fmt.count(count, "agent"))\(failedCount > 0 ? ", \(failedCount) en échec" : "")"]
     }
 
     /// « 7 finis (1 en échec) · 2 en cours ».
@@ -350,7 +426,7 @@ struct WorkflowTile: View {
         var text = "\(Fmt.count(done, "fini", "finis"))"
         if let failedCount = c?.failed, failedCount > 0 { text += " (\(failedCount) en échec)" }
         if let runningCount = c?.running, runningCount > 0 { text += " · \(runningCount) en cours" }
-        return text
+        return ConversationVerdict.sentence(text)
     }
 
     private var segments: some View {
@@ -372,57 +448,77 @@ struct WorkflowTile: View {
     }
 }
 
-// MARK: Détails
+// MARK: Ligne Journal · Fichiers · Tests…
 
-/// Une ligne de puces : Journal, Fichiers, Tests, MCP, En fond, réponses choisies pour toi. Une puce vide disparaît.
+/// Une ligne de puces, juste sous la tuile d'État : Journal, Fichiers, Tests, MCP, En fond, puis « À regarder » et
+/// « À relire » de cette conversation. Une puce vide disparaît ; une puce qui signale un problème prend sa couleur et un
+/// symbole (jamais la couleur seule), expliqué au survol et lu par VoiceOver.
 struct DetailsBar: View {
     @Environment(VigieStore.self) private var store
     let summary: ConversationSummary
     let model: ConversationDetailModel
     let open: (ConversationPanel) -> Void
 
+    private static let flag = "exclamationmark.circle.fill"
+
     var body: some View {
+        let looks = store.lookItems(for: summary.id).count
+        let rereads = store.rereadItems(for: summary.id).count
         WrapLayout(spacing: 6, lineSpacing: 6) {
-            Text("Détails")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 3)
             if !model.feed.isEmpty {
-                chip("Journal \(Fmt.int(model.feed.count))", dot: model.feed.contains { $0.value.decisionKind == .blocked || $0.value.decisionKind == .waiting } ? Theme.alert : nil, .journal)
+                journal
             }
             if !model.files.isEmpty || !model.artifacts.isEmpty {
-                chip("Fichiers \(Fmt.int(model.files.count + model.artifacts.count))", .files)
+                Chip("Fichiers \(Fmt.int(model.files.count + model.artifacts.count))", size: .regular) { open(.files) }
             }
             if !model.tests.isEmpty {
-                chip("Tests \(Fmt.int(model.tests.count))", dot: SideTiles.redTest(model, now: store.now) != nil ? Theme.alert : nil, .tests)
+                let failing = SideTiles.redTest(model, now: store.now) != nil
+                let text = "Tests \(Fmt.int(model.tests.count))"
+                Chip(text, symbol: failing ? Self.flag : nil, tone: failing ? .alert : .neutral, size: .regular) { open(.tests) }
+                    .help(failing ? "Le dernier test est en échec" : "Les tests lancés dans cette conversation")
+                    .accessibilityLabel(failing ? "\(text), le dernier en échec" : text)
             }
             if !model.raw.mcp.isEmpty {
-                let broken = model.raw.mcp.contains { ($0.enabled ?? true) && ($0.mcpStatus == .needsAuth || $0.mcpStatus == .failed) }
-                chip("MCP \(Fmt.int(model.raw.mcp.count))", dot: broken ? Theme.warn : nil, .mcp)
+                let broken = model.raw.mcp.count { ($0.enabled ?? true) && ($0.mcpStatus == .needsAuth || $0.mcpStatus == .failed) }
+                let text = "MCP \(Fmt.int(model.raw.mcp.count))"
+                let why = Fmt.count(broken, "à reconnecter ou en échec", "à reconnecter ou en échec")
+                Chip(text, symbol: broken > 0 ? Self.flag : nil, tone: broken > 0 ? .warn : .neutral, size: .regular) { open(.mcp) }
+                    .help(broken > 0 ? why : "Les MCP utilisés par cette conversation")
+                    .accessibilityLabel(broken > 0 ? "\(text), dont \(why)" : text)
             }
             if !model.raw.processes.isEmpty || !model.raw.background.isEmpty {
-                chip("En fond \(Fmt.int(model.raw.processes.count + model.raw.background.count))", .background)
+                Chip("En fond \(Fmt.int(model.raw.processes.count + model.raw.background.count))", size: .regular) { open(.background) }
+                    .help(backgroundHelp)
             }
-            let answers = store.toReview.filter { $0.conversationId == summary.id && !$0.needsDecision && $0.reviewKind != .waiting }
-            if !answers.isEmpty {
-                chip(answers.count > 1 ? "\(answers.count) éléments pour toi" : "1 élément pour toi", .answers)
+            if looks > 0 {
+                Chip("À regarder \(Fmt.int(looks))", size: .regular) { open(.answers) }
+                    .help("Ce qui a mal tourné ou que tu dois faire toi-même")
+            }
+            if rereads > 0 {
+                Chip("À relire \(Fmt.int(rereads))", size: .regular) { open(.answers) }
+                    .help("Ce que Vigie a choisi pour toi")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .font(.callout)
     }
 
-    private func chip(_ text: String, dot: Color? = nil, _ panel: ConversationPanel) -> some View {
-        Button { open(panel) } label: {
-            HStack(spacing: 5) {
-                Text(text)
-                if let dot { Circle().fill(dot).frame(width: 6, height: 6) }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .background(.quinary, in: .capsule)
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
+    /// Le Journal : en rouge, avec un symbole, s'il contient une action refusée d'office ou qui t'attend.
+    private var journal: some View {
+        let refused = model.feed.count { $0.value.decisionKind == .blocked }
+        let waiting = model.feed.count { $0.value.decisionKind == .waiting }
+        let flagged = refused + waiting > 0
+        let text = "Journal \(Fmt.int(model.feed.count))"
+        let why = [refused > 0 ? Fmt.count(refused, "refusée d'office", "refusées d'office") : nil,
+                   waiting > 0 ? (waiting > 1 ? "\(waiting) qui t'attendent" : "1 qui t'attend") : nil]
+            .compactMap { $0 }.joined(separator: ", ")
+        return Chip(text, symbol: flagged ? Self.flag : nil, tone: flagged ? .alert : .neutral, size: .regular) { open(.journal) }
+            .help(flagged ? "Dont \(why)" : "Ses actions et leur résultat")
+            .accessibilityLabel(flagged ? "\(text), dont \(why)" : text)
+    }
+
+    private var backgroundHelp: String {
+        guard let background = summary.background, let label = background.label else { return "Ce qu'elle a laissé tourner" }
+        let more = (background.count ?? 1) > 1 ? " +\((background.count ?? 1) - 1)" : ""
+        return "\(label)\(more) · \(Fmt.memory(mb: background.memoryMb))"
     }
 }

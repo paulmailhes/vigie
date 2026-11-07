@@ -56,7 +56,7 @@ struct MarkdownBlocks: View {
                     .fixedSize()
             }
             .padding(8)
-            .background(.quinary, in: .rect(cornerRadius: 8))
+            .background(.quinary, in: .rect(cornerRadius: Theme.cornerInner))
         case .paragraph(let text):
             markdown(text)
         }

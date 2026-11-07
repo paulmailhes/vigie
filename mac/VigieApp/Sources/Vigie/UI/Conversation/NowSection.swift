@@ -22,8 +22,9 @@ struct RoadmapView: View {
                 RoadmapSection(section: section, expandedAtFirst: !collapsed && section.title.contains(Self.open))
             }
             HStack(spacing: 10) {
-                Button("Ouvrir \(relative(doc.path))", systemImage: "doc.text") { SystemActions.openInVSCode(path: doc.path) }
+                Button("Ouvrir \(relative(doc.path)) dans VS Code", systemImage: "doc.text") { SystemActions.openInVSCode(path: doc.path) }
                     .buttonStyle(.link)
+                    .help(Fmt.shortPath(doc.path))
                 if !doc.others.isEmpty {
                     Text("Aussi : " + doc.others.map { relative($0.path) }.joined(separator: ", "))
                         .font(.caption)
@@ -59,7 +60,7 @@ struct RoadmapSection: View {
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
                         .foregroundStyle(.secondary)
                     Text(section.title)
-                        .font(.body.weight(.semibold))
+                        .textRole(.item)
                 }
                 .contentShape(.rect)
             }

@@ -2,7 +2,10 @@ import SwiftUI
 
 /// La barre d'une conversation, en haut de sa page (la barre d'outils de la fenêtre appartient à toute l'app) : son
 /// compte (bascule avec confirmation), son auto-accept (comme le réglage général, toujours, jamais), les MCP de ton
-/// compte claude.ai, et de quoi l'ouvrir là où elle tourne. Codex : l'auto-accept seulement.
+/// compte claude.ai, et de quoi l'ouvrir là où elle tourne (la flèche : son dossier, ses serveurs de dev, ce qu'elle a
+/// publié). Codex : l'auto-accept seulement. Sans fond : les boutons en verre suffisent, la barre reste dans la page.
+/// Quand la place manque, un libellé perd son préfixe, jamais le nom de la chose (« Travail 1 », « claude.ai :
+/// coupés », « VS Code ») ; « Auto-accept : oui » reste entier.
 struct ConversationBar: View {
     @Environment(VigieStore.self) private var store
     let summary: ConversationSummary
@@ -33,9 +36,6 @@ struct ConversationBar: View {
         .buttonStyle(.borderless)
         .labelStyle(.titleAndIcon)
         .tint(.primary) // réglages : neutres, le bleu reste aux actions
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.quinary, in: .rect(cornerRadius: Theme.corner))
         .confirmationDialog(pendingAccount.map { "Passer sur \($0.displayName) ?" } ?? "",
                             isPresented: $confirmSwitch, titleVisibility: .visible, presenting: pendingAccount) { account in
             Button(summary.state == .working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
@@ -129,7 +129,8 @@ struct ConversationBar: View {
             }
         } label: {
             BusyLabel(busy: busy == "auto") {
-                Label(compact ? autoAcceptText.replacingOccurrences(of: "Auto-accept", with: "Auto") : autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
+                // entier même en court : « Auto » seul ne veut rien dire
+                Label(autoAcceptText, systemImage: (summary.autoAccept ?? false) ? "checkmark.shield" : "shield.slash")
             }
         }
         .fixedSize()
@@ -154,7 +155,11 @@ struct ConversationBar: View {
             Button { run("mcp") { await store.setConnectors(false, for: summary.id) } } label: { choice("Coupés (recommandé)", selected: !on) }
             Button { run("mcp") { await store.setConnectors(true, for: summary.id) } } label: { choice("Activés", selected: on) }
         } label: {
-            BusyLabel(busy: busy == "mcp") { Label(compact ? (on ? "MCP : activés" : "MCP : coupés") : (on ? "MCP du compte : activés" : "MCP du compte : coupés"), systemImage: Icon.mcp) }
+            // en court, « claude.ai » : « MCP : coupés » laisserait croire que tous les MCP le sont
+            BusyLabel(busy: busy == "mcp") {
+                Label(compact ? (on ? "claude.ai : activés" : "claude.ai : coupés") : (on ? "MCP du compte : activés" : "MCP du compte : coupés"),
+                      systemImage: Icon.mcp)
+            }
         }
         .fixedSize()
         .glassButton()
@@ -163,26 +168,95 @@ struct ConversationBar: View {
 
     // MARK: Ouvrir
 
+    /// Le libellé court du bouton : l'outil où elle tourne, jamais « Ouvrir » seul.
+    private var shortOpenLabel: String {
+        switch summary.surface {
+        case "claude-app": "App Claude"
+        case "codex-app": "App ChatGPT"
+        default: "VS Code"
+        }
+    }
+
     @ViewBuilder
     private func openButton(compact: Bool) -> some View {
         if summary.surface == "terminal", let cwd = summary.cwd {
-            // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois.
-            Button("Ouvrir le dossier", systemImage: "folder") { SystemActions.openInVSCode(path: cwd) }
-                .glassButton()
+            // Lancée dans Terminal : l'ouvrir dans VS Code la reprendrait deux fois ; on ouvre son dossier.
+            let label = Label(compact ? "VS Code" : "Ouvrir le dossier dans VS Code", systemImage: "folder")
+            if hasLinks {
+                Menu { links } label: { label } primaryAction: { SystemActions.openInVSCode(path: cwd) }
+                    .fixedSize()
+                    .glassButton()
+                    .help("Ouvrir son dossier dans VS Code (la flèche : ses serveurs de dev, ce qu'elle a publié)")
+            } else {
+                Button { SystemActions.openInVSCode(path: cwd) } label: { label }
+                    .glassButton()
+                    .help("Ouvrir son dossier dans VS Code")
+            }
         } else {
             Menu {
                 if let cwd = summary.cwd {
                     Button("Ouvrir le dossier dans VS Code") { SystemActions.openInVSCode(path: cwd) }
                     Button("Afficher le dossier dans le Finder") { SystemActions.revealInFinder(path: cwd) }
                 }
+                links
             } label: {
-                Label(compact ? "Ouvrir" : summary.openLabel, systemImage: "arrow.up.forward.app")
+                Label(compact ? shortOpenLabel : summary.openLabel, systemImage: "arrow.up.forward.app")
             } primaryAction: {
                 Task { await store.openConversationInVSCode(summary.id, cwd: summary.cwd) }
             }
             .fixedSize()
             .glassButton(.primary)
-            .help("Ouvrir cette conversation là où elle tourne (la flèche : son dossier)")
+            .help("Ouvrir cette conversation là où elle tourne (la flèche : son dossier, ses serveurs de dev, ce qu'elle a publié)")
+        }
+    }
+
+    // MARK: Liens du projet (menu du bouton Ouvrir)
+
+    private static let maxLinks = 3
+
+    private var detail: ConversationDetailModel? { store.details[summary.id] }
+
+    /// Les ports de ses serveurs de dev (relevé En fond de la conversation), sans doublon.
+    private var ports: [Int] {
+        let all = Set((detail?.raw.processes ?? []).flatMap { $0.ports })
+        return Array(all.sorted().prefix(Self.maxLinks))
+    }
+
+    /// Ses 3 dernières publications qui ont une adresse web.
+    private var published: [PublishedLink] {
+        let artifacts = (detail?.artifacts ?? []).map { $0.value }.sorted { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
+        let links = artifacts.compactMap { artifact in
+            SideTiles.webLink(artifact.url).map { PublishedLink(title: artifact.title ?? "Page publiée", url: $0) }
+        }
+        return Array(links.prefix(Self.maxLinks))
+    }
+
+    private struct PublishedLink: Identifiable {
+        let title: String
+        let url: String
+        var id: String { url }
+    }
+
+    private var hasLinks: Bool { !ports.isEmpty || !published.isEmpty }
+
+    /// Sous le dossier : « Ouvrir localhost:5173 », puis ce qu'elle a publié. Tout s'ouvre dans ton navigateur.
+    @ViewBuilder
+    private var links: some View {
+        let ports = self.ports
+        let published = self.published
+        if !ports.isEmpty {
+            Section("Serveurs de dev") {
+                ForEach(ports, id: \.self) { port in
+                    Button("Ouvrir localhost:\(String(port))") { SystemActions.open("http://localhost:\(String(port))") }
+                }
+            }
+        }
+        if !published.isEmpty {
+            Section("Publié") {
+                ForEach(published) { item in
+                    Button("Ouvrir « \(item.title) »") { SystemActions.open(item.url) }
+                }
+            }
         }
     }
 

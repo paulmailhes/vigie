@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// La page d'une conversation, en tuiles : l'État (toujours), l'Échange entre toi et Claude juste dessous avec à côté
-/// au plus deux petites tuiles (ce qui cloche, le plan, ce qui est publié), puis ce qui travaille (workflows et agents)
-/// et une ligne de détails. Une tuile n'apparaît que si elle a quelque chose à dire ; un clic ouvre le détail à
-/// droite, la page restant visible et à jour à côté.
+/// La page d'une conversation, en tuiles : sa barre de réglages, l'État (toujours), juste dessous la ligne Journal ·
+/// Fichiers · Tests · MCP (toujours au même endroit, jamais sous le bas de la fenêtre), l'Échange entre toi et Claude
+/// avec à côté au plus deux petites tuiles (ce qui cloche, le plan, ce qui est publié), puis ce qui travaille
+/// (workflows et agents). Une tuile n'apparaît que si elle a quelque chose à dire ; un clic ouvre le détail à droite,
+/// la page restant visible et à jour à côté.
 struct ConversationView: View {
     @Environment(VigieStore.self) private var store
     let conversationID: String
@@ -16,8 +17,6 @@ struct ConversationView: View {
     private static let pageMinWidth: CGFloat = 340
     /// La colonne de côté (tests, plan, publié).
     private static let sideWidth: CGFloat = 300
-    /// Marges de `Page` : la largeur des tuiles se déduit de celle de la page, sans dépendre de son contenu.
-    private static let pageMargins: CGFloat = 56
 
     var body: some View {
         let summary = store.conversation(conversationID)
@@ -74,13 +73,14 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func page(_ summary: ConversationSummary, _ model: ConversationDetailModel?) -> some View {
-        let verdict = ConversationVerdict.make(summary: summary, detail: model?.raw, urgent: store.urgentItems(for: conversationID),
+        let verdict = ConversationVerdict.make(summary: summary, detail: model?.raw, urgent: store.decisionItems(for: conversationID),
                                                now: store.now) { store.account($0)?.displayName ?? "l'autre compte" }
         Page {
             VStack(alignment: .leading, spacing: 12) {
                 ConversationBar(summary: summary, contextTokens: model?.raw.contextTokens ?? summary.contextTokens)
                 StateTile(summary: summary, model: model, verdict: verdict, open: open)
                 if let model {
+                    DetailsBar(summary: summary, model: model, open: open)
                     let wide = width >= Self.twoColumns
                     let side = SideTiles.kinds(model, now: store.now)
                     if wide && !side.isEmpty {
@@ -97,8 +97,6 @@ struct ConversationView: View {
                         }
                     }
                     work(model)
-                    DetailsBar(summary: summary, model: model, open: open)
-                        .padding(.top, 2)
                 } else {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -106,11 +104,13 @@ struct ConversationView: View {
                 }
             }
         }
-        // mesurée sur la page elle-même, pas dans ce qui défile : le contenu ne peut pas changer cette mesure
-        .onGeometryChange(for: CGFloat.self) { $0.size.width - Self.pageMargins } action: { width = $0 }
+        // mesurée sur la page elle-même, pas dans ce qui défile : le contenu ne peut pas changer cette mesure ; les
+        // marges de `Page` retirées, la largeur des tuiles s'en déduit sans dépendre de leur contenu
+        .onGeometryChange(for: CGFloat.self) { $0.size.width - PageMetrics.margin * 2 } action: { width = $0 }
     }
 
-    /// Au travail : les workflows (une tuile mère avec ses agents) et les agents seuls. Absent si rien ne tourne.
+    /// Au travail : les workflows (une tuile mère avec ses agents) et les agents seuls, sous un titre de section qui
+    /// compte les agents en cours. Absent si rien ne tourne.
     @ViewBuilder
     private func work(_ model: ConversationDetailModel) -> some View {
         let now = store.now
@@ -120,30 +120,33 @@ struct ConversationView: View {
         let solo = (model.runningAgents + model.doneAgents.filter { Self.recent($0, now: now) })
             .filter { $0.workflow == nil || !shown.contains($0.workflow ?? "") }
         let run = model.raw.agentRun?.report != nil ? model.raw.agentRun : nil
+        let steps = model.raw.now?.plan?.steps ?? []
         if !workflows.isEmpty || !solo.isEmpty || run != nil {
+            let running = model.runningAgents.count
             VStack(alignment: .leading, spacing: 8) {
-                Text("Au travail")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                SectionHeader("Au travail", count: running > 0 ? running : nil, inset: 0)
                 if let run, let summary = store.conversation(conversationID) {
                     AgentReportTile(run: run, summary: summary)
                 }
                 ForEach(workflows) { workflow in
                     WorkflowTile(workflow: workflow,
                                  agents: model.runningAgents.filter { $0.workflow == (workflow.name ?? workflow.id) },
+                                 planSteps: steps,
                                  open: open)
                 }
                 if !solo.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], alignment: .leading, spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], alignment: .leading, spacing: 12) {
                         ForEach(solo.prefix(6)) { agent in
-                            AgentTile(agent: agent, open: open)
+                            AgentTile(agent: agent, planSteps: steps, look: .card, open: open)
                         }
                     }
                     if solo.count > 6 {
-                        Text("+\(solo.count - 6) agents").font(.callout).foregroundStyle(.secondary)
+                        Text("+\(Fmt.count(solo.count - 6, "agent"))").font(.callout).foregroundStyle(.secondary)
                     }
                 }
             }
+            // 20 pt avant un titre de section (12 d'écart entre tuiles, plus 8)
+            .padding(.top, 8)
         }
     }
 
@@ -163,30 +166,6 @@ struct ConversationView: View {
     }
 }
 
-/// Titre d'un bloc avec, à droite, la fraîcheur de l'information.
-struct CardHeader: View {
-    let title: String
-    let date: Date?
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-            Spacer(minLength: 8)
-            if date != nil {
-                Label {
-                    Freshness(date: date)
-                } icon: {
-                    Image(systemName: "clock")
-                }
-                .font(.callout)
-                .fontWeight(.regular)
-                .foregroundStyle(.secondary)
-                .labelStyle(.titleAndIcon)
-            }
-        }
-    }
-}
-
 /// La conversation vient d'un lancement d'agent Vigie : son rapport, en tête de « Au travail ».
 struct AgentReportTile: View {
     @Environment(VigieStore.self) private var store
@@ -196,26 +175,36 @@ struct AgentReportTile: View {
     var body: some View {
         let report = run.report
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                (Text("Agent ").foregroundStyle(.secondary) + Text(run.displayName).bold())
+            CardTitle("Agent Vigie", trailing: status(report), alert: report?.isBlocked == true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(run.displayName)
+                    .textRole(.item)
                     .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(status(report)).foregroundStyle(report?.isBlocked == true ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
-            }
-            if let verdict = report?.verdict ?? report?.title {
-                Text(verdict).lineLimit(2)
-            }
-            if let counts = report?.counts {
-                Text([counts.block.flatMap { $0 > 0 ? Fmt.count($0, "bloquant") : nil },
-                      counts.warn.flatMap { $0 > 0 ? "\($0) à corriger" : nil },
-                      counts.ok.flatMap { $0 > 0 ? "\($0) OK" : nil }].compactMap { $0 }.joined(separator: " · "))
-                    .foregroundStyle(.secondary)
+                if let verdict = report?.verdict ?? report?.title {
+                    Text(verdict).lineLimit(2)
+                }
+                if let counts = report?.counts {
+                    let parts = [counts.block.flatMap { $0 > 0 ? Fmt.count($0, "bloquant") : nil },
+                                 counts.warn.flatMap { $0 > 0 ? "\($0) à corriger" : nil },
+                                 counts.ok.flatMap { $0 > 0 ? "\($0) OK" : nil }]
+                    if !InfoLine.text(parts).isEmpty {
+                        InfoLine(parts: parts)
+                    }
+                }
             }
             if stale {
-                Text("Le rapport dit « en cours », mais la conversation ne travaille plus depuis plus de 2 h.")
-                    .foregroundStyle(Theme.warn)
+                // une phrase : le texte reste lisible en gris, seule l'icône est orange
+                Label {
+                    Text("Le rapport dit « en cours », mais la conversation ne travaille plus depuis plus de 2 h.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.warn)
+                }
             }
-            HStack(spacing: 8) {
+            // les boutons passent à la ligne quand la page est étroite
+            WrapLayout(spacing: 8, lineSpacing: 6) {
                 if let step = report?.next.first {
                     AsyncButton(step.label) { await store.sendToRun(run, step) }
                         .glassButton(.primary)

@@ -14,12 +14,17 @@ struct ConversationVerdict: Equatable {
     var line: String?
     /// Ce qui t'attend (décisions, questions) : chaque élément avec ses boutons.
     var items: [ReviewItem] = []
-    /// Bouton « Ouvrir la conversation » (rien à décider d'ici).
+    /// Bouton qui ramène à la conversation dans son outil (rien à décider d'ici).
     var openButton = false
+    /// Le bouton dit « Répondre dans… » (elle attend un message de toi) ; sinon « Ouvrir dans… ».
+    var reply = true
+    /// Une tuile orange porte aussi de quoi comprendre : « Voir les tests » (un test en échec), sinon « Journal ».
+    var showCause = false
 
     /// Sans nouvelles : marquée en cours, mais rien écrit depuis 10 min et rien ne tourne pour elle.
     static let silence: TimeInterval = 10 * 60
 
+    /// `urgent` : « À décider » de cette conversation (`store.decisionItems(for:)`, triée par échéance).
     static func make(summary s: ConversationSummary, detail: ConversationDetail?, urgent: [ReviewItem], now: Date,
                      accountName: (String?) -> String) -> ConversationVerdict {
         let decisions = urgent.filter(\.needsDecision)
@@ -48,14 +53,17 @@ struct ConversationVerdict: Equatable {
             return .init(tone: .alert, title: ended.kind == "limit" ? "Arrêtée : limite atteinte" : "Arrêtée : erreur de l'API",
                          since: ago(ended.ts, now: now), line: unfinishedLine(detail), openButton: true)
         }
+        // une tuile orange porte son action : de quoi rouvrir la conversation, et de quoi comprendre
         if let alert = s.alert, alert.isRunaway {
-            return .init(tone: .warn, title: "S'emballe", line: alert.reason ?? "Elle consomme beaucoup plus que d'habitude")
+            return .init(tone: .warn, title: "S'emballe", line: alert.reason ?? "Elle consomme beaucoup plus que d'habitude",
+                         openButton: true, reply: false, showCause: true)
         }
         if s.state == .working {
             if !busy, let last = s.lastActivity, now.timeIntervalSince(last) > silence {
-                let step = currentStep(detail).map { "\($0) marquée en cours, " } ?? ""
+                let line = currentStep(detail).map { "\($0) marquée en cours, dernière action \(at(last, now: now))" }
+                    ?? "Dernière action \(at(last, now: now))"
                 return .init(tone: .warn, title: "Sans nouvelles", since: "depuis \(Fmt.age(since: last, now: now))",
-                             line: "\(step)dernière action à \(Fmt.time(last))")
+                             line: line, openButton: true, reply: false, showCause: true)
             }
             return .init(tone: .live, title: "Travaille", line: workLine(s, detail))
         }
@@ -107,5 +115,19 @@ struct ConversationVerdict: Equatable {
 
     private static func since(_ date: Date?, now: Date) -> String? {
         date.map { "depuis \(Fmt.age(since: $0, now: now))" }
+    }
+
+    // MARK: Textes de la page
+
+    /// Un fait passé après un verbe : « à 01:15 » aujourd'hui, « hier 23:10 », « lun. 26 oct. 20:00 » (jamais l'heure
+    /// seule : le matin, on ne saurait pas si c'était cette nuit ou la veille).
+    static func at(_ date: Date?, now: Date) -> String {
+        guard let date else { return "" }
+        return Calendar.current.isDate(date, inSameDayAs: now) ? "à \(Fmt.time(date))" : Fmt.when(date, now: now)
+    }
+
+    /// Une ligne seule commence par une majuscule (un fragment après « · » reste en minuscule).
+    static func sentence(_ text: String) -> String {
+        text.prefix(1).uppercased() + text.dropFirst()
     }
 }
