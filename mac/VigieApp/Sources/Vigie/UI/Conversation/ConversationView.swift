@@ -38,7 +38,7 @@ struct ConversationView: View {
         }
         .splitColumn(minWidth: Self.pageMinWidth)
         .navigationTitle(summary?.shortTitle ?? "Conversation")
-        .navigationSubtitle(summary?.title ?? "")
+        .navigationSubtitle(subtitle(summary))
         .inspector(isPresented: Binding(get: { shownPanel != nil },
                                         set: { if !$0 { store.conversationPanel = nil } })) {
             if let panel = shownPanel, let summary {
@@ -55,6 +55,13 @@ struct ConversationView: View {
         .task(id: "\(conversationID)|\(store.windowVisible)") {
             await store.follow(conversation: conversationID)
         }
+    }
+
+    /// Son identité (le titre de VS Code) ; quand plusieurs conversations attendent une décision et qu'elle en est,
+    /// sa place devant (« 1 sur 3 à décider · … », ⌘J passe à la suivante) : le titre peut être coupé, pas la place.
+    private func subtitle(_ summary: ConversationSummary?) -> String {
+        let position = store.waitingPosition(of: conversationID).map { "\($0) à décider" }
+        return InfoLine.text([position, summary?.title])
     }
 
     /// Le détail ouvert, s'il appartient à cette conversation.
@@ -209,8 +216,12 @@ struct AgentReportTile: View {
                     AsyncButton(step.label) { await store.sendToRun(run, step) }
                         .glassButton(.primary)
                 }
-                Button("Voir le rapport") { store.route = .agents }
-                    .glassButton()
+                Button("Voir le rapport") {
+                    // la page Agents défile jusqu'à ce rapport et le déplie
+                    store.agentRunFocus = run.id
+                    store.route = .agents
+                }
+                .glassButton()
             }
         }
         .font(.callout)

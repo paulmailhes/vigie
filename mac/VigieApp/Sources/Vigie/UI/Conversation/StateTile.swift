@@ -3,8 +3,8 @@ import SwiftUI
 /// La tuile d'État, toujours en haut : le verdict en un mot et une couleur, ce qu'elle fait ou attend en une ligne, ce
 /// qui t'attend (décisions) et ce qui a mal tourné ou que tu dois faire toi-même (« À regarder » : refus d'office, sudo
 /// à lancer toi-même, limite), depuis quand, deux ou trois puces quand il y a lieu, et les boutons quand c'est à toi
-/// d'agir. Les réglages de la conversation (compte, auto-accept, MCP du compte) sont dans la barre juste au-dessus :
-/// la tuile ne les répète pas.
+/// d'agir. Finie, elle dit aussi si c'est vérifié, commité et envoyé (« Fini, mais pas vérifié »). Les réglages de la
+/// conversation (compte, auto-accept, MCP du compte) sont dans la barre juste au-dessus : la tuile ne les répète pas.
 struct StateTile: View {
     @Environment(VigieStore.self) private var store
     let summary: ConversationSummary
@@ -36,6 +36,16 @@ struct StateTile: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
+            // fini, mais vérifié ? commité ? envoyé ? (une ligne qui passe à la ligne, jamais coupée)
+            if verdict.finished, let checks, !checks.facts.isEmpty {
+                let facts = FactLine(facts: checks.facts)
+                facts.text
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(checks.help(now: store.now))
+                    .accessibilityLabel(facts.plain)
+            }
             if !verdict.items.isEmpty || !looks.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(verdict.items) { item in
@@ -48,11 +58,12 @@ struct StateTile: View {
             }
             WrapLayout(spacing: 8, lineSpacing: 6) {
                 if !timeLine.isEmpty {
+                    // même marge verticale que les puces : la ligne de temps reste sur leur ligne de base
                     Text(timeLine)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .help(placeHelp)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 5)
                 }
                 ForEach(notes) { note in
                     noteView(note)
@@ -169,7 +180,7 @@ struct StateTile: View {
     private var timeLine: String {
         var parts: [String] = []
         if let start = model?.raw.current?.start {
-            if verdict.title == "Finie", let end = model?.raw.messages.last(where: \.isReport)?.ts {
+            if verdict.finished, let end = model?.raw.messages.last(where: \.isReport)?.ts {
                 parts.append("ta demande a pris \(Fmt.duration(ms: end.timeIntervalSince(start) * 1000))")
             } else if summary.state == .working {
                 parts.append("travaille sur ta demande depuis \(Fmt.age(since: start, now: store.now))")
@@ -197,36 +208,77 @@ struct StateTile: View {
         var style: Style = .plain
         var panel: ConversationPanel?
         var switchTo: String?
-        /// Texte venu de Claude, de longueur libre : il se coupe (les autres puces ne se coupent jamais).
+        /// De longueur libre (texte venu de Claude, date longue) : il se coupe, entier au survol (les autres puces ne
+        /// se coupent jamais).
         var free = false
+        /// Au survol, à la place du texte.
+        var help: String?
+        /// Quand il y en a trop, les puces de plus petit rang restent (l'ordre d'affichage, lui, ne change pas).
+        var rank = 0
     }
 
-    /// Trois puces au plus, dans cet ordre : ce qui te revient (si sa bulle n'est pas déjà dans l'Échange), une
-    /// bascule de compte, un MCP en panne utilisé ici, ce qui tourne en fond (si la ligne Journal · Fichiers… ne le dit
-    /// pas déjà). L'auto-accept forcé n'y est plus : la barre de réglages le dit.
+    /// Trois puces au plus, dans cet ordre : ce qui te revient (si sa bulle n'est pas déjà dans l'Échange), le contexte
+    /// résumé, une bascule de compte, un MCP en panne utilisé ici, ce qui tourne en fond (si la ligne Journal ·
+    /// Fichiers… ne le dit pas déjà). Quand il y en a plus, la bascule et le MCP en panne passent avant le contexte
+    /// résumé. L'auto-accept forcé n'y est plus : la barre de réglages le dit.
     private var notes: [Note] {
         var list: [Note] = []
         let messages = model?.raw.messages ?? []
         if let index = messages.lastIndex(where: { $0.toYou != nil }), let toYou = messages[index].toYou,
            !ExchangeTile.isVisible(index, of: messages.count) {
-            list.append(Note(id: "you", text: "À toi : \(toYou)", panel: .message(index), free: true))
+            list.append(Note(id: "you", text: "À toi : \(toYou)", panel: .message(index), free: true, rank: 0))
+        }
+        if let compactions, let count = compactions.count, count > 0 {
+            list.append(Note(id: "compact", text: compactedText(compactions, count: count), free: true,
+                             help: compactedHelp(compactions, count: count), rank: 3))
         }
         if let info = summary.account, let running = info.running {
             let to = info.pending?.to ?? summary.pendingAccountId.flatMap { $0 != running ? $0 : nil }
             if let to {
-                list.append(Note(id: "switch", text: "→ \(store.account(to)?.displayName ?? to) à la fin du tour", style: .warn, switchTo: to))
+                list.append(Note(id: "switch", text: "→ \(store.account(to)?.displayName ?? to) à la fin du tour", style: .warn,
+                                 switchTo: to, rank: 1))
             }
         }
         if let broken = model?.raw.mcp.first(where: { ($0.enabled ?? true) && ($0.uses ?? 0) > 0 && ($0.mcpStatus == .needsAuth || $0.mcpStatus == .failed) }) {
             let what = broken.mcpStatus == .failed ? "en échec" : "à reconnecter"
-            list.append(Note(id: "mcp", text: "\(broken.name) \(what)", style: .warn, panel: .mcp))
+            list.append(Note(id: "mcp", text: "\(broken.name) \(what)", style: .warn, panel: .mcp, rank: 2))
         }
         let detailsShowBackground = !(model?.raw.processes.isEmpty ?? true) || !(model?.raw.background.isEmpty ?? true)
         if !detailsShowBackground, let background = summary.background, let label = background.label {
             let more = (background.count ?? 1) > 1 ? " +\((background.count ?? 1) - 1)" : ""
-            list.append(Note(id: "bg", text: "En fond : \(label)\(more) · \(Fmt.memory(mb: background.memoryMb))", panel: .background))
+            list.append(Note(id: "bg", text: "En fond : \(label)\(more) · \(Fmt.memory(mb: background.memoryMb))", panel: .background, rank: 4))
         }
-        return Array(list.prefix(3))
+        let kept = Set(list.sorted { $0.rank < $1.rank }.prefix(3).map(\.id))
+        return list.filter { kept.contains($0.id) }
+    }
+
+    // MARK: Ce que le moteur dit de plus (fini, mais pas vérifié ; contexte résumé)
+
+    /// Le résumé de la conversation porte ces champs ; le détail aussi, lu plus souvent quand la page est ouverte.
+    private var checks: RequestChecks? {
+        summary.checks ?? model?.raw.summary?.checks
+    }
+
+    private var compactions: ContextCompactions? {
+        summary.compactions ?? model?.raw.summary?.compactions
+    }
+
+    /// « Contexte résumé à 03:12 », « Contexte résumé 2 fois · dernière 03:12 ».
+    private func compactedText(_ compactions: ContextCompactions, count: Int) -> String {
+        guard let last = compactions.lastAt else { return "Contexte résumé \(count) fois" }
+        if count == 1 { return "Contexte résumé \(ConversationVerdict.at(last, now: store.now))" }
+        return "Contexte résumé \(count) fois · dernière \(Fmt.when(last, now: store.now))"
+    }
+
+    /// Ce que ça veut dire, et quoi faire.
+    private func compactedHelp(_ compactions: ContextCompactions, count: Int) -> String {
+        let auto = min(compactions.auto ?? 0, count)
+        let how = switch auto {
+        case count: count > 1 ? "automatiquement, chaque fois que le contexte débordait" : "automatiquement, quand le contexte débordait"
+        case 0: "à ta demande (/compact)"
+        default: "dont \(auto) automatiquement"
+        }
+        return "Claude Code a résumé le début de cette conversation pour faire de la place (\(how)). Après un résumé, Claude peut oublier une consigne du début : redis-la si elle compte."
     }
 
     @ViewBuilder
@@ -249,7 +301,19 @@ struct StateTile: View {
                 .background(Theme.raised, in: .capsule)
             }
             .buttonStyle(ChipButtonStyle())
-            .help(note.text)
+            .help(note.help ?? note.text)
+        } else if note.free {
+            // une puce neutre dont la date peut être longue (« dernière sam. 7 nov. 03:12 ») : elle se coupe en fin
+            // plutôt que de dépasser de la tuile dans une fenêtre étroite
+            Text(note.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Theme.raised, in: .capsule)
+                .help(note.help ?? note.text)
         } else if let to = note.switchTo {
             HStack(spacing: 4) {
                 Chip(note.text, tone: .warn, size: .regular)
@@ -260,8 +324,10 @@ struct StateTile: View {
         } else if let panel = note.panel {
             Chip(note.text, symbol: note.id == "mcp" ? Icon.mcp : nil, tone: note.style == .warn ? .warn : .neutral,
                  size: .regular, raised: true) { open(panel) }
+                .help(note.help ?? "")
         } else {
             Chip(note.text, tone: note.style == .warn ? .warn : .neutral, size: .regular, raised: true)
+                .help(note.help ?? "")
         }
     }
 }

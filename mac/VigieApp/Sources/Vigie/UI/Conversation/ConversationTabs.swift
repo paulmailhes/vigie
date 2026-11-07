@@ -273,20 +273,12 @@ struct ConversationMCPList: View {
                 .glassButton(.primary)
                 .controlSize(.small)
             } else {
+                // déjà une couleur de TEXTE (orange ou rouge foncés en mode clair pour un problème, gris sinon)
                 Text(MCPStatusStyle.label(status))
                     .font(.callout)
-                    .foregroundStyle(Self.statusText(status))
+                    .foregroundStyle(MCPStatusStyle.color(status))
             }
             UsesLabel(count: item.uses, here: true)
-        }
-    }
-
-    /// Couleur de TEXTE de l'état : orange ou rouge foncés (lisibles en mode clair) pour un problème, gris sinon.
-    private static func statusText(_ status: MCPStatus) -> AnyShapeStyle {
-        switch status {
-        case .needsAuth, .pendingApproval: AnyShapeStyle(Theme.warnText)
-        case .failed: AnyShapeStyle(Theme.alertText)
-        case .connected, .disabled, .unknown: AnyShapeStyle(.secondary)
         }
     }
 }

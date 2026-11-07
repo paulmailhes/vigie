@@ -76,7 +76,8 @@ struct ConversationInspector: View {
             guard detail.messages.indices.contains(index) else { return PanelHeading(title: fallbackTitle) }
             let message = detail.messages[index]
             return PanelHeading(title: message.isReport ? "Compte rendu de Claude" : "Message de Claude",
-                                subtitle: InfoLine.text([message.kind == "live" ? "en direct" : nil, recentTime(message.ts)]))
+                                subtitle: InfoLine.text([message.kind == "live" ? "en direct" : nil,
+                                                         ConversationVerdict.recent(message.ts, now: store.now)]))
         case .thread:
             return PanelHeading(title: "Tous les échanges", subtitle: Fmt.count(detail.chapters.count, "demande"))
         case .agent(let id):
@@ -189,13 +190,6 @@ struct ConversationInspector: View {
         case (false, false): return PanelHeading(title: "À regarder et à relire", subtitle: "Ce qui a mal tourné, et ce que Vigie a choisi pour toi.")
         default: return PanelHeading(title: "À relire", subtitle: reread.isEmpty ? nil : "Ce que Vigie a choisi pour toi.")
         }
-    }
-
-    /// « 01:19 · il y a 12 min » tant que c'est récent (moins d'une heure), sinon « 01:19 », « hier 17:18 ».
-    private func recentTime(_ date: Date?) -> String? {
-        guard let date else { return nil }
-        let when = Fmt.when(date, now: store.now)
-        return store.now.timeIntervalSince(date) < 3600 ? "\(when) · \(Fmt.ago(date, now: store.now))" : when
     }
 
     private func agent(_ id: String, in model: ConversationDetailModel) -> AgentRun? {
@@ -477,9 +471,10 @@ struct AgentDetail: View {
             PanelBlock("Temps") {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(timeLine)
-                    if let estimate = agent.estimate, let median = estimate.medianMs, let basis = estimate.basis {
-                        Text("Base : médiane de \(Fmt.duration(ms: median)) sur les \(basis) agents « \(agent.phase ?? "") » finis.")
+                    if let basis = estimateBasis {
+                        Text(basis)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -513,6 +508,17 @@ struct AgentDetail: View {
         .font(.callout)
     }
 
+    /// D'où vient l'estimation, en mots simples : « Estimé d'après les 4 agents « Faire » déjà finis, qui ont pris
+    /// environ 12 min. » (la médiane de leur durée).
+    private var estimateBasis: String? {
+        guard let estimate = agent.estimate, let median = estimate.medianMs, let basis = estimate.basis, basis > 0 else { return nil }
+        let duration = Fmt.duration(ms: median)
+        guard !duration.isEmpty else { return nil }
+        let phase = agent.phase.flatMap { $0.isEmpty ? nil : " « \($0) »" } ?? ""
+        if basis == 1 { return "Estimé d'après l'agent\(phase) déjà fini, qui a pris environ \(duration)." }
+        return "Estimé d'après les \(Fmt.int(basis)) agents\(phase) déjà finis, qui ont pris environ \(duration)."
+    }
+
     private var timeLine: String {
         guard let start = agent.startedAt else { return Fmt.duration(ms: agent.durationMs) }
         if agent.status == "running" {
@@ -537,6 +543,8 @@ struct WorkflowDetail: View {
 
     var body: some View {
         let mine = (model.runningAgents + model.doneAgents).filter { $0.workflow == (workflow.name ?? workflow.id) }
+        // un agent sans nom (« faire:C7 ») prend le libellé de l'étape du plan qu'il fait
+        let steps = model.raw.now?.plan?.steps ?? []
         VStack(alignment: .leading, spacing: 14) {
             if let result = workflow.result ?? workflow.summary {
                 Text(result).textSelection(.enabled)
@@ -547,7 +555,7 @@ struct WorkflowDetail: View {
             ForEach(phases(mine), id: \.title) { phase in
                 PanelBlock(phase.title, trailing: phase.line) {
                     ForEach(phase.agents) { agent in
-                        AgentTile(agent: agent) { panel in
+                        AgentTile(agent: agent, planSteps: steps) { panel in
                             store.conversationPanel = panel
                         }
                     }

@@ -35,13 +35,15 @@ struct ExchangeTile: View {
                 if let current = detail.current {
                     youBubble(current)
                     let facts = factsLine(current)
-                    if !facts.characters.isEmpty {
-                        Text(facts)
+                    if !facts.isEmpty {
+                        facts.text
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
+                            .help(checks?.help(now: store.now) ?? "")
+                            .accessibilityLabel(facts.plain)
                     }
                 }
                 let messages = Array(detail.messages.enumerated()).suffix(Self.shown)
@@ -150,8 +152,9 @@ struct ExchangeTile: View {
         .help("Le message en entier")
     }
 
+    /// « Claude · compte rendu · 01:19 · il y a 12 min » : l'heure au même format que le panneau qu'elle ouvre.
     private func label(_ message: ClaudeMessage, live: Bool, asks: Bool) -> String {
-        let when = message.ts.map { live ? Fmt.ago($0, now: store.now) : Fmt.when($0, now: store.now) } ?? ""
+        let when = ConversationVerdict.recent(message.ts, now: store.now) ?? ""
         let parts: [String]
         if asks { parts = ["Claude te demande", when] }
         else if live { parts = ["Claude", "en direct", when] }
@@ -170,34 +173,36 @@ struct ExchangeTile: View {
 
     // MARK: Faits et dernière action
 
-    /// « 4 commits · 38 fichiers · tests réussis à 01:15 · 7 agents finis, 1 en échec » ; un test en échec en rouge.
-    private func factsLine(_ c: CurrentRequest) -> AttributedString {
-        // (texte, en rouge)
-        var parts: [(String, Bool)] = []
-        if let v = c.commits, v > 0 { parts.append((Fmt.count(v, "commit"), false)) }
-        if let v = c.deploys, v > 0 { parts.append((v > 1 ? "\(v) déploiements" : "déployé", false)) }
-        if let v = c.files, v > 0 { parts.append((Fmt.count(v, "fichier"), false)) }
-        if let test = lastTest(since: c.start) {
+    /// Le verdict du moteur sur la demande en cours (le résumé de la conversation, sinon celui du détail).
+    private var checks: RequestChecks? {
+        summary.checks ?? model.raw.summary?.checks
+    }
+
+    /// « 4 commits · 38 fichiers · ✓ tests verts après la dernière modification · 1 commit pas envoyé · 7 agents finis,
+    /// 1 en échec » : seul le mot qui signale prend sa couleur (orange : modifié après les tests, pas commité, pas
+    /// envoyé ; rouge : en échec), le reste en gris. Cinq faits au plus : le verdict et ce qui manque restent, les
+    /// agents puis les fichiers partent d'abord.
+    private func factsLine(_ c: CurrentRequest) -> FactLine {
+        var facts: [FactLine.Fact] = []
+        if let v = c.commits, v > 0 { facts.append(.init(Fmt.count(v, "commit"))) }
+        if let v = c.deploys, v > 0 { facts.append(.init(v > 1 ? "\(v) déploiements" : "déployé")) }
+        if let v = c.files, v > 0 { facts.append(.init(Fmt.count(v, "fichier"))) }
+        if let verdict = checks?.verdictFact {
+            facts.append(verdict)
+        } else if let test = lastTest(since: c.start) {
+            // moteur plus ancien, ou rien à dire des vrais tests : le dernier contrôle, tel quel
             let when = ConversationVerdict.at(test.ts, now: store.now)
             let failed = test.outcome == .failed
             let text = failed ? "tests en échec" : "tests réussis"
-            parts.append((when.isEmpty ? text : "\(text) \(when)", failed))
+            facts.append(.init(when.isEmpty ? text : "\(text) \(when)", tone: failed ? .alert : .plain, kept: failed))
         }
+        facts += checks?.noteFacts ?? []
         let agents = model.doneAgents.filter { ($0.startedAt ?? .distantPast) >= (c.start ?? .distantPast) }
         let failed = agents.count { $0.status == "failed" }
         if !agents.isEmpty {
-            parts.append(("\(Fmt.count(agents.count, "agent fini", "agents finis"))\(failed > 0 ? ", \(failed) en échec" : "")", false))
+            facts.append(.init("\(Fmt.count(agents.count, "agent fini", "agents finis"))\(failed > 0 ? ", \(failed) en échec" : "")"))
         }
-        var line = AttributedString()
-        for (offset, part) in parts.prefix(4).enumerated() {
-            if offset > 0 { line += AttributedString(" · ") }
-            // une ligne seule commence par une majuscule (« Déployé · … »)
-            var piece = AttributedString(offset == 0 ? ConversationVerdict.sentence(part.0) : part.0)
-            // seul le mot qui signale reste en rouge, le reste de la ligne en gris
-            if part.1 { piece.swiftUI.foregroundColor = Theme.alertText }
-            line += piece
-        }
-        return line
+        return FactLine(facts: facts).limited(to: 5)
     }
 
     private func lastTest(since start: Date?) -> TestRun? {

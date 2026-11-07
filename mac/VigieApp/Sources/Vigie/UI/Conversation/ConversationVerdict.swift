@@ -20,6 +20,8 @@ struct ConversationVerdict: Equatable {
     var reply = true
     /// Une tuile orange porte aussi de quoi comprendre : « Voir les tests » (un test en échec), sinon « Journal ».
     var showCause = false
+    /// Elle a fini ta demande (« Finie ») : la tuile dit si c'est vérifié, commité et envoyé.
+    var finished = false
 
     /// Sans nouvelles : marquée en cours, mais rien écrit depuis 10 min et rien ne tourne pour elle.
     static let silence: TimeInterval = 10 * 60
@@ -50,7 +52,7 @@ struct ConversationVerdict: Equatable {
         let commands = detail?.background.count ?? 0
         let busy = agents > 0 || workflows > 0 || commands > 0
         if s.state != .working, !busy, let ended = detail?.ended, ended.kind == "limit" || ended.kind == "error" {
-            return .init(tone: .alert, title: ended.kind == "limit" ? "Arrêtée : limite atteinte" : "Arrêtée : erreur de l'API",
+            return .init(tone: .alert, title: ended.kind == "limit" ? "Arrêtée : limite atteinte" : "Arrêtée : Claude n'a pas répondu",
                          since: ago(ended.ts, now: now), line: unfinishedLine(detail), openButton: true)
         }
         // une tuile orange porte son action : de quoi rouvrir la conversation, et de quoi comprendre
@@ -80,7 +82,8 @@ struct ConversationVerdict: Equatable {
             return .init(tone: .calm, title: "Fermée", since: ago(s.lastActivity, now: now), line: report?.brief ?? s.headline)
         }
         if let report {
-            return .init(tone: .calm, title: "Finie", since: ago(report.ts, now: now), line: report.brief ?? s.headline)
+            return .init(tone: .calm, title: "Finie", since: ago(report.ts, now: now), line: report.brief ?? s.headline,
+                         finished: true)
         }
         return .init(tone: .calm, title: "Au repos", since: ago(s.lastActivity, now: now), line: s.headline)
     }
@@ -124,6 +127,14 @@ struct ConversationVerdict: Equatable {
     static func at(_ date: Date?, now: Date) -> String {
         guard let date else { return "" }
         return Calendar.current.isDate(date, inSameDayAs: now) ? "à \(Fmt.time(date))" : Fmt.when(date, now: now)
+    }
+
+    /// L'heure d'un message : « 01:19 · il y a 12 min » pendant la première heure, sinon « 01:19 », « hier 17:18 ».
+    /// Le même format dans la bulle de l'Échange et dans le panneau qui l'ouvre.
+    static func recent(_ date: Date?, now: Date) -> String? {
+        guard let date else { return nil }
+        let when = Fmt.when(date, now: now)
+        return now.timeIntervalSince(date) < 3600 ? "\(when) · \(Fmt.ago(date, now: now))" : when
     }
 
     /// Une ligne seule commence par une majuscule (un fragment après « · » reste en minuscule).

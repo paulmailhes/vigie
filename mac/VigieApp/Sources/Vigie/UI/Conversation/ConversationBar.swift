@@ -103,14 +103,18 @@ struct ConversationBar: View {
         .help("Compte de cette conversation")
     }
 
+    /// Ce que coûte la bascule : un autre compte n'a pas son cache, il relit toute la conversation. Vigie ne sait pas
+    /// encore le dire en part de semaine (le cache froid coûte plus qu'un tour ordinaire) : la taille de la
+    /// conversation, entre parenthèses.
     private func switchMessage(_ account: Account) -> String {
-        var text = summary.state == .working
-            ? "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
-            : "Elle reprend sur \(account.displayName) avec tout son historique."
-        if let contextTokens, contextTokens > 0 {
-            text += " ≈ \(Fmt.tokens(contextTokens)) tokens relus sur le nouveau compte."
+        let reread = contextTokens.flatMap { $0 > 0 ? $0 : nil }.map {
+            "Elle relira toute la conversation sur \(account.displayName) (environ \(Fmt.tokens($0)) tokens)."
         }
-        return text
+        if summary.state == .working {
+            let base = "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
+            return reread.map { "\(base) \($0)" } ?? base
+        }
+        return reread.map { "Elle garde tout son historique. \($0)" } ?? "Elle reprend sur \(account.displayName) avec tout son historique."
     }
 
     // MARK: Auto-accept de cette conversation
