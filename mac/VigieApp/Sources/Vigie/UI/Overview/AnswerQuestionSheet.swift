@@ -12,15 +12,10 @@ struct AnswerQuestionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                SheetIcon(symbol: Icon.question)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Claude te pose une question").font(.title3.bold())
-                    if let title = item.conversationTitle {
-                        Text(title).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ObjectHeader("Claude te pose une question",
+                         info: [item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.conversationTitle,
+                                item.ts.map { Fmt.when($0, now: store.now) }],
+                         icon: Icon.question)
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(item.questions, id: \.question) { question in
@@ -49,9 +44,7 @@ struct AnswerQuestionSheet: View {
     private func questionView(_ question: PendingQuestion) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let header = question.header, !header.isEmpty {
-                Text(header.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                CardTitle(header, compact: true)
             }
             Text(question.question)
                 .font(.headline)
@@ -78,10 +71,11 @@ struct AnswerQuestionSheet: View {
                         Spacer(minLength: 0)
                     }
                     .padding(10)
-                    .background(selected ? AnyShapeStyle(Theme.action.opacity(0.10)) : AnyShapeStyle(.quinary), in: .rect(cornerRadius: 10))
+                    .background(selected ? AnyShapeStyle(Theme.action.opacity(0.10)) : AnyShapeStyle(.quinary), in: .rect(cornerRadius: 8))
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
     }

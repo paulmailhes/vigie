@@ -1,8 +1,9 @@
 import Charts
 import SwiftUI
 
-/// Bloc « Consommation » de la vue d'ensemble : une courbe par conversation sur 1 h, 10 h ou 20 h,
-/// en % de la semaine du compte (tokens au survol), cases pour afficher ou masquer chaque conversation.
+/// Graphique « Consommation » (page Comptes ; il se suffit à lui-même) : une courbe par conversation sur 1 h, 10 h
+/// ou 20 h, en % de la semaine du compte (tokens au survol), cases pour afficher ou masquer chaque conversation.
+/// La vue d'ensemble n'en garde qu'une ligne par compte (`AccountUsageSection`).
 struct UsageSection: View {
     @Environment(VigieStore.self) private var store
     @AppStorage("usage.window") private var spanRaw = UsageSpan.hour.rawValue
@@ -15,22 +16,20 @@ struct UsageSection: View {
     private var span: UsageSpan { UsageSpan(rawValue: spanRaw) ?? .hour }
 
     var body: some View {
-        CardSection {
+        CardSection("Consommation") {
             content
-        } header: {
-            header
+        } trailing: {
+            controls
         }
         .task(id: "\(spanRaw)|\(store.windowVisible)") { await store.followUsage(span) }
     }
 
-    private var header: some View {
+    private var controls: some View {
         HStack(spacing: 10) {
-            Label("Consommation", systemImage: Icon.usage)
-                .labelStyle(.titleOnly)
-            Spacer(minLength: 8)
             Text("% de la semaine par heure")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             Picker("Période", selection: $spanRaw) {
                 ForEach(UsageSpan.allCases) { span in
                     Text(span.label).tag(span.rawValue)
@@ -40,15 +39,15 @@ struct UsageSection: View {
             .labelsHidden()
             .fixedSize()
         }
-        .font(.body)
         .controlSize(.small)
     }
 
     @ViewBuilder
     private var content: some View {
         if let series = store.usageSeries[span.rawValue] {
-            // les conversations ouvertes seulement (les fermées et les dossiers annexes encombraient la courbe)
-            let lines = UsageLine.make(series, store: store, span: span, cumulative: cumulative).filter(\.running)
+            // les conversations ouvertes seulement (les fermées et les dossiers annexes encombraient la courbe) ;
+            // 6 courbes au plus, le reste regroupé en « Autres »
+            let lines = UsageLine.forChart(UsageLine.make(series, store: store, span: span, cumulative: cumulative).filter(\.running))
             if lines.isEmpty {
                 Label("Aucune consommation sur cette période", systemImage: "moon.zzz")
                     .foregroundStyle(.secondary)
@@ -104,13 +103,15 @@ struct UsageLine: Identifiable, Equatable {
     var totalTokens: Double
     var points: [Point]
 
-    static let palette: [Color] = [.blue, .orange, .green, .pink, .purple, .teal, .yellow, .red, .indigo, .mint, .brown, .cyan]
+    /// Couleurs sans sens d'état : ni le vert (travaille), l'orange (à surveiller), le rouge (t'attend), ni le violet
+    /// de « Toi » ; une courbe rouge se lisait comme une alerte.
+    static let palette: [Color] = [.blue, .indigo, .teal, .cyan, .brown, .gray]
+    /// Au-delà, les moins gourmandes sont regroupées en une courbe grise « Autres ».
+    static let maxLines = 6
 
     @MainActor
     static func make(_ series: UsageSeries, store: VigieStore, span: UsageSpan, cumulative: Bool) -> [UsageLine] {
         let step = max(series.stepMin ?? span.defaultStep, 1)
-        // Couleur stable : rang de l'identifiant parmi les conversations de la période.
-        let colorIndex = Dictionary(uniqueKeysWithValues: series.conversations.map(\.id).sorted().enumerated().map { ($1, $0) })
         var lines: [UsageLine] = []
         for conversation in series.conversations {
             var points: [Point] = []
@@ -135,13 +136,52 @@ struct UsageLine: Identifiable, Equatable {
             lines.append(UsageLine(id: conversation.id, name: name,
                                    subtitle: title == name ? nil : title,
                                    account: accountID.flatMap { store.account($0)?.displayName },
-                                   color: palette[(colorIndex[conversation.id] ?? 0) % palette.count],
+                                   color: .gray,
                                    running: live.map(\.isOpen) ?? (conversation.running ?? false),
                                    totalPct: conversation.totalPct, totalTokens: conversation.totalTokens,
                                    points: points))
         }
         // Rangées par compte, puis les plus gourmandes d'abord.
         return lines.sorted { ($0.account ?? "~", -$0.totalPct) < ($1.account ?? "~", -$1.totalPct) }
+    }
+
+    /// Les courbes du graphique : 6 au plus. S'il y en a davantage, les 5 plus gourmandes gardent la leur et le reste
+    /// est additionné en une courbe grise « Autres », en dernier. Couleur stable : rang de l'identifiant parmi les
+    /// conversations affichées.
+    static func forChart(_ lines: [UsageLine]) -> [UsageLine] {
+        var kept = lines
+        var others: UsageLine?
+        if lines.count > maxLines {
+            let top = Set(lines.sorted { $0.totalPct > $1.totalPct }.prefix(maxLines - 1).map(\.id))
+            kept = lines.filter { top.contains($0.id) }
+            others = merged(lines.filter { !top.contains($0.id) })
+        }
+        let colors = others == nil ? palette : Array(palette.prefix(maxLines - 1))
+        let rank = Dictionary(uniqueKeysWithValues: kept.map(\.id).sorted().enumerated().map { ($1, $0) })
+        var result = kept.map { line in
+            var colored = line
+            colored.color = colors[(rank[line.id] ?? 0) % colors.count]
+            return colored
+        }
+        if let others { result.append(others) }
+        return result
+    }
+
+    /// Une courbe « Autres » : la somme des courbes regroupées, minute par minute.
+    private static func merged(_ lines: [UsageLine]) -> UsageLine {
+        var sums: [Date: (value: Double, tokens: Double)] = [:]
+        for line in lines {
+            for point in line.points {
+                let current = sums[point.t] ?? (0, 0)
+                sums[point.t] = (current.value + point.value, current.tokens + point.tokens)
+            }
+        }
+        let points = sums.sorted { $0.key < $1.key }.enumerated().map { index, entry in
+            Point(id: index, t: entry.key, value: entry.value.value, tokens: entry.value.tokens)
+        }
+        return UsageLine(id: "autres", name: "Autres", subtitle: Fmt.count(lines.count, "conversation"), account: nil,
+                         color: .gray, running: true, totalPct: lines.reduce(0) { $0 + $1.totalPct },
+                         totalTokens: lines.reduce(0) { $0 + $1.totalTokens }, points: points)
     }
 
     /// Le point le plus proche d'une heure (survol).
@@ -171,7 +211,7 @@ private struct AccountTotals: View {
                     if let rate = rates[account.id] {
                         Text("· \(Fmt.rate(rate)) maintenant")
                             .monospacedDigit()
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .font(.callout)
@@ -311,18 +351,13 @@ private struct UsageLegend: View {
             Text(line.name)
                 .lineLimit(1)
             if let account = line.account {
-                Text(account)
-                    .font(.caption)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.quaternary, in: .capsule)
-                    .lineLimit(1)
+                Chip(account)
                     .help("Consomme sur \(account)")
             }
             if !line.running {
                 Text("fermée")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: 6)
             Text(Fmt.pctFine(line.totalPct))
@@ -336,5 +371,94 @@ private struct UsageLegend: View {
         var parts = [line.subtitle ?? line.name, "\(Fmt.pctFine(line.totalPct)) de la semaine de \(line.account ?? "son compte")"]
         if line.totalTokens > 0 { parts.append("\(Fmt.tokensShort(line.totalTokens)) tokens") }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Vue d'ensemble : une ligne par compte
+
+/// Vue d'ensemble : une ligne par compte connecté, ce qu'il a consommé sur l'heure, son débit du moment et sa semaine.
+/// Le graphique conversation par conversation est dans la page Comptes (`UsageSection`).
+struct AccountUsageSection: View {
+    @Environment(VigieStore.self) private var store
+
+    var body: some View {
+        let rows = AccountUsageRow.make(store: store, series: store.usageSeries[UsageSpan.hour.rawValue])
+        if !rows.isEmpty {
+            CardSection("Consommation") {
+                ForEach(rows) { row in
+                    AccountUsageLine(row: row)
+                }
+            } trailing: {
+                Button("Voir le graphique") { store.showAccounts(nil) }
+                    .buttonStyle(.link)
+                    .help("Le graphique de consommation, conversation par conversation, est dans la page Comptes")
+            }
+            .task(id: store.windowVisible) { await store.followUsage(.hour) }
+        }
+    }
+}
+
+/// Ce que dit la ligne d'un compte.
+struct AccountUsageRow: Identifiable, Equatable {
+    var id: String
+    var name: String
+    /// % de la semaine consommé sur la dernière heure (nil : pas encore lu, ou compte sans relevé).
+    var hourPct: Double?
+    /// Débit du moment, % de la semaine par heure (conversations ouvertes).
+    var rate: Double?
+    /// Semaine utilisée, en %.
+    var week: Double?
+
+    /// À partir de 90 % de la semaine, la ligne le dit en puce (la vue d'ensemble la remonte aussi).
+    var weekAlert: Bool { (week ?? 0) >= 90 }
+
+    /// L'heure écoulée, le moment, la semaine (dite par la puce quand elle est presque pleine).
+    var info: [String?] {
+        let hour: String? = hourPct.map { $0 > 0.005 ? "\(Fmt.pctFine($0)) en 1 h" : "rien depuis une heure" }
+        let now: String? = rate.flatMap { $0 > 0.005 ? "\(Fmt.rate($0)) maintenant" : nil }
+        let weekText: String? = weekAlert ? nil : week.map { "semaine à \(Fmt.pct($0))" }
+        let parts = [hour, now, weekText]
+        let empty = parts.allSatisfy { $0?.isEmpty ?? true }
+        return empty && !weekAlert ? ["pas encore de relevé"] : parts
+    }
+
+    @MainActor
+    static func make(store: VigieStore, series: UsageSeries?) -> [AccountUsageRow] {
+        let rates = Dictionary(store.ratesByAccount.map { ($0.id, $0.pctPerHour) }, uniquingKeysWith: { first, _ in first })
+        let hour = Dictionary((series?.accounts ?? []).map { ($0.id, $0.totalPct) }, uniquingKeysWith: { first, _ in first })
+        return store.accounts.filter(\.isConnected).map { account in
+            AccountUsageRow(id: account.id, name: account.displayName,
+                            hourPct: hour[account.id],
+                            rate: rates[account.id], week: account.usage?.week?.pct)
+        }
+    }
+}
+
+/// La ligne d'un compte : son nom (et « Semaine à 92 % » en puce quand elle est presque pleine), puis ses chiffres.
+private struct AccountUsageLine: View {
+    let row: AccountUsageRow
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: Icon.account)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.name)
+                        .textRole(.item)
+                        .lineLimit(1)
+                    if row.weekAlert, let week = row.week {
+                        Chip("Semaine à \(Fmt.pct(week))", symbol: Icon.week, tone: week >= 95 ? .alert : .warn)
+                    }
+                }
+                if !row.info.allSatisfy({ $0?.isEmpty ?? true }) {
+                    InfoLine(parts: row.info)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

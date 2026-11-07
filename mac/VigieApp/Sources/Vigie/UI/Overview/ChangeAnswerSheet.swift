@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// « Changer » : L'utilisateur choisit une autre option ; l'app prépare le message de correction.
+/// « Changer » : l'utilisateur choisit une autre option que celle choisie pour lui ; l'app prépare le message qui
+/// corrige Claude (envoyé à la conversation, ou à coller).
 struct ChangeAnswerSheet: View {
     @Environment(VigieStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -46,15 +47,10 @@ struct ChangeAnswerSheet: View {
     // MARK: En-tête
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SheetIcon(symbol: "questionmark.bubble")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(result == nil ? "Changer la réponse" : "Message de correction")
-                    .font(.title3.bold())
-                Text([item.conversationTitle, item.ts.map { Fmt.when($0) }].compactMap { $0 }.joined(separator: " · "))
-                    .foregroundStyle(.secondary)
-            }
-        }
+        ObjectHeader(result == nil ? "Changer la réponse choisie pour toi" : "Message de correction",
+                     info: [item.conversationId.flatMap { store.conversation($0)?.shortTitle } ?? item.conversationTitle,
+                            item.ts.map { Fmt.when($0, now: store.now) }],
+                     icon: Icon.question)
     }
 
     // MARK: Choix
@@ -81,12 +77,12 @@ struct ChangeAnswerSheet: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.action) : AnyShapeStyle(.secondary))
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(label).bold()
                         if claudeChoice {
-                            Pill(text: "Choisie pour toi", symbol: "sparkles")
+                            Chip("Choisie pour toi", symbol: "sparkles")
                         }
                     }
                     if let description = option.description, !description.isEmpty {
@@ -99,10 +95,10 @@ struct ChangeAnswerSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(10)
-            .background(selected ? Color.accentColor.opacity(0.10) : Color.clear, in: .rect(cornerRadius: 10))
+            .background(selected ? Theme.action.opacity(0.10) : Color.clear, in: .rect(cornerRadius: 8))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(selected ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.25))
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(selected ? Theme.action.opacity(0.6) : Color.secondary.opacity(0.25))
             }
             .contentShape(.rect)
         }
@@ -144,7 +140,7 @@ struct ChangeAnswerSheet: View {
                 .textSelection(.enabled)
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quinary, in: .rect(cornerRadius: 12))
+                .background(.quinary, in: .rect(cornerRadius: Theme.corner))
             if result.delivered == true {
                 Label("Envoyé à la conversation", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -159,6 +155,13 @@ struct ChangeAnswerSheet: View {
 
     private var footer: some View {
         HStack {
+            // un bouton grisé dit pourquoi
+            if result == nil && changedAnswers.isEmpty {
+                Text("Choisis une autre option pour corriger Claude.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
             if let result {
                 if result.delivered == true {
@@ -185,12 +188,13 @@ struct ChangeAnswerSheet: View {
                     if sending {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Préparer le message")
+                        Text("Corriger Claude")
                     }
                 }
                 .keyboardShortcut(.defaultAction)
                 .glassButton(.primary)
                 .disabled(changedAnswers.isEmpty || sending)
+                .help("Prépare le message qui dit à Claude ta réponse : envoyé à la conversation, ou à coller")
             }
         }
         .controlSize(.large)

@@ -53,7 +53,8 @@ struct Sparkline: View {
     }
 }
 
-/// Consommation du moment d'une conversation : mini-courbe et « 1,2 %/h » (tokens au survol).
+/// Consommation du moment d'une conversation : mini-courbe et « 1,2 %/h » (tokens au survol). La place de la flèche
+/// de tendance est toujours réservée : d'une rangée à l'autre, les chiffres et les courbes restent alignés.
 struct RateBadge: View {
     let rate: ConversationRate
     var alert = false
@@ -71,13 +72,14 @@ struct RateBadge: View {
                 HStack(spacing: 1) {
                     Text(Fmt.rate(pct))
                         .monospacedDigit()
-                    if let symbol = trendSymbol {
-                        Image(systemName: symbol)
-                            .imageScale(.small)
-                            .foregroundStyle(.tertiary)
-                    }
+                        .contentTransition(.numericText())
+                    Image(systemName: trendSymbol ?? "arrow.up.right")
+                        .imageScale(.small)
+                        .foregroundStyle(steepRise ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
+                        .opacity(trendSymbol == nil ? 0 : 1)
+                        .frame(width: 10)
                 }
-                .foregroundStyle(alert ? AnyShapeStyle(Theme.warn) : AnyShapeStyle(.secondary))
+                .foregroundStyle(alert ? AnyShapeStyle(Theme.warnText) : AnyShapeStyle(.secondary))
             }
         }
         .lineLimit(1)
@@ -95,9 +97,25 @@ struct RateBadge: View {
         }
     }
 
+    /// Forte hausse : elle s'emballe, ou les 5 dernières minutes consomment au moins le double des précédentes.
+    private var steepRise: Bool {
+        guard rate.trend == "up" else { return false }
+        if alert { return true }
+        let values = rate.spark
+        guard values.count >= 10 else { return false }
+        let recent = values.suffix(5)
+        let before = values.dropLast(5)
+        let recentMean = recent.reduce(0, +) / Double(recent.count)
+        let beforeMean = before.reduce(0, +) / Double(before.count)
+        return beforeMean > 0 && recentMean >= 2 * beforeMean
+    }
+
     private var help: String {
         var parts: [String] = []
-        if let pct = rate.weekPctPerHour { parts.append("\(Fmt.rate(pct)) de la semaine du compte") }
+        if let pct = rate.weekPctPerHour {
+            let trend = steepRise ? ", en forte hausse" : rate.trend == "up" ? ", en hausse" : rate.trend == "down" ? ", en baisse" : ""
+            parts.append("\(Fmt.rate(pct)) de la semaine du compte\(trend)")
+        }
         if let tokens = rate.tokensPerMin { parts.append(Fmt.tokensPerMin(tokens)) }
         parts.append("10 dernières minutes, agents compris")
         return parts.joined(separator: " · ")

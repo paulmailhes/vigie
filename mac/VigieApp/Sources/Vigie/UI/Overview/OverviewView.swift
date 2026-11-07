@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// Vue d'ensemble : ce qui t'attend (s'il y a quelque chose), en ce moment (comptes), conversations.
-/// Le reste (depuis ton passage, graphique, acceptations) est replié en bas.
+/// Vue d'ensemble, dans un ordre fixe (un bloc apparaît ou disparaît, il ne change pas de place) :
+/// 1. « À décider » : toutes les décisions, quelle que soit la conversation, la plus proche du refus d'abord ;
+/// 2. « Conversations » : une rangée chacune, avec sa pastille, et le compte rendu de celles qui ont fini ;
+/// 3. « À regarder » : ce qui a mal tourné ou que tu dois faire toi-même ;
+/// 4. « À relire » : ce que Vigie a choisi pour toi ;
+/// 5. « Consommation » : une ligne par compte (le graphique est dans la page Comptes). Seule exception à l'ordre :
+///    elle passe juste sous « À décider » quand un compte qui fait tourner une conversation dépasse 90 % de sa semaine ;
+/// 6. « Depuis une heure » : les chiffres de l'heure, chacun ouvre l'Historique.
 struct OverviewView: View {
     @Environment(VigieStore.self) private var store
-    @State private var showAllLater = false
+    @State private var showAllReread = false
 
-    private static let reportsShown = 3
+    private static let rereadShown = 3
 
     var body: some View {
         Group {
@@ -21,7 +27,10 @@ struct OverviewView: View {
     }
 
     private var content: some View {
-        Page {
+        let decisions = store.decisionItems
+        let look = store.lookItems(for: nil)
+        let reread = store.rereadItems(for: nil)
+        return Page {
             UpdateBanner()
 
             if let notices = store.engineInfo?.notices, !notices.isEmpty {
@@ -34,48 +43,48 @@ struct OverviewView: View {
                 .padding(.horizontal, 6)
             }
 
-            // Ordre d'importance : ce qui t'attend ou a mal tourné remonte ; la consommation passe devant les
-            // acceptations quand un compte approche de sa limite.
-            CardSection(sinceHeader) {
-                SinceRow()
+            if !decisions.isEmpty {
+                CardSection("À décider", count: decisions.count, urgent: true) {
+                    ForEach(decisions) { item in
+                        ReviewRow(item: item)
+                    }
+                }
             }
 
-            if !urgent.isEmpty {
-                urgentSection
+            if usageAlert {
+                AccountUsageSection()
             }
 
             ConversationListSection()
 
-            if usageAlert {
-                UsageSection()
-                AcceptedFeedSection()
-            } else {
-                AcceptedFeedSection()
-                UsageSection()
+            if !look.isEmpty {
+                CardSection("À regarder", count: look.count) {
+                    ForEach(look) { item in
+                        ReviewRow(item: item)
+                    }
+                }
             }
 
-            if !later.isEmpty {
-                laterSection
+            if !reread.isEmpty {
+                CardSection("À relire", count: reread.count) {
+                    ForEach(showAllReread ? reread : Array(reread.prefix(Self.rereadShown))) { item in
+                        ReviewRow(item: item)
+                    }
+                    if !showAllReread && reread.count > Self.rereadShown {
+                        ShowAllButton(count: reread.count) { showAllReread = true }
+                    }
+                }
+            }
+
+            if !usageAlert {
+                AccountUsageSection()
+            }
+
+            // Fenêtre glissante d'une heure, tenue par le moteur : rien à remettre à zéro.
+            CardSection("Depuis une heure") {
+                SinceRow()
             }
         }
-    }
-
-    /// En haut, en entier : ce qui attend ta décision hors d'une conversation ouverte (elle l'affiche sous elle),
-    /// et ce qui a mal tourné (autorisée mais échouée, refusée, limite atteinte), où que ce soit.
-    private var urgent: [ReviewItem] {
-        let open = Set(store.conversations.filter(\.isOpen).map(\.id))
-        return store.toReview.filter {
-            (($0.needsDecision || $0.reviewKind == .waiting) && !open.contains($0.conversationId ?? "")) || Self.important($0)
-        }
-    }
-
-    private static func important(_ item: ReviewItem) -> Bool {
-        (item.reviewKind == .blocked && !item.needsDecision) || item.reviewKind == .limit
-    }
-
-    /// Le reste (questions choisies pour toi…) : à relire, sans urgence.
-    private var later: [ReviewItem] {
-        store.toReview.filter { !($0.needsDecision || $0.reviewKind == .waiting) && !Self.important($0) }
     }
 
     /// Un compte qui fait tourner une conversation ouverte passe 90 % de sa semaine : la consommation remonte
@@ -85,61 +94,28 @@ struct OverviewView: View {
         return store.accounts.contains { used.contains($0.id) && ($0.usage?.week?.pct ?? 0) >= 90 }
     }
 
-    private var urgentSection: some View {
-        CardSection {
-            ForEach(urgent) { item in
-                ReviewRow(item: item)
-            }
-        } header: {
-            HStack(spacing: 6) {
-                Text("À regarder")
-                CountBadge(count: urgent.count, urgent: true)
-            }
-        }
-    }
-
-    private var laterSection: some View {
-        CardSection {
-            ForEach(showAllLater ? later : Array(later.prefix(Self.reportsShown))) { item in
-                ReviewRow(item: item)
-            }
-            if !showAllLater && later.count > Self.reportsShown {
-                ShowAllButton(count: later.count) { showAllLater = true }
-            }
-        } header: {
-            HStack(spacing: 6) {
-                Text("À relire")
-                Text(Fmt.int(later.count))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-        }
-    }
-
-
-    /// Fenêtre glissante d'une heure, tenue par le moteur : rien à remettre à zéro.
-    private var sinceHeader: String { "Depuis une heure" }
-
+    /// « 3 à décider · 4 conversations ouvertes · 3 au travail » : le chiffre rouge de la barre latérale se relit ici.
     private var subtitle: String {
         let open = store.conversations.filter(\.isOpen)
         let working = open.count(where: { $0.state == .working })
-        var parts = [Fmt.count(open.count, "conversation ouverte", "conversations ouvertes")]
-        if working > 0 { parts.append("\(working) au travail") }
+        var parts: [String] = []
+        let decisions = store.decisionCount
+        if decisions > 0 { parts.append("\(Fmt.int(decisions)) à décider") }
+        parts.append(Fmt.count(open.count, "conversation ouverte", "conversations ouvertes"))
+        if working > 0 { parts.append("\(Fmt.int(working)) au travail") }
         return parts.joined(separator: " · ")
     }
 }
 
-/// « Depuis une heure » : une ligne de chiffres, fenêtre glissante.
+/// « Depuis une heure » : une ligne de chiffres, fenêtre glissante. Seulement ce qui ne se lit pas déjà plus haut
+/// (les tests en échec sont sur la rangée de leur conversation, une limite reste dans « À regarder »).
 struct SinceRow: View {
     @Environment(VigieStore.self) private var store
 
     var body: some View {
-        let summary = store.sinceSummary
-        HStack(alignment: .center, spacing: 16) {
-            FlowStats(items: items(summary)) { status in store.openHistory(status: status, window: 60) }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 4)
+        FlowStats(items: items(store.sinceSummary)) { status in store.openHistory(status: status, window: 60) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
     }
 
     private func items(_ summary: SinceSummary?) -> [FlowStats.Item] {
@@ -147,24 +123,31 @@ struct SinceRow: View {
         let questions = summary?.questionsAuto ?? 0
         let blocked = summary?.blocked ?? 0
         let refused = summary?.refused ?? 0
-        let failedActions = summary?.failed ?? 0
-        let reports = summary?.reports ?? 0
-        let failed = summary?.testsFailed ?? 0
-        let limits = summary?.limits ?? 0
+        let failed = summary?.failed ?? 0
+        let results = summary?.reports ?? 0
         // un clic sur un chiffre ouvre l'historique de l'heure, filtré sur ce statut
         var list: [FlowStats.Item] = [.init(value: accepted, label: accepted > 1 ? "acceptées" : "acceptée", history: "accepted")]
-        if questions > 0 { list.append(.init(value: questions, label: questions > 1 ? "questions choisies" : "question choisie", history: "question")) }
-        if refused > 0 { list.append(.init(value: refused, label: refused > 1 ? "refusées" : "refusée", history: "refused")) }
-        if blocked > 0 { list.append(.init(value: blocked, label: blocked > 1 ? "bloquées" : "bloquée", alert: true, history: "blocked")) }
-        if failedActions > 0 { list.append(.init(value: failedActions, label: failedActions > 1 ? "échouées" : "échouée", alert: true, history: "failed")) }
-        if reports > 0 { list.append(.init(value: reports, label: reports > 1 ? "rapports" : "rapport")) }
-        if failed > 0 { list.append(.init(value: failed, label: failed > 1 ? "tests en échec" : "test en échec")) }
-        if limits > 0 { list.append(.init(value: limits, label: limits > 1 ? "limites atteintes" : "limite atteinte")) }
+        if questions > 0 {
+            list.append(.init(value: questions, label: questions > 1 ? "questions choisies pour toi" : "question choisie pour toi",
+                              history: "question"))
+        }
+        if refused > 0 { list.append(.init(value: refused, label: refused > 1 ? "refusées par toi" : "refusée par toi", history: "refused")) }
+        if blocked > 0 {
+            list.append(.init(value: blocked, label: blocked > 1 ? "refusées d'office" : "refusée d'office", alert: true, history: "blocked"))
+        }
+        if failed > 0 {
+            list.append(.init(value: failed, label: "en échec", alert: true, history: "failed",
+                              help: "Autorisées, mais en échec : voir le détail dans l'historique"))
+        }
+        if results > 0 {
+            list.append(.init(value: results, label: results > 1 ? "résultats" : "résultat",
+                              help: "Livrables publiés, workflows et agents finis dans l'heure ; une demande finie se lit sous sa conversation"))
+        }
         return list
     }
 }
 
-/// Chiffres en gras suivis d'un mot, séparés par des points ; retour à la ligne si la place manque.
+/// Chiffres en gras suivis d'un mot plus petit et gris, séparés par des points ; retour à la ligne si la place manque.
 struct FlowStats: View {
     struct Item: Hashable {
         var value: Int
@@ -172,6 +155,7 @@ struct FlowStats: View {
         var alert = false
         /// Statut de l'historique ouvert au clic (nil : pas cliquable).
         var history: String? = nil
+        var help: String? = nil
     }
 
     let items: [Item]
@@ -180,32 +164,35 @@ struct FlowStats: View {
     var body: some View {
         FlowLayout(spacing: 6) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if index > 0 { Text("·").foregroundStyle(.tertiary) }
                     stat(item)
                 }
             }
         }
-        .font(.title3)
-        .contentTransition(.numericText())
     }
 
     @ViewBuilder
     private func stat(_ item: Item) -> some View {
-        let label = HStack(spacing: 4) {
-            Text(Fmt.int(item.value)).bold().monospacedDigit()
-                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
+        let label = HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(Fmt.int(item.value))
+                .font(.title3.bold())
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .foregroundStyle(item.alert ? AnyShapeStyle(Theme.alertText) : AnyShapeStyle(.primary))
             Text(item.label)
-                .foregroundStyle(item.alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                .font(.body)
+                .foregroundStyle(item.alert ? AnyShapeStyle(Theme.alertText) : AnyShapeStyle(.secondary))
         }
         .fixedSize()
         if let key = item.history, let open {
             Button { open(key) } label: { label.contentShape(.rect) }
                 .buttonStyle(.plain)
-                .help("Voir le détail dans l'historique")
+                .help(item.help ?? "Voir le détail dans l'historique")
                 .pointerStyle(.link)
         } else {
             label
+                .help(item.help ?? "")
         }
     }
 }

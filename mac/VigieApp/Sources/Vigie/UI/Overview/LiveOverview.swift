@@ -1,13 +1,15 @@
 import SwiftUI
 
-// Vue d'ensemble, en deux blocs qui se lisent d'un coup d'œil :
-// « En ce moment » (chaque compte : ce qui consomme dessus, débit, session et semaine),
-// puis « Conversations » (une ligne chacune : état, ce qu'elle fait, compte, débit, étapes).
+// Vue d'ensemble, la liste « Conversations » : une rangée chacune (état, ce qu'elle fait, compte, débit, avancée),
+// dans l'ordre stable de la liste (par nom : l'activité ne déplace rien). Les décisions sont toutes en tête de page,
+// dans « À décider » : la rangée garde seulement sa pastille (« À autoriser », « T'attend »). Sous une conversation
+// finie depuis moins de 24 h, son compte rendu : ce que Claude a fait, « À toi : … », sa question.
 
 extension VigieStore {
-    /// Ce qui attend une décision maintenant dans cette conversation (action sensible, question, attente).
+    /// Ce qui attend une décision maintenant dans cette conversation : la même liste que « À décider »
+    /// (`decisionItems(for:)`), gardée sous ce nom pour les écrans qui l'appellent encore.
     func urgentItems(for conversationID: String) -> [ReviewItem] {
-        toReview.filter { $0.conversationId == conversationID && ($0.needsDecision || $0.reviewKind == .waiting) }
+        decisionItems(for: conversationID)
     }
 
     /// Compte sur lequel tourne vraiment la conversation (processus lancé), sinon celui choisi.
@@ -26,21 +28,17 @@ extension VigieStore {
             .filter { $0.isOpen && runningAccountId(of: $0) == accountId }
             .reduce(0) { $0 + ($1.rate?.weekPctPerHour ?? 0) }
     }
-}
 
-/// Titre de bloc : un mot en gras, un complément discret.
-struct BlockTitle: View {
-    let title: String
-    var detail: String?
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(.headline)
-            if let detail, !detail.isEmpty {
-                Text(detail).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 6)
+    /// Le compte rendu d'une conversation finie : au repos, rien ne tourne pour elle, sa dernière demande a fini il y
+    /// a moins de 24 h et rien ne s'est passé depuis (une nouvelle demande, même courte, le rend caduc).
+    func finishedReport(for conversation: ConversationSummary) -> Report? {
+        guard conversation.state == .idle,
+              (conversation.agentsRunning ?? 0) == 0, (conversation.workflowsRunning ?? 0) == 0 else { return nil }
+        let ends = reports.map(\.value).filter { $0.reportKind == .missionDone && $0.conversationId == conversation.id }
+        guard let last = ends.max(by: { ($0.ts ?? .distantPast) < ($1.ts ?? .distantPast) }), let ts = last.ts,
+              now.timeIntervalSince(ts) < 24 * 3600 else { return nil }
+        if let activity = conversation.lastActivity, activity.timeIntervalSince(ts) > 10 * 60 { return nil }
+        return last
     }
 }
 
@@ -61,8 +59,6 @@ struct RowsBlock<Content: View>: View {
     }
 }
 
-// MARK: - En ce moment
-
 // MARK: - Conversations
 
 struct ConversationListSection: View {
@@ -71,9 +67,7 @@ struct ConversationListSection: View {
     var body: some View {
         let open = store.conversations.filter(\.isOpen)
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                BlockTitle(title: "Conversations", detail: Fmt.count(open.count, "ouverte", "ouvertes"))
-                Spacer(minLength: 8)
+            SectionHeader("Conversations", count: open.count) {
                 if open.filter({ !$0.isCodex }).count > 1 {
                     SwitchAllMenu()
                 }
@@ -86,37 +80,19 @@ struct ConversationListSection: View {
                 RowsBlock {
                     ConversationListHeader()
                     ForEach(open) { conversation in
-                        // la conversation, et juste dessous ce qu'elle attend de toi, avec les boutons
-                        VStack(spacing: 0) {
+                        // la conversation, et sous celle qui a fini, son compte rendu
+                        VStack(alignment: .leading, spacing: 0) {
                             ConversationListRow(conversation: conversation,
                                                 data: CardData(summary: conversation, detail: store.details[conversation.id]?.raw,
-                                                               since: store.since, now: store.now),
-                                                sensitive: sensitiveItem(for: conversation.id))
-                            let waiting = store.urgentItems(for: conversation.id)
-                            if !waiting.isEmpty {
-                                VStack(spacing: 0) {
-                                    ForEach(waiting) { item in
-                                        ReviewRow(item: item)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                    }
-                                }
-                                .background(Theme.alert.opacity(0.06), in: .rect(cornerRadius: 10))
-                                .padding(.leading, 40)
-                                .padding(.trailing, 12)
-                                .padding(.bottom, 10)
+                                                               since: store.since, now: store.now))
+                            if let report = store.finishedReport(for: conversation) {
+                                FinishedReportRow(conversation: conversation, report: report)
                             }
                         }
                     }
                 }
             }
         }
-    }
-
-    /// L'action sensible de la conversation : celle qui attend ta décision d'abord.
-    private func sensitiveItem(for id: String) -> ReviewItem? {
-        let items = store.toReview.filter { $0.conversationId == id && $0.reviewKind == .blocked }
-        return items.first(where: \.needsDecision) ?? items.first
     }
 }
 
@@ -195,24 +171,31 @@ struct ConversationListHeader: View {
         HStack(spacing: 12) {
             Text("")
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Compte").frame(width: Column.account, alignment: .trailing)
-            Text("Consommation").frame(width: Column.rate, alignment: .trailing)
-            Text("Étapes").frame(width: Column.steps, alignment: .trailing)
+            Text("Compte")
+                .frame(width: Column.account, alignment: .trailing)
+                .help("Le compte Claude sur lequel elle tourne")
+            Text("% semaine/h")
+                .frame(width: Column.rate, alignment: .trailing)
+                .help("Consommation du moment : part de la semaine du compte par heure (10 dernières minutes), puis ce qu'elle a pris de la semaine")
+            Text("Avancée")
+                .frame(width: Column.steps, alignment: .trailing)
+                .help("Étapes faites du plan, sinon tâches faites de sa liste")
         }
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 2)
     }
 }
 
-/// Une conversation : pastille, nom, ce qu'elle fait ; ce qui t'attend en rouge ; compte, débit, étapes.
+/// Une conversation : pastille, nom, ce qui est à surveiller et ce qu'elle fait ; sa pastille si elle t'attend ;
+/// compte, débit, avancée.
 struct ConversationListRow: View {
     @Environment(VigieStore.self) private var store
     let conversation: ConversationSummary
     let data: CardData
-    let sensitive: ReviewItem?
 
     @State private var hovering = false
 
@@ -223,16 +206,14 @@ struct ConversationListRow: View {
             StatusDot(status: conversation.state, size: 9)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(conversation.shortTitle)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                    warnings
-                }
-                Text(line)
+                Text(conversation.shortTitle)
+                    .textRole(.item)
+                    .lineLimit(1)
+                detailLine
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .help(detailHelp)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             attention
@@ -245,7 +226,7 @@ struct ConversationListRow: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: Column.steps, alignment: .trailing)
-                .help(data.progressLabel ?? "Étapes faites")
+                .help(data.progressHelp)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -266,55 +247,57 @@ struct ConversationListRow: View {
         return Theme.label(for: conversation.state)
     }
 
-    /// À surveiller (orange) : s'emballe, tests en échec. Le détail au survol.
-    @ViewBuilder
-    private var warnings: some View {
+    /// À surveiller, écrit en mots (pas seulement en icônes) et en tête de ligne, pour ne jamais être coupé avant
+    /// l'étape : « s'emballe » et les tests en échec en orange, les agents au travail en gris.
+    private var warnings: [(text: String, symbol: String, warn: Bool)] {
+        var list: [(text: String, symbol: String, warn: Bool)] = []
         if let alert = conversation.alert, alert.isRunaway {
-            Image(systemName: Icon.runaway)
-                .imageScale(.small)
-                .foregroundStyle(Theme.warn)
-                .help("S'emballe : \(alert.reason ?? "consommation anormale")")
-        }
-        if let agents = conversation.agentsRunning, agents > 0 {
-            Label(Fmt.int(agents), systemImage: Icon.agent)
-                .labelStyle(CompactLabelStyle())
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help(Fmt.count(agents, "agent au travail", "agents au travail"))
+            list.append(("s'emballe", Icon.runaway, true))
         }
         if data.testsFailed > 0 {
-            Label(Fmt.int(data.testsFailed), systemImage: Icon.testFailed)
-                .labelStyle(CompactLabelStyle())
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.warn)
-                .help(Fmt.count(data.testsFailed, "test en échec", "tests en échec"))
+            list.append((Fmt.count(data.testsFailed, "test en échec", "tests en échec"), Icon.testFailed, true))
         }
+        if let agents = conversation.agentsRunning, agents > 0 {
+            list.append((Fmt.count(agents, "agent"), Icon.agent, false))
+        }
+        return list
     }
 
-    /// Ce qui t'attend (rouge) : une action à autoriser, une question, une attente.
+    private var detailLine: Text {
+        let parts: [Text] = warnings.map { warning in
+            let text = Text("\(Image(systemName: warning.symbol)) \(warning.text)")
+            return warning.warn ? text.foregroundStyle(Theme.warnText) : text
+        } + [Text(line)]
+        return parts.dropFirst().reduce(parts[0]) { Text("\($0) \(Text("·").foregroundStyle(.tertiary)) \($1)") }
+    }
+
+    private var detailHelp: String {
+        var parts = warnings.map(\.text)
+        if let alert = conversation.alert, alert.isRunaway, let reason = alert.reason, !reason.isEmpty {
+            parts[0] = "s'emballe (\(reason))"
+        }
+        return (parts + [line]).joined(separator: " · ")
+    }
+
+    /// Sa pastille quand elle t'attend (la décision elle-même est en tête de page, dans « À décider »).
     @ViewBuilder
     private var attention: some View {
-        if !store.urgentItems(for: conversation.id).isEmpty {
-            EmptyView()
-        } else if let resume = conversation.resume {
-            AsyncButton {
-                await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd)
-            } label: {
-                Pill(text: "À relancer", alert: true, symbol: "arrow.clockwise")
+        let decisions = store.decisionItems(for: conversation.id)
+        if let resume = conversation.resume {
+            Chip("À relancer", symbol: "arrow.clockwise", tone: .alert) {
+                Task { await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd) }
             }
-            .buttonStyle(.plain)
-            .help("Arrêtée pour passer sur \(store.account(resume.to)?.displayName ?? "l'autre compte") : écris-lui un message dans VS Code et elle repart dessus. Clic : ouvrir la conversation.")
-        } else if let sensitive, sensitive.needsDecision || sensitive.isAwaitingApproval {
-            Button {
+            .help("Arrêtée pour passer sur \(store.account(resume.to)?.displayName ?? "l'autre compte") : écris-lui un message dans VS Code et elle repart dessus. Clic : ouvrir dans VS Code.")
+        } else if let sensitive = decisions.first(where: { $0.reviewKind == .blocked }) {
+            Chip("À autoriser", symbol: Icon.guardRule, tone: .alert) {
                 store.blockedRequest = sensitive
-            } label: {
-                Pill(text: "À autoriser", alert: true, symbol: Icon.guardRule)
             }
-            .buttonStyle(.plain)
-            .help(sensitive.rule ?? sensitive.title ?? "Action sensible")
-        } else if Theme.needsYou(conversation.state) {
-            Pill(text: "T'attend", alert: true, symbol: Icon.waiting)
-                .help(conversation.waitingFor ?? "T'attend")
+            .help("\(sensitive.title ?? sensitive.rule ?? "Action sensible") : voir l'action en entier")
+        } else if !decisions.isEmpty || conversation.state == .waiting {
+            Chip("T'attend", symbol: Icon.waiting, tone: .alert)
+                .help(conversation.waitingFor ?? decisions.first?.title ?? "T'attend")
+        } else if conversation.state == .blocked {
+            Chip("À autoriser", symbol: Icon.guardRule, tone: .alert)
         }
     }
 
@@ -323,12 +306,12 @@ struct ConversationListRow: View {
         let running = conversation.resume?.to ?? store.runningAccountId(of: conversation)
         let pending = conversation.account?.pending?.to
         VStack(alignment: .trailing, spacing: 1) {
-            Text(store.account(running)?.displayName ?? running ?? "—")
+            Text(store.account(running)?.displayName ?? running ?? Fmt.none)
                 .foregroundStyle(working ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             if let pending, pending != running {
                 Text("→ \(store.account(pending)?.displayName ?? pending)")
                     .font(.caption)
-                    .foregroundStyle(Theme.warn)
+                    .foregroundStyle(Theme.warnText)
             }
         }
         .font(.callout)
@@ -337,10 +320,83 @@ struct ConversationListRow: View {
               ?? "Tourne sur \(store.account(running)?.displayName ?? "?")")
     }
 
-    @ViewBuilder
+    /// Le débit du moment, et dessous ce qu'elle a pris de la semaine de son compte (« 14 % de la semaine »).
     private var rateCell: some View {
-        if let rate = conversation.rate, (rate.tokensPerMin ?? 0) > 0 || (rate.weekPctPerHour ?? 0) > 0.005 {
-            RateBadge(rate: rate, alert: conversation.alert?.isRunaway == true, compact: true, live: working)
+        VStack(alignment: .trailing, spacing: 1) {
+            if let rate = conversation.rate, (rate.tokensPerMin ?? 0) > 0 || (rate.weekPctPerHour ?? 0) > 0.005 {
+                RateBadge(rate: rate, alert: conversation.alert?.isRunaway == true, compact: true, live: working)
+            }
+            if let share = Self.weekShare(conversation.weekPct) {
+                Text(share)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help("Part de la semaine de son compte qu'elle a consommée depuis le début de la semaine")
+            }
         }
+    }
+
+    /// « 14 % de la semaine », « < 1 % de la semaine » ; rien sans relevé (jamais « — » dans la colonne).
+    static func weekShare(_ pct: Double?) -> String? {
+        guard let pct, pct > 0 else { return nil }
+        return pct < 1 ? "< 1 % de la semaine" : "\(Fmt.pct(pct.rounded())) de la semaine"
+    }
+}
+
+/// Sous une conversation finie depuis moins de 24 h : ce que Claude a fait, ses faits, sa durée et son heure,
+/// « À toi : … » en gras, la question qui finit le compte rendu, puis « Voir » et « Répondre dans VS Code ».
+struct FinishedReportRow: View {
+    @Environment(VigieStore.self) private var store
+    let conversation: ConversationSummary
+    let report: Report
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(report.title ?? "Demande terminée")
+                .textRole(.event)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(report.prompt.map { "Ta demande : \($0)" } ?? report.title ?? "")
+            InfoLine(parts: [report.detail,
+                             report.durationMs.flatMap { Fmt.duration(ms: $0).isEmpty ? nil : "a pris \(Fmt.duration(ms: $0))" },
+                             Fmt.when(report.ts, now: store.now)])
+            if let toYou = report.toYou, !toYou.isEmpty {
+                Text("À toi : \(toYou)")
+                    .font(.body.weight(.semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let question = report.question, !question.isEmpty {
+                Label {
+                    Text(question)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: Icon.question)
+                        .foregroundStyle(.secondary)
+                }
+                .help("Claude finit son compte rendu par cette question")
+            }
+            HStack(spacing: 6) {
+                Button("Voir") { store.route = .conversation(conversation.id) }
+                    .glassButton()
+                    .help("Voir la conversation dans Vigie")
+                AsyncButton(conversation.replyLabel) {
+                    await store.openConversationInVSCode(conversation.id, cwd: conversation.cwd)
+                }
+                .glassButton()
+                .help("Ouvre cette conversation dans VS Code")
+            }
+            .controlSize(.small)
+            .fixedSize()
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 40)
+        .padding(.trailing, 14)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Compte rendu de \(conversation.shortTitle)")
     }
 }

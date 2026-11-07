@@ -9,7 +9,10 @@ struct CardData: Equatable {
 
     var progressDone = 0
     var progressTotal = 0
+    /// Le titre du plan suivi (« Tâches » quand le chiffre vient de la liste de tâches).
     var progressLabel: String?
+    /// L'avancée compte les tâches de la liste, pas les étapes d'un plan.
+    var progressFromTasks = false
     var current: String?
 
     var testsFailed = 0
@@ -25,6 +28,18 @@ struct CardData: Equatable {
 
     var hasProgress: Bool { progressTotal > 0 }
 
+    /// L'aide de la colonne « Avancée » : d'où vient « 23/31 » (« 23 étapes faites sur 31 du plan « Refonte » »,
+    /// « 3 tâches faites sur 5 »).
+    var progressHelp: String {
+        guard hasProgress else { return "" }
+        if progressFromTasks {
+            return "\(Fmt.count(progressDone, "tâche faite", "tâches faites")) sur \(Fmt.int(progressTotal))"
+        }
+        let steps = "\(Fmt.count(progressDone, "étape faite", "étapes faites")) sur \(Fmt.int(progressTotal))"
+        guard let label = progressLabel, !label.isEmpty else { return "\(steps) du plan" }
+        return "\(steps) du plan « \(label) »"
+    }
+
     init(summary: ConversationSummary, detail: ConversationDetail?, since: Date?, now: Date) {
         fillProgress(summary.progress, detail: detail)
         fillTests(summary.tests, detail: detail, now: now)
@@ -36,6 +51,8 @@ struct CardData: Equatable {
             progressDone = min(progress.done ?? 0, total)
             progressTotal = total
             progressLabel = progress.label
+            // le moteur nomme « Tâches » une avancée tirée de la liste de tâches (sans plan)
+            progressFromTasks = progress.label == "Tâches"
             current = progress.current
             return
         }
@@ -50,6 +67,7 @@ struct CardData: Equatable {
         if !tasks.isEmpty {
             progressDone = tasks.count(where: { $0.state == .done })
             progressTotal = tasks.count
+            progressFromTasks = true
             current = (tasks.first { $0.state == .doing } ?? tasks.first { $0.state == .todo })?.text
         }
     }
@@ -111,54 +129,5 @@ struct CardData: Equatable {
         let newest = list.max { ($0.ts ?? .distantPast) < ($1.ts ?? .distantPast) }
         lastArtifact = newest?.title
         lastArtifactURL = newest?.url
-    }
-}
-
-/// Une ligne du fil des acceptations, d'où qu'elle vienne (moteur ou détails lus).
-struct FeedItem: Identifiable, Equatable {
-    let id: String
-    let ts: Date?
-    let kind: ItemKind
-    let title: String
-    let detail: String?
-    let conversationId: String?
-    let conversationTitle: String
-    let service: String?
-
-    /// Le fil : celui du moteur, sinon les acceptations des détails déjà lus, fusionnées.
-    @MainActor
-    static func build(store: VigieStore, limit: Int = 100) -> [FeedItem] {
-        let titles = Dictionary(store.conversations.map { ($0.id, $0.shortTitle) }, uniquingKeysWith: { first, _ in first })
-        var items: [FeedItem] = []
-        if !store.recentAccepted.isEmpty {
-            // identifiants tirés de l'élément lui-même : une acceptation qui arrive en tête ne recrée pas les autres lignes
-            let rows = RowIDs.make(Array(store.recentAccepted.prefix(limit))) {
-                "e|\(RowIDs.stamp($0.ts))|\($0.conversationId ?? "")|\($0.title ?? "")"
-            }
-            for row in rows {
-                let item = row.value
-                let name = item.conversationId.flatMap { titles[$0] } ?? item.conversationTitle ?? "Conversation"
-                items.append(FeedItem(id: row.id, ts: item.ts, kind: item.itemKind,
-                                      title: item.title ?? "Action", detail: item.detail,
-                                      conversationId: item.conversationId, conversationTitle: name, service: item.service))
-            }
-            return items
-        }
-        for conversation in store.conversations where conversation.isOpen {
-            guard let model = store.details[conversation.id] else { continue }
-            for row in model.accepted.prefix(limit) {
-                let item = row.value
-                switch item.decisionKind {
-                case .blocked, .waiting, .denied: continue
-                case .auto, .you, .unknown: break
-                }
-                items.append(FeedItem(id: conversation.id + "|" + row.id, ts: item.ts, kind: item.itemKind,
-                                      title: item.title ?? "Action", detail: item.detail,
-                                      conversationId: conversation.id, conversationTitle: conversation.shortTitle,
-                                      service: nil))
-            }
-        }
-        items.sort { ($0.ts ?? .distantPast) > ($1.ts ?? .distantPast) }
-        return Array(items.prefix(limit))
     }
 }
