@@ -133,7 +133,7 @@ final class VigieStore {
     var backgroundProblem: String?
     /// Arrêtés depuis l'app : gardés hors de l'écran 20 s, le temps que le moteur ne les voie plus.
     var stoppedBackground: [String: Date] = [:]
-    /// Graphique de consommation, par fenêtre (60, 600, 1200 min).
+    /// Graphique de consommation, par fenêtre (60, 600, 1440, 2880 min).
     private(set) var usageSeries: [Int: UsageSeries] = [:]
     /// Le moteur ne fournit pas (encore) GET /api/v2/usage/series.
     private(set) var usageUnavailable = false

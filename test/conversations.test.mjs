@@ -517,6 +517,56 @@ test('conversation fermée depuis plus de 48 h : sort de la liste mais garde son
   assert.equal(ix.usageWeight(sid), w);
 });
 
+test('consommation minute par minute : 48 h gardées pour le graphique (fermées comprises), rien de plus vieux', async () => {
+  const { SERIES_WINDOWS, SERIES_POINTS, seriesFrom } = await import('../lib/usage.mjs');
+  const sid = 'f4f4f4f4-0000-4000-8000-000000000048';
+  const F = mk(sid);
+  const p = path.join(PROJECTS, '-Users-alex-Code-graphique', `${sid}.jsonl`);
+  const H = 3600_000;
+  const ago = (h) => new Date(Date.now() - h * H).toISOString();
+  write(p, [
+    F.att({ type: 'credential_org', organizationUuid: ORG_A }, ago(52)),
+    F.human('vieille demande', ago(52)),
+    F.say('il y a 52 h', ago(52), U(1, 0, 0, 1)),
+    F.human('demande', ago(40)),
+    F.say('il y a 40 h', ago(40), U(10, 0, 0, 20)),
+    F.say('il y a 30 h', ago(30), U(100, 0, 0, 200)),
+  ]);
+  const closedAt = (Date.now() - 30 * H) / 1000;
+  fs.utimesSync(p, closedAt, closedAt);
+  const tokensIn = (ix, win) => {
+    const step = SERIES_WINDOWS[win];
+    return ix.usageBuckets(sid, seriesFrom(Date.now(), step), step, SERIES_POINTS).tok.reduce((a, b) => a + b, 0);
+  };
+  // Démarrage du moteur : tout se relit dans le transcript.
+  const ix = newIndexer();
+  await ix.refresh();
+  const s = ix.sessions.get(sid);
+  assert.ok(s, 'fermée depuis 30 h : lue en entier');
+  assert.equal(s.wByMin.size, 2, 'l\'appel d\'il y a 52 h n\'est pas gardé minute par minute');
+  assert.ok(Math.abs(s.lastUsageAt - (Date.now() - 30 * H)) < 60_000, 'dernier appel compté : il y a 30 h');
+  assert.equal(tokensIn(ix, 2880), 330, '48 h : les appels d\'il y a 40 h et 30 h');
+  assert.equal(tokensIn(ix, 1440), 0, '24 h : rien');
+  const realNow = Date.now;
+  try {
+    // 10 h plus tard : l'appel d'il y a 40 h a 50 h, il part ; celui d'il y a 30 h reste.
+    Date.now = () => realNow() + 10 * H;
+    ix.discover();
+    assert.ok(ix.sessions.has(sid), 'fermée depuis 40 h : toujours lue en entier');
+    assert.equal(tokensIn(ix, 2880), 300);
+    assert.equal(s.wByMin.size, 1, 'rien de plus de 49 h en mémoire');
+    // 20 h plus tard : fermée depuis 50 h, hors de la fenêtre de 48 h. Elle ne garde que son usage par heure.
+    Date.now = () => realNow() + 20 * H;
+    ix.discover();
+    assert.ok(!ix.sessions.has(sid) && ix.light.has(sid));
+    assert.equal(tokensIn(ix, 2880), 0);
+    assert.equal(ix.light.get(sid).wByMin.size, 0);
+  } finally {
+    Date.now = realNow;
+  }
+  fs.rmSync(path.dirname(p), { recursive: true });
+});
+
 test('état de la conversation vu de l\'utilisateur', async () => {
   const reg = path.join(SESSIONS, `${process.pid}.json`);
   const set = (o) => fs.writeFileSync(reg, JSON.stringify({ pid: process.pid, sessionId: SID, cwd: CWD, startedAt: BASE, ...o }));

@@ -1,7 +1,7 @@
 // Consommation en direct (rate) et alerte « s'emballe » (lib/usage.mjs) : calculs purs, sans fichier.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rateOf, runawayAlert, RATE_MINUTES, seriesFrom, seriesPoints, weekRatio, toWeekPct, weekFullAt } from '../lib/usage.mjs';
+import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, SERIES_MAX_MIN, seriesFrom, seriesPoints, weekRatio, toWeekPct, weekFullAt } from '../lib/usage.mjs';
 
 const NOW = Date.parse('2026-10-20T12:00:30.000Z');
 const iso = (min) => new Date(NOW + min * 60_000).toISOString();
@@ -56,8 +56,11 @@ test('alerte : un agent qui répète la même action ≥ 8 fois', () => {
   assert.equal(runawayAlert({ now: NOW, activity: [...activity.slice(1), act(-2, 'ag1', 'src/b.ts')] }), null, 'action différente');
 });
 
-test('graphique : 60 seaux alignés sur le pas, le dernier contient la minute en cours', () => {
-  for (const step of [1, 10, 20]) {
+test('graphique : 1 h, 10 h, 24 h, 48 h (et 20 h, l\'ancienne fenêtre) ; 60 seaux alignés sur le pas, le dernier contient la minute en cours', () => {
+  assert.deepEqual(SERIES_WINDOWS, { 60: 1, 600: 10, 1440: 24, 2880: 48, 1200: 20 });
+  for (const [win, step] of Object.entries(SERIES_WINDOWS)) assert.equal(step * SERIES_POINTS, Number(win), `fenêtre ${win}`);
+  assert.equal(SERIES_MAX_MIN, 48 * 60, 'la plus longue fenêtre : 48 h');
+  for (const step of [1, 10, 20, 24, 48]) {
     const from = seriesFrom(NOW, step);
     assert.equal(from % (step * 60_000), 0);
     assert.ok(NOW >= from + 59 * step * 60_000 && NOW < from + 60 * step * 60_000, `pas ${step}`);

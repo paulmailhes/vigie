@@ -469,22 +469,25 @@ function usageLive(ctx, sum, accountId) {
   return { rate, alert };
 }
 
-// GET /api/v2/usage/series?window=60|600|1200 : toutes les conversations des 20 dernières heures (ouvertes et
-// fermées, sauf les jetables fermées), agents et workflows compris, et chaque compte ; 60 points par série.
+// GET /api/v2/usage/series?window=60|600|1440|2880 (1200 encore accepté) : les conversations ouvertes et celles
+// fermées pendant la fenêtre (sauf les jetables fermées), agents et workflows compris, et chaque compte ; 60 points
+// par série. Une conversation fermée reste dans la fenêtre de 48 h : l'indexeur lit en entier les conversations des
+// 48 dernières heures (Indexer windowHours) et garde leur consommation minute par minute 49 h (lib/indexer.mjs).
 function usageSeries(url) {
   const raw = url.searchParams.get('window') ?? '60';
   const win = /^\d{1,5}$/.test(raw) ? Number(raw) : NaN;
   const stepMin = SERIES_WINDOWS[win];
-  if (!stepMin) return bad('Fenêtre : 60, 600 ou 1200 min.');
+  if (!stepMin) return bad('Fenêtre : 60, 600, 1440 ou 2880 min.');
   const now = Date.now();
   const ctx = { now, model: accounts.load(), accSums: accounts.summaries(), week: new Map() };
   const from = seriesFrom(now, stepMin);
-  const cutoff = new Date(now - 20 * HOUR).toISOString();
+  // Fermée : gardée si elle a travaillé pendant la fenêtre (dernière activité, ou appel d'un de ses agents après elle).
+  const cutoff = new Date(from).toISOString();
   const sums = new Map(conv.summaries().map((x) => [x.id, x]));
   const conversations = [];
   for (const s of indexer.sessions.values()) {
     const running = indexer.live.has(s.id);
-    if (!running && !(String(s.lastTs || '') >= cutoff)) continue;
+    if (!running && !(String(s.lastTs || '') >= cutoff) && !(s.lastUsageAt >= from)) continue;
     if (!running && conv.isThrowaway(s.id)) continue;
     const accountId = chosenAccount(ctx.model, s.id);
     const w = weekInfo(ctx, accountId);

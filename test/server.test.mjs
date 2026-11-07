@@ -992,14 +992,15 @@ test('passerelle MCP : relais et retour d\'autorisation branchés, sans en-tête
   assert.equal((await post('/api/v2/gateway', { action: 'migrate', name: 'absent' })).status, 400);
 });
 
-test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris, en % de la semaine du compte)', async () => {
+test('consommation en direct et graphique sur 1 h / 10 h / 24 h / 48 h, fermées comprises (agents compris, en % de la semaine du compte)', async () => {
   const o = (await get('/api/v2/overview')).body;
   assert.deepEqual(check(o, Overview), []);
   const a = o.conversations.find((c) => c.id === SID_A);
   assert.equal(a.rate.spark.length, 30);
   assert.deepEqual([a.rate.weekPctPerHour, a.rate.tokensPerMin, a.rate.trend], [0, 0, 'flat'], 'rien depuis 30 min');
   assert.equal(a.alert, null);
-  for (const [win, step] of [[60, 1], [600, 10], [1200, 20]]) {
+  // 1200 (20 h) : l'ancienne fenêtre, encore demandée par l'app 0.3.28 pendant sa mise à jour.
+  for (const [win, step] of [[60, 1], [600, 10], [1440, 24], [2880, 48], [1200, 20]]) {
     const r = await get(`/api/v2/usage/series?window=${win}`);
     assert.equal(r.status, 200);
     assert.deepEqual(check(r.body, Series), [], `window=${win}`);
@@ -1017,12 +1018,21 @@ test('consommation en direct et graphique sur 1 h / 10 h / 20 h (agents compris,
   const lastHour = [-59, -56, -55, -50, -45].filter((m) => NOW + m * 60_000 >= from).length * 150 + 600;
   assert.equal(total(pa.points, 'tokens'), lastHour, 'tokens bruts de la dernière heure');
   assert.ok(Math.abs(total(pa.points, 'weekPct') - a.weekPct * lastHour / (5 * 150 + 600)) <= 0.06, 'même conversion que weekPct');
-  assert.equal(total(s60.conversations.find((c) => c.id === SID_B).points, 'tokens'), 0, 'B a travaillé il y a 2 h');
+  // B, fermée, a travaillé il y a 2 h : hors de la fenêtre d'1 h, elle reste dans celles de 10, 24 et 48 h.
+  assert.equal(s60.conversations.find((c) => c.id === SID_B), undefined, 'fermée sans rien dans l\'heure : pas dans le graphique d\'1 h');
   const s600 = (await get('/api/v2/usage/series?window=600')).body;
-  assert.ok(total(s600.conversations.find((c) => c.id === SID_B).points, 'tokens') > 0);
+  const pb = s600.conversations.find((c) => c.id === SID_B);
+  assert.equal(pb.running, false);
+  assert.ok(total(pb.points, 'tokens') > 0);
+  const order = s600.conversations.map((c) => c.running);
+  assert.deepEqual(order, [...order].sort((a, b) => b - a), 'ouvertes d\'abord, puis fermées');
+  for (const win of [1440, 2880]) {
+    const s = (await get(`/api/v2/usage/series?window=${win}`)).body;
+    assert.equal(total(s.conversations.find((c) => c.id === SID_B).points, 'tokens'), total(pb.points, 'tokens'), `fermée gardée sur ${win} min`);
+  }
   const acc = s600.accounts.find((x) => total(x.points, 'weekPct') > 0);
   assert.ok(acc && Math.abs(total(acc.points, 'weekPct') - 40) < 0.01, 'tout l\'usage de la semaine du compte tient dans ces 10 h : 40 %');
-  for (const bad of ['30', 'abc', '60.5']) assert.equal((await get(`/api/v2/usage/series?window=${bad}`)).status, 400, bad);
+  for (const bad of ['30', 'abc', '60.5', '1441', '5760']) assert.equal((await get(`/api/v2/usage/series?window=${bad}`)).status, 400, bad);
 });
 
 test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à autoriser, autoriser (message, lien) ou refuser', async () => {

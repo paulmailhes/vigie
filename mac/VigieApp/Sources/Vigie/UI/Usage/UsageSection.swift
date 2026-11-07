@@ -1,8 +1,10 @@
 import Charts
 import SwiftUI
 
-/// Graphique « Consommation » (page Comptes ; il se suffit à lui-même) : une courbe par conversation sur 1 h, 10 h
-/// ou 20 h, en % de la semaine du compte (tokens au survol), cases pour afficher ou masquer chaque conversation.
+/// Graphique « Consommation » (page Comptes ; il se suffit à lui-même) : une courbe par conversation sur 1 h, 10 h,
+/// 24 h ou 48 h, en % de la semaine du compte (tokens au survol), cases pour afficher ou masquer chaque conversation.
+/// Une conversation fermée reste sur le graphique tant qu'elle a travaillé dans la fenêtre (le moteur garde 48 h) :
+/// trait en pointillés qui s'arrête après son dernier appel, rond creux et « fermée » dans la légende.
 /// La vue d'ensemble n'en garde qu'une ligne par compte (`AccountUsageSection`).
 struct UsageSection: View {
     @Environment(VigieStore.self) private var store
@@ -13,7 +15,8 @@ struct UsageSection: View {
     @AppStorage("usage.hidden") private var hiddenRaw = ""
     @State private var selected: Date?
 
-    private var span: UsageSpan { UsageSpan(rawValue: spanRaw) ?? .hour }
+    /// Une fenêtre qui n'est plus proposée (20 h, avant la 0.3.29) se lit comme la plus proche : 24 h.
+    private var span: UsageSpan { UsageSpan(stored: spanRaw) }
 
     var body: some View {
         CardSection("Consommation") {
@@ -21,7 +24,7 @@ struct UsageSection: View {
         } trailing: {
             controls
         }
-        .task(id: "\(spanRaw)|\(store.windowVisible)") { await store.followUsage(span) }
+        .task(id: "\(span.rawValue)|\(store.windowVisible)") { await store.followUsage(span) }
     }
 
     private var controls: some View {
@@ -30,9 +33,9 @@ struct UsageSection: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Picker("Période", selection: $spanRaw) {
+            Picker("Période", selection: Binding(get: { span }, set: { spanRaw = $0.rawValue })) {
                 ForEach(UsageSpan.allCases) { span in
-                    Text(span.label).tag(span.rawValue)
+                    Text(span.label).tag(span)
                 }
             }
             .pickerStyle(.segmented)
@@ -45,9 +48,9 @@ struct UsageSection: View {
     @ViewBuilder
     private var content: some View {
         if let series = store.usageSeries[span.rawValue] {
-            // les conversations ouvertes seulement (les fermées et les dossiers annexes encombraient la courbe) ;
-            // 6 courbes au plus, le reste regroupé en « Autres »
-            let lines = UsageLine.forChart(UsageLine.make(series, store: store, span: span, cumulative: cumulative).filter(\.running))
+            // ouvertes et fermées : le moteur ne garde que celles qui ont travaillé dans la fenêtre (les jetables
+            // fermées en sont écartées) ; 4 courbes colorées au plus, le reste regroupé en « Autres »
+            let lines = UsageLine.forChart(UsageLine.make(series, store: store, span: span, cumulative: cumulative))
             if lines.isEmpty {
                 Label("Aucune consommation sur cette période", systemImage: "moon.zzz")
                     .foregroundStyle(.secondary)
@@ -55,7 +58,7 @@ struct UsageSection: View {
                 AccountTotals(series: series, span: span)
                 let shownLines = lines.filter { !hidden.contains($0.id) }
                 UsageChart(lines: shownLines.isEmpty ? lines : shownLines, allIDs: lines.map(\.id),
-                           cumulative: cumulative, span: span, selected: $selected)
+                           cumulative: cumulative, span: span, window: series.window, selected: $selected)
                 UsageLegend(lines: lines, hidden: hidden, cumulative: cumulative) { id, visible in
                     setVisible(id, visible)
                 } setAll: { visible in
@@ -99,6 +102,8 @@ struct UsageLine: Identifiable, Equatable {
     var account: String?
     var color: Color
     var running: Bool
+    /// Fermée : sa dernière activité (dite au survol de la légende).
+    var lastActivity: Date?
     var totalPct: Double
     var totalTokens: Double
     var points: [Point]
@@ -127,8 +132,18 @@ struct UsageLine: Identifiable, Equatable {
                                     value: cumulative ? sum : pct * 60 / step,
                                     tokens: cumulative ? tokens : point.tokens ?? 0))
             }
-            guard !points.isEmpty else { continue }
             let live = store.conversation(conversation.id)
+            let running = live.map(\.isOpen) ?? (conversation.running ?? false)
+            // Fermée : sa courbe s'arrête juste après son dernier appel (un point à zéro pour la chute), au lieu de
+            // filer en pointillés au ras de zéro jusqu'à maintenant. Fermée sans rien consommé dans la fenêtre : rien.
+            if !running {
+                if let last = points.lastIndex(where: { $0.tokens > 0 || $0.value > 0 }) {
+                    points = Array(points.prefix(through: min(last + 1, points.count - 1)))
+                } else {
+                    points = []
+                }
+            }
+            guard !points.isEmpty else { continue }
             let name = live?.shortTitle
                 ?? conversation.project.map { ProjectName.display($0, cwd: conversation.cwd) }
                 ?? conversation.title ?? "Conversation"
@@ -138,9 +153,18 @@ struct UsageLine: Identifiable, Equatable {
                                    subtitle: title == name ? nil : title,
                                    account: accountID.flatMap { store.account($0)?.displayName },
                                    color: .gray,
-                                   running: live.map(\.isOpen) ?? (conversation.running ?? false),
+                                   running: running,
+                                   lastActivity: live?.lastActivity ?? conversation.lastActivity,
                                    totalPct: conversation.totalPct, totalTokens: conversation.totalTokens,
                                    points: points))
+        }
+        // Deux conversations du même projet (une ouverte et une fermée, souvent) : chacune se nomme par son titre.
+        let sameName = Dictionary(grouping: lines, by: \.name).filter { $0.value.count > 1 }
+        lines = lines.map { line in
+            guard sameName[line.name] != nil, let title = line.subtitle else { return line }
+            var renamed = line
+            renamed.name = title
+            return renamed
         }
         // Rangées par compte, puis les plus gourmandes d'abord.
         return lines.sorted { ($0.account ?? "~", -$0.totalPct) < ($1.account ?? "~", -$1.totalPct) }
@@ -180,14 +204,44 @@ struct UsageLine: Identifiable, Equatable {
         let points = sums.sorted { $0.key < $1.key }.enumerated().map { index, entry in
             Point(id: index, t: entry.key, value: entry.value.value, tokens: entry.value.tokens)
         }
-        return UsageLine(id: "autres", name: "Autres", subtitle: Fmt.count(lines.count, "conversation"), account: nil,
+        let closed = lines.count(where: { !$0.running })
+        let subtitle = Fmt.count(lines.count, "conversation") + (closed > 0 ? " dont \(Fmt.count(closed, "fermée"))" : "")
+        return UsageLine(id: "autres", name: "Autres", subtitle: subtitle, account: nil,
                          color: .gray, running: true, totalPct: lines.reduce(0) { $0 + $1.totalPct },
                          totalTokens: lines.reduce(0) { $0 + $1.totalTokens }, points: points)
     }
 
-    /// Le point le plus proche d'une heure (survol).
+    /// Le point le plus proche d'une heure (survol) ; rien au-delà de la courbe (une fermée s'arrête avant maintenant).
     func point(near date: Date) -> Point? {
-        points.min { abs($0.t.timeIntervalSince(date)) < abs($1.t.timeIntervalSince(date)) }
+        guard let first = points.first, let last = points.last else { return nil }
+        let gap = points.count > 1 ? points[1].t.timeIntervalSince(first.t) : 0
+        guard date >= first.t.addingTimeInterval(-gap), date <= last.t.addingTimeInterval(gap) else { return nil }
+        return points.min { abs($0.t.timeIntervalSince(date)) < abs($1.t.timeIntervalSince(date)) }
+    }
+
+    /// Trait plein pour une conversation ouverte, en pointillés pour une fermée.
+    var stroke: StrokeStyle {
+        StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round, dash: running ? [] : [4, 4])
+    }
+}
+
+/// Pastille d'une courbe (légende, infobulle) : ronde et pleine pour une conversation ouverte, creuse pour une
+/// fermée, comme son trait en pointillés.
+private struct UsageSwatch: View {
+    let color: Color
+    let running: Bool
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if running {
+                Circle().fill(color)
+            } else {
+                Circle().strokeBorder(color, lineWidth: 1.6)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -226,11 +280,21 @@ private struct AccountTotals: View {
 
 /// Le graphique (Swift Charts) avec infobulle au survol.
 private struct UsageChart: View {
+    @Environment(VigieStore.self) private var store
     let lines: [UsageLine]
     let allIDs: [String]
     let cumulative: Bool
     let span: UsageSpan
+    /// Début et fin de la fenêtre (moteur) : l'axe la couvre toute, même quand les courbes fermées s'arrêtent avant.
+    let window: ClosedRange<Date>?
     @Binding var selected: Date?
+
+    private var xDomain: ClosedRange<Date> {
+        let dates = lines.flatMap { $0.points.map(\.t) }
+        let low = [window?.lowerBound, dates.min()].compactMap { $0 }.min() ?? store.now
+        let high = [window?.upperBound, dates.max()].compactMap { $0 }.max() ?? low
+        return low...max(high, low)
+    }
 
     var body: some View {
         Chart {
@@ -241,7 +305,7 @@ private struct UsageChart: View {
                              series: .value("Conversation", line.id))
                         .foregroundStyle(line.color)
                         .interpolationMethod(.monotone)
-                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .lineStyle(line.stroke)
                 }
             }
             if let selected {
@@ -254,6 +318,7 @@ private struct UsageChart: View {
             }
         }
         .chartXSelection(value: $selected)
+        .chartXScale(domain: xDomain)
         .chartYAxis {
             AxisMarks(position: .leading) { value in
                 AxisGridLine()
@@ -267,7 +332,12 @@ private struct UsageChart: View {
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                 AxisGridLine()
-                AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                if span.spansDays {
+                    // « lun. 14:00 » : sur 24 h et 48 h, la même heure revient d'un jour à l'autre
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                } else {
+                    AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                }
             }
         }
         .environment(\.locale, Fmt.locale)
@@ -285,16 +355,19 @@ private struct UsageChart: View {
         let rows = lines.compactMap { line in line.point(near: date).map { (line, $0) } }
             .sorted { $0.1.value > $1.1.value }
         return VStack(alignment: .leading, spacing: 3) {
-            Text(Fmt.time(rows.first?.1.t ?? date))
+            Text(Fmt.when(rows.first?.1.t ?? date, now: store.now))
                 .font(.caption.bold())
                 .monospacedDigit()
             ForEach(Array(rows.prefix(8).enumerated()), id: \.offset) { _, row in
                 let (line, point) = row
                 HStack(spacing: 6) {
-                    Circle().fill(line.color).frame(width: 7, height: 7)
+                    UsageSwatch(color: line.color, running: line.running, size: 7)
                     Text(line.name).lineLimit(1)
                     if let account = line.account {
                         Text(account).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if !line.running {
+                        Text("fermée").foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 10)
                     Text(cumulative ? Fmt.pctFine(point.value) : Fmt.rate(point.value))
@@ -315,6 +388,7 @@ private struct UsageChart: View {
 
 /// Légende : une case par conversation (mémorisée), total sur la période.
 private struct UsageLegend: View {
+    @Environment(VigieStore.self) private var store
     let lines: [UsageLine]
     let hidden: Set<String>
     let cumulative: Bool
@@ -346,9 +420,7 @@ private struct UsageLegend: View {
 
     private func row(_ line: UsageLine) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(line.color)
-                .frame(width: 8, height: 8)
+            UsageSwatch(color: line.color, running: line.running, size: 8)
             Text(line.name)
                 .lineLimit(1)
             if let account = line.account {
@@ -357,8 +429,9 @@ private struct UsageLegend: View {
             }
             if !line.running {
                 Text("fermée")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Spacer(minLength: 6)
             Text(Fmt.pctFine(line.totalPct))
@@ -371,7 +444,12 @@ private struct UsageLegend: View {
     private func help(_ line: UsageLine) -> String {
         var parts = [line.subtitle ?? line.name, "\(Fmt.pctFine(line.totalPct)) de la semaine de \(line.account ?? "son compte")"]
         if line.totalTokens > 0 { parts.append("\(Fmt.tokensShort(line.totalTokens)) tokens") }
-        return parts.joined(separator: " · ")
+        var text = parts.joined(separator: " · ")
+        if !line.running {
+            let when = line.lastActivity.map { ", dernière activité \(Fmt.when($0, now: store.now))" } ?? ""
+            text += "\nFermée\(when). Sa courbe reste 48 h."
+        }
+        return text
     }
 }
 

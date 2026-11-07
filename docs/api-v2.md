@@ -414,11 +414,11 @@ Chaque ligne porte `pid`. Les lignes de garde-fou portent `ruleId` ; `garde-fou-
 ```
 « S'emballe » = consommation anormale : débit > 3 × sa médiane des 2 dernières heures ET > 0,5 %/h, ou la même commande de test qui échoue ≥ 6 fois en 20 min, ou un agent qui répète la même action ≥ 8 fois.
 
-### Graphique : `GET /api/v2/usage/series?window=60|600|1200` (minutes)
+### Graphique : `GET /api/v2/usage/series?window=60|600|1440|2880` (minutes)
 
 ```jsonc
 {
-  "from": "…", "to": "…", "stepMin": 1,          // 1 min pour 1 h, 10 min pour 10 h, 20 min pour 20 h
+  "from": "…", "to": "…", "stepMin": 1,          // 1 min pour 1 h, 10 min pour 10 h, 24 min pour 24 h, 48 min pour 48 h
   "unit": "weekPct",                             // les valeurs sont en % de la semaine du compte de la conversation ; tokens bruts en plus
   "conversations": [
     { "id": "…", "title": "Atelier", "project": "atelier", "accountId": "travail1", "running": true,
@@ -427,7 +427,7 @@ Chaque ligne porte `pid`. Les lignes de garde-fou portent `ruleId` ; `garde-fou-
   "accounts": [ { "id": "travail1", "label": "Perso", "points": [ { "t": "…", "weekPct": 0.05 } ] } ]
 }
 ```
-Toutes les conversations des 20 dernières heures (ouvertes et fermées), agents et workflows compris (leur usage compte pour leur conversation).
+Les conversations ouvertes et celles fermées pendant la fenêtre (jusqu'à 48 h), agents et workflows compris (leur usage compte pour leur conversation).
 
 ### Garde-fous « seulement par Vigie » (choix de l'utilisateur)
 
@@ -439,14 +439,14 @@ L'utilisateur refuse : `POST /api/v2/approvals` `{ approvalId, decision: "deny" 
 ### Précisions du serveur (tour 3)
 
 **`rate` et `alert` (ConversationSummary, toujours présents ; `alert` vaut `null` si rien)**
-- Usage minute par minute gardé 24 h par conversation (agents et workflows compris : leurs transcripts comptent pour leur conversation), en poids d'usage (même formule que `weekPct`) et en tokens bruts (entrée + sortie + cache lu + cache écrit).
+- Usage minute par minute gardé 49 h par conversation (la plus longue fenêtre du graphique, 48 h, plus 1 h de marge ; rien de plus vieux), ouverte ou fermée (agents et workflows compris : leurs transcripts comptent pour leur conversation), en poids d'usage (même formule que `weekPct`) et en tokens bruts (entrée + sortie + cache lu + cache écrit). Au démarrage du moteur, il se relit dans les transcripts des conversations des 48 dernières heures.
 - `weekPctPerHour` = poids des 10 dernières minutes (minute en cours comprise) de l'organisation du compte de la conversation ÷ poids de ce compte sur sa fenêtre hebdo × `week.pct` × 6. `null` dans les mêmes cas que `weekPct`. Arrondi au centième.
 - `tokensPerMin` : moyenne des 10 dernières minutes (entier). `spark` : 30 entiers, poids d'usage brut par minute (plus ancien d'abord, la dernière valeur est la minute en cours) ; l'app les normalise. `trend` : 10 dernières minutes comparées aux 10 d'avant (`up` > +25 %, `down` < −25 %, sinon `flat`).
 - `alert` (conversations ouvertes seulement), première règle qui s'applique : (1) même commande de test en échec ≥ 6 fois en 20 min (étape rouge voulue et tests pas finis exclus) ; (2) un agent qui répète la même action (même outil, mêmes paramètres affichés) ≥ 8 fois en 20 min ; (3) débit des 10 dernières minutes > 3 × la médiane des tranches de 10 min ACTIVES des 2 h précédentes (au moins 3 tranches actives : une conversation qui démarre n'a pas de référence) et > 0,5 %/h. `since` : premier échec / première répétition / début de la fenêtre de 10 min. `reason` : une phrase en français.
 
-**`GET /api/v2/usage/series?window=60|600|1200`**
-- 60 points par série, seaux alignés sur le pas (1, 10 ou 20 min), le dernier contient la minute en cours ; `from` = début du premier seau, `to` = maintenant ; `t` = début du seau. Autre `window` : 400.
-- `conversations` : ouvertes, et fermées dont la dernière activité date de moins de 20 h (les jetables fermées exclues), ouvertes d'abord puis plus récentes ; champs en plus : `lastActivity`. `weekPct` du point : conversion du compte de la conversation (`null` sans relevé hebdo ou sans organisation) ; `tokens` : tokens bruts toutes organisations.
+**`GET /api/v2/usage/series?window=60|600|1440|2880`** (depuis le 2026-11-08 ; avant : `60|600|1200`)
+- 60 points par série, seaux alignés sur le pas (1, 10, 24 ou 48 min), le dernier contient la minute en cours ; `from` = début du premier seau, `to` = maintenant ; `t` = début du seau. `window=1200` (20 h, pas de 20 min) reste accepté pour l'app 0.3.28 et avant, qui le demande encore pendant sa mise à jour. Autre `window` : 400.
+- `conversations` : ouvertes, et fermées qui ont travaillé pendant la fenêtre : dernière activité depuis `from`, ou un appel (agents compris) depuis `from` (les jetables fermées exclues) ; ouvertes d'abord puis plus récentes ; champs en plus : `lastActivity`. Une conversation fermée garde ainsi sa courbe jusqu'à 48 h après sa fermeture. `weekPct` du point : conversion du compte de la conversation (`null` sans relevé hebdo ou sans organisation) ; `tokens` : tokens bruts toutes organisations.
 - `accounts` : comptes dont l'organisation est connue, usage de toutes les conversations de cette organisation (jetables comprises) ; points `{ t, weekPct, tokens }`.
 
 **Garde-fous `guard.mode`**
