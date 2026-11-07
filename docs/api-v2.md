@@ -67,7 +67,7 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
   "sinceWindow": { "from": "2026-10-19T21:40:00.000Z", "to": "…", "capped": false },  // la fenêtre réellement utilisée
   "sinceSummary": { "accepted": 1284, "questionsAuto": 2, "blocked": 1, "reports": 2, "testsFailed": 3, "limits": 0 },
   "toReview": [
-    { "id": "q:7f3a…", "kind": "question",      // question | blocked | waiting | limit
+    { "id": "q:7f3a…", "kind": "question",      // question | blocked | waiting | limit | notice
       "conversationId": "…", "conversationTitle": "Atelier",
       "title": "Quel fond pour la charte ?",
       "detail": "Claude a pris « Fond B (recommandé) »",
@@ -726,7 +726,7 @@ Tous facultatifs : un moteur plus ancien ne les envoie pas, l'app les lit comme 
 
 Date ISO à laquelle la semaine du compte serait pleine au rythme des dernières 24 h, au quart d'heure ; `null` si elle tient jusqu'à la remise à zéro, ou s'il n'y a pas de quoi mesurer. Vue d'ensemble et `GET /api/v2/accounts`.
 - D'après les vrais relevés du % de la semaine (`data/usage/semaine.json` : un point à chaque changement, 8 jours gardés), notés pour chaque compte à chaque lecture.
-- Pente : hausse depuis le % d'il y a 24 h (le dernier relevé d'avant ; sans relevé aussi ancien, depuis le début de la semaine, à 0 %), au moins 3 points, rapportée au temps écoulé jusqu'à maintenant (les heures calmes comptent). Relevés d'une autre semaine (autre `resetsAt`) ignorés.
+- Pente : hausse depuis le % d'il y a 24 h, au moins 3 points, rapportée aux 24 h (les heures calmes comptent). Le % d'il y a 24 h est interpolé entre le dernier relevé d'avant et le suivant (ou le % actuel) : après un trou de relevés (Mac en veille, compte utilisé ailleurs), la hausse du trou n'est pas comptée en 24 h. Sans relevé aussi ancien (premier jour de la semaine, compte ajouté) : 0 % il y a 24 h, ou au début de la semaine s'il est plus ancien (quelques heures de travail juste après la remise à zéro ne se projettent pas sur la semaine). Relevés d'une autre semaine (autre `resetsAt`) ignorés.
 - Déjà à 100 % : l'heure du premier relevé à 100 %.
 
 ### Pendant ton absence (`GET /api/v2/overview?since=<ISO>`)
@@ -742,7 +742,16 @@ Date ISO à laquelle la semaine du compte serait pleine au rythme des dernières
 
 ### Journal des actions retenues dans Vigie (`accepted[]`, `recentAccepted[]`)
 
-`garde-fou-en-attente-vigie` (action refusée sur le moment, à autoriser dans Vigie) : `waiting` tant qu'elle est à autoriser, comme dans l'Historique. Une fois sa suite écrite dans le journal (même `approvalId` : `garde-fou-autorise-vigie` → `you`, `garde-fou-refuse-vigie` → `denied`, `garde-fou-delai-vigie` → `blocked`, `garde-fou-vigie-clos`), seule la suite est listée. Sans suite : `denied` si l'utilisateur l'a refusée dans l'app, `you` s'il l'a autorisée et qu'elle n'est pas encore relancée, sinon `blocked` (refusée d'office, jamais autorisée).
+`garde-fou-en-attente-vigie` (action refusée sur le moment, à autoriser dans Vigie) : `waiting` tant qu'elle est à autoriser, comme dans l'Historique. Une fois sa suite écrite dans le journal (même `approvalId` : `garde-fou-autorise-vigie` → `you`, `garde-fou-refuse-vigie` → `denied`, `garde-fou-delai-vigie`, `garde-fou-vigie-clos`), seule la suite est listée. `garde-fou-delai-vigie` (pas de réponse à temps : elle a continué sans, et reste à autoriser 24 h) : `waiting` tant qu'elle est à autoriser, `you` une fois autorisée dans l'app et pas encore relancée, sinon `blocked` (relancée, la relance a sa propre ligne ; ou refusée). Sans suite : `denied` si l'utilisateur l'a refusée dans l'app, `you` s'il l'a autorisée et qu'elle n'est pas encore relancée, sinon `blocked` (refusée d'office, jamais autorisée).
+
+### Historique (`GET /api/v2/history`)
+
+Les décisions de Vigie et les tiennes (history.jsonl), la plus récente d'abord, 1000 au plus.
+- Paramètres : `window` (minutes : 60, 1440 ou 10080 ; 1440 par défaut ; sinon 400 « Période : 60, 1440 ou 10080 min. »), `status` (un des statuts ci-dessous), `conversation` (identifiant), `q` (texte cherché dans le titre, la commande, la raison, la conversation et le projet ; 200 caractères au plus).
+- Réponse : `{ window, since, counts: { <statut>: n }, items[] }`. `counts` est compté après `q` et `conversation`, mais avant `status` (les compteurs des filtres ne bougent pas quand on en choisit un).
+- Élément : `id` (`<ts>|<pid>|<event>`), `ts`, `status`, `event`, `app` (`claude` | `codex`), `tool`, `title` (à l'infinitif, comme le Journal), `command` (masquée), `rule`, `ruleId`, `reason` (phrase prête), `conversationId`, `conversationTitle`, `project`, `cwd`, `agent`, `needsPassword`.
+- Statuts : `accepted` (acceptée par Vigie) · `allowed` (autorisée par toi dans Vigie) · `refused` (refusée par toi ou par le mode automatique de Claude) · `blocked` (refusée d'office) · `failed` (autorisée, mais en échec) · `question` (réponse choisie pour toi, ou donnée par toi) · `vscode` (laissée à toi dans VS Code) · `waiting` (attend ta décision : seulement tant qu'elle attend). Un statut inconnu de l'app se lit comme `accepted`.
+- `allowed` existe depuis le 2026-11-07 : avant, `garde-fou-autorise-app` et `garde-fou-autorise-vigie` étaient comptés dans `accepted`.
 
 ### Plan à approuver
 

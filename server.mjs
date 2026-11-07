@@ -970,9 +970,13 @@ function heldDecision(h, ctx) {
 }
 // Le délai d'une action retenue dans Vigie (« garde-fou-delai-vigie ») ne la retire pas de « À décider » : elle a
 // continué sans, et reste à autoriser 24 h (lib/approvals.mjs). Tant qu'elle l'est, le Journal dit « waiting », comme
-// le badge rouge, et non « refusée d'office ». null : la décision habituelle.
+// le badge rouge, et non « refusée d'office » ; autorisée dans Vigie mais pas encore relancée : « you » (sans retomber
+// sur « refusée d'office » juste après ton accord). null : la décision habituelle (« blocked »), une fois relancée
+// (« garde-fou-autorise-vigie » a sa propre ligne) ou refusée par toi.
 function heldTimeout(h, ctx) {
-  return h.event === 'garde-fou-delai-vigie' && h.approvalId && heldDecision(h, ctx) === 'waiting' ? 'waiting' : null;
+  if (h.event !== 'garde-fou-delai-vigie' || !h.approvalId) return null;
+  const a = awaitingOf(ctx).find((x) => x.approvalId === h.approvalId);
+  return a ? (a.approved ? 'you' : 'waiting') : null;
 }
 const SHELL = new Set(['Bash', 'PowerShell', 'Monitor']);
 // À l'infinitif, comme les descriptions de Claude et les titres du Journal (lib/indexer.mjs, label).

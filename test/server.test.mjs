@@ -129,8 +129,9 @@ function seed() {
   w(VSC, '{\n  // réglages de test\n  "editor.fontSize": 13,\n}\n');
   wj(path.join(DATA, 'state.json'), { version: 1, autoAccept: true, questions: 'ask', questionWaitMin: 20, guard: { enabled: true, waitMin: 10 }, sessions: {} });
   wj(path.join(DATA, 'ui.json'), { lastSeen: iso(-90) });
-  // relevés du % de la semaine : 10 % il y a 30 h (donc encore il y a 24 h), 40 % maintenant → pleine dans 48 h
-  wj(path.join(DATA, 'usage', 'semaine.json'), { travail1: [{ t: iso(-30 * 60), pct: 10, resetsAt: iso(3 * 24 * 60) }] });
+  // relevés du % de la semaine : 9 % il y a 30 h, 10 % il y a 24 h, 40 % maintenant → pleine dans 48 h
+  wj(path.join(DATA, 'usage', 'semaine.json'), { travail1: [{ t: iso(-30 * 60), pct: 9, resetsAt: iso(3 * 24 * 60) },
+    { t: iso(-24 * 60), pct: 10, resetsAt: iso(3 * 24 * 60) }] });
   const h = (min, event, extra) => ({ ts: iso(min), event, sessionId: SID_A, cwd: CWD, ...extra });
   const sudo = { rule: 'Commande administrateur (sudo)', ruleId: 'sudo' };
   // ancienne forme d'une question dans le journal : l'entrée brute de l'outil, en JSON coupé à 600 caractères
@@ -1097,6 +1098,23 @@ test('garde-fous retenus dans Vigie : plus de réglage de mode, élément à aut
   assert.equal((await post('/api/v2/approvals', { approvalId: C_ID, decision: 'deny' })).body.ok, true);
   assert.deepEqual(await items(), []);
   assert.deepEqual(await lines(), ['blocked']);
+  // autorisée par toi après le délai : « you » jusqu'à la relance (jamais « refusée d'office » juste après ton accord),
+  // puis la relance a sa propre ligne et celle du délai redevient le refus de cette tentative
+  const D_ID = 'dddddddddddddddd', D_CMD = 'publier-maquette --site recette';
+  const delay = (id, cmd, event = 'garde-fou-delai-vigie') => JSON.stringify({ ts: new Date().toISOString(), event, sessionId: SID_A, cwd: CWD,
+    tool: 'Bash', action: cmd, ...rule, approvalId: id, hash: id.repeat(4), pid: deadPid });
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), `${line(D_ID, D_CMD, rule)}\n${delay(D_ID, D_CMD)}\n`);
+  v = [];
+  for (let i = 0; i < 80 && !v.length; i++) { await new Promise((res) => setTimeout(res, 100)); v = await items(); }
+  assert.deepEqual(v.map((x) => x.approvalId), [D_ID]);
+  const linesD = async () => (await get(`/api/v2/conversation/${SID_A}`)).body.accepted.filter((x) => x.title === D_CMD).map((x) => x.decision);
+  assert.deepEqual(await linesD(), ['waiting']);
+  assert.equal((await post('/api/v2/approvals', { approvalId: D_ID })).body.ok, true);
+  assert.deepEqual(await linesD(), ['you'], 'autorisée, pas encore relancée');
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), `${delay(D_ID, D_CMD, 'garde-fou-autorise-vigie')}\n`);
+  let relaunched = [];
+  for (let i = 0; i < 80 && relaunched.length < 2; i++) { await new Promise((res) => setTimeout(res, 100)); relaunched = await linesD(); }
+  assert.deepEqual(relaunched, ['you', 'blocked'], 'relancée : sa ligne, et le refus de la première tentative');
 });
 
 // ---------- connexions vues par le coffre (lib/vault.mjs : data/connexions.json) ----------

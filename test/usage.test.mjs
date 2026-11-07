@@ -88,8 +88,8 @@ test('jusqu\'où tient le compte : pente des dernières 24 h d\'après les vrais
   const reset = new Date(NOW + 72 * H).toISOString();
   const pt = (h, pct, resetsAt = reset) => ({ t: new Date(NOW + h * H).toISOString(), pct, resetsAt });
   const week = (pct) => ({ pct, resetsAt: reset });
-  // 10 % il y a 30 h (donc encore il y a 24 h), 40 % maintenant : 30 points en 24 h → les 60 restants en 48 h
-  const full = weekFullAt([pt(-30, 10), pt(-10, 25), pt(-1, 40)], week(40), NOW);
+  // 10 % il y a 24 h, 40 % maintenant : 30 points en 24 h → les 60 restants en 48 h
+  const full = weekFullAt([pt(-30, 9), pt(-24, 10), pt(-10, 25), pt(-1, 40)], week(40), NOW);
   assert.ok(full > NOW + 48 * H - 60_000 && full <= NOW + 48 * H + 15 * 60_000, 'pleine vers dans 48 h');
   assert.equal(full % (15 * 60_000), 0, 'au quart d\'heure');
   // même hausse, mais une remise à zéro dans 40 h : elle tient
@@ -102,6 +102,18 @@ test('jusqu\'où tient le compte : pente des dernières 24 h d\'après les vrais
   // semaine commencée il y a 15 h, 1 % il y a 2 h, 6 % maintenant : 0,4 %/h en moyenne, elle tient jusqu'à la remise
   const fresh = new Date(NOW + (7 * 24 - 15) * H).toISOString();
   assert.equal(weekFullAt([pt(-2, 1, fresh)], { pct: 6, resetsAt: fresh }, NOW), null);
+  // premier soir de la semaine (remise à zéro il y a 3 h) : 8 % en 3 h se mesure sur 24 h (à 0 % avant la remise),
+  // pas de fausse alerte qui prendrait la seule notification de la semaine ; 30 % en 3 h, si
+  const firstDay = new Date(NOW + (7 * 24 - 3) * H).toISOString();
+  assert.equal(weekFullAt([pt(-2, 1, firstDay)], { pct: 8, resetsAt: firstDay }, NOW), null, '8 % en 3 h');
+  const justReset = new Date(NOW + (7 * 24 - 5 / 60) * H).toISOString();
+  assert.equal(weekFullAt([], { pct: 3, resetsAt: justReset }, NOW), null, '3 % dans les 5 min après la remise à zéro');
+  const rush = weekFullAt([pt(-2, 1, firstDay)], { pct: 30, resetsAt: firstDay }, NOW);
+  assert.ok(Math.abs(rush - (NOW + 70 / (30 / 24) * H)) <= 15 * 60_000, '30 % en 3 h → les 70 restants en 56 h');
+  // trou de relevés : 30 % vendredi 18:00, Mac en veille tout le week-end, 55 % lundi 09:00 (usage fait ailleurs). La
+  // hausse du trou n'est pas comptée en 24 h : 0,4 %/h, elle tient jusqu'à la remise dans 83 h
+  const later = new Date(NOW + 83 * H).toISOString();
+  assert.equal(weekFullAt([pt(-63, 30, later)], { pct: 55, resetsAt: later }, NOW), null, 'week-end sans relevé');
   // moins de 3 points de hausse : rien à mesurer
   assert.equal(weekFullAt([pt(-30, 38), pt(-1, 40)], week(40), NOW), null);
   // relevés d'une autre semaine ignorés
