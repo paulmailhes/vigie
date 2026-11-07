@@ -16,7 +16,7 @@
         "week": {
           "pct": 39,
           "resetsAt": "2026-10-26T19:00:00.000Z",
-          "fullAt": "2026-10-24T14:00:00.000Z"
+          "fullAt": "2026-10-22T12:00:00.000Z"
         },
         "weekModel": {
           "label": "Fable",
@@ -52,7 +52,7 @@
     {
       "id": "perso",
       "label": "Perso",
-      "email": "alex.durand@gmail.com",
+      "email": "bob@autre.fr",
       "expectedEmail": "alex.durand@gmail.com",
       "wrongAccount": true,
       "connected": true,

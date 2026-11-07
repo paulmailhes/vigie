@@ -203,10 +203,14 @@ struct ConversationTrail: View {
 
 /// Un compte : pastille verte quand une conversation consomme dessus (triangle rouge : connecté à la mauvaise
 /// adresse), puis la limite qui compte (`AccountGauge`) : « sem. 39 % » et sa jauge, ou « Session pleine · 03:40 » en
-/// rouge à la place de la jauge. Pas connecté : le nom en gris lisible, seule la pastille est atténuée.
+/// rouge à la place de la jauge. Pas connecté : le nom en gris lisible, seule la pastille est atténuée. L'aide au
+/// survol dit aussi si la semaine sera pleine avant sa remise à zéro (`WeekForecast`).
 struct SidebarAccountRow: View {
     @Environment(VigieStore.self) private var store
     let account: Account
+
+    /// L'aide du triangle rouge (et ce que VoiceOver en dit).
+    nonisolated static let wrongAddressHelp = "Mauvaise adresse : reconnecte-le dans Comptes"
 
     var body: some View {
         let gauge = AccountGauge(usage: account.usage, now: store.now)
@@ -215,6 +219,7 @@ struct SidebarAccountRow: View {
                 if account.wrongAccount == true {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(Theme.alert)
+                        .help(Self.wrongAddressHelp)
                 } else {
                     Circle()
                         .fill(store.working(on: account.id).isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
@@ -255,15 +260,24 @@ struct SidebarAccountRow: View {
         .padding(.vertical, 2)
         .help(help(gauge))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(account.isConnected ? "\(account.displayName), \(gauge.help)" : "\(account.displayName), pas connecté")
+        .accessibilityLabel(spoken(gauge))
     }
 
     private func help(_ gauge: AccountGauge) -> String {
-        guard account.isConnected else { return "\(account.displayName) : pas connecté" }
+        let wrong = account.wrongAccount == true ? "\n" + Self.wrongAddressHelp : ""
+        guard account.isConnected else { return "\(account.displayName) : pas connecté" + wrong }
         let working = store.working(on: account.id)
         let head = working.isEmpty ? account.displayName
             : "\(account.displayName) · consomme : " + working.map(\.shortTitle).joined(separator: ", ")
-        return gauge.help.isEmpty ? head : head + "\n" + gauge.help
+        return (gauge.help.isEmpty ? head : head + "\n" + gauge.help) + wrong
+    }
+
+    /// « Perso, Mauvaise adresse : reconnecte-le dans Comptes, Semaine 8 % … ».
+    private func spoken(_ gauge: AccountGauge) -> String {
+        [account.displayName, account.wrongAccount == true ? Self.wrongAddressHelp : "",
+         account.isConnected ? gauge.help : "pas connecté"]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 }
 
@@ -279,7 +293,10 @@ struct AccountGauge: Equatable {
     let pct: Double?
     /// Une fenêtre pleine : ce texte rouge remplace la jauge (« Session pleine · 03:40 », « Semaine pleine »).
     let full: String?
-    /// Les deux chiffres et leurs remises à zéro, pour l'aide au survol et VoiceOver.
+    /// La semaine serait pleine avant sa remise à zéro : « À ce rythme : pleine vers jeu. 14 h, avant la remise à
+    /// zéro de lun. 20:00 » (`WeekForecast`) ; nil sinon.
+    let forecast: String?
+    /// Les deux chiffres et leurs remises à zéro, puis la prévision de la semaine, pour l'aide au survol et VoiceOver.
     let help: String
 
     /// Seuil à partir duquel la session passe devant la semaine (celui des alertes de consommation).
@@ -310,9 +327,11 @@ struct AccountGauge: Equatable {
             pct = weekPct
             full = nil
         }
-        help = [Self.describe("Session", session, now: now), Self.describe("Semaine", week, now: now)]
+        forecast = WeekForecast.text(week, now: now)
+        let windows = [Self.describe("Session", session, now: now), Self.describe("Semaine", week, now: now)]
             .compactMap { $0 }
             .joined(separator: " · ")
+        help = [windows, forecast ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// « Session pleine · 03:40 » (la session se remet à zéro dans les 5 h : l'heure suffit), « Semaine pleine » ; nil

@@ -229,6 +229,9 @@ struct BackgroundRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(InfoLine.text([group.label ?? "Commande", "lancé par \(conversationName)", stateText, Fmt.memory(mb: group.memoryMb)]))
         .accessibilityHint(expanded ? "Referme le détail" : "Montre la commande entière et le dossier")
+        // le clic sur la ligne n'est qu'un geste : VoiceOver a son action
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: expanded ? "Replier" : "Déplier", toggle)
     }
 
     private var dot: some View {
@@ -368,7 +371,8 @@ struct BackgroundRow: View {
                     .help("Le dossier où il a été lancé")
                 }
                 if let port = group.ports.first {
-                    Button("Ouvrir localhost:\(port)") {
+                    // String(port) : un Int dans un libellé serait groupé (« 5 173 »)
+                    Button("Ouvrir localhost:\(String(port))") {
                         if let url = URL(string: "http://localhost:\(port)") { NSWorkspace.shared.open(url) }
                     }
                     .glassButton()

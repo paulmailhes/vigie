@@ -14,7 +14,7 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
         case .failed: "Une action autorisée a échoué"
         case .question: "Vigie a répondu à une question à ta place"
         case .accountSession: "Un compte passe 90 % de sa session pendant qu'une conversation tourne"
-        case .accountWeek: "Un compte passe 80 % puis 90 % de sa semaine"
+        case .accountWeek: "Un compte passe 80 % puis 90 % de sa semaine, ou sera plein avant la remise à zéro"
         case .missionDone: "Une conversation ou un workflow a fini"
         case .stopped: "Une conversation s'arrête avant la fin"
         case .runaway: "Une conversation s'emballe"
@@ -85,8 +85,11 @@ final class Notifier {
 
     private static let seenKey = "notify.seen"
     private static let seededKey = "notify.seeded"
-    /// Un élément notifié est oublié au bout de 4 jours.
-    private static let memory: TimeInterval = 4 * 86_400
+    /// Un élément notifié est oublié au bout de 4 jours ; une alerte de la semaine d'un compte au bout de 8 (sinon
+    /// elle repartait en fin de semaine, sa clé oubliée).
+    private static func memory(for key: String) -> TimeInterval {
+        key.hasPrefix("a:") || key.hasPrefix("f:") ? 8 * 86_400 : 4 * 86_400
+    }
     /// Une fin plus ancienne que ça ne fait plus de bannière (par exemple au lancement de l'app le matin).
     private static let staleEnd: TimeInterval = 15 * 60
     /// Un workflow fini attend ce délai : si la conversation reprend la main, il entre dans sa fin.
@@ -166,7 +169,7 @@ final class Notifier {
         liveKeys = live
 
         let before = seen.count
-        seen = seen.filter { now - $0.value < Self.memory }
+        seen = seen.filter { now - $0.value < Self.memory(for: $0.key) }
         versions = versions.filter { seen[$0.key] != nil }
         if !fresh.isEmpty || seen.count != before { save() }
     }
@@ -232,9 +235,10 @@ final class Notifier {
             if let reset = week.resetsAt { body += " · remise à zéro \(Fmt.reset(reset, now: store.now))" }
             list.append(Candidate(key: "a:\(account.id):\(top):\(period)", kind: .accountWeek,
                                   title: "\(account.displayName) passe \(top) % de sa semaine", body: body,
-                                  conversationId: nil, reviewId: nil))
+                                  conversationId: nil, reviewId: nil, accountId: account.id))
         }
 
+        list.append(contentsOf: weekForecasts(store))
         list.append(contentsOf: sessionAlerts(store))
 
         let reports = store.reports.map(\.value)
@@ -321,6 +325,35 @@ final class Notifier {
             return "Elle a continué sans. Autorise-la pour qu'elle la relance."
         }
         return "Clique pour décider."
+    }
+
+    /// La semaine d'un compte serait pleine avant sa remise à zéro, au rythme des dernières 24 h (`WeekForecast`) :
+    /// « Travail 1 sera plein avant la remise à zéro (vers jeu. 14 h) ». Une seule fois par compte et par semaine, même
+    /// si la prévision disparaît puis revient (la remise à zéro, à l'heure près, fait la clé).
+    private func weekForecasts(_ store: VigieStore) -> [Candidate] {
+        store.accounts.compactMap { account in
+            guard account.isConnected, let week = account.usage?.week,
+                  let title = WeekForecast.notificationTitle(account: account.displayName, week: week, now: store.now)
+            else { return nil }
+            return Candidate(key: Self.forecastKey(accountId: account.id, reset: week.resetsAt, now: store.now),
+                             kind: .accountWeek, title: title, body: Self.forecastBody(week, now: store.now),
+                             conversationId: nil, reviewId: nil, accountId: account.id)
+        }
+    }
+
+    /// Clé de la prévision : le compte et la remise à zéro arrondie à l'heure (le relevé dit 18:59 ou 19:00) ; sans
+    /// remise à zéro connue, la tranche de 7 jours.
+    static func forecastKey(accountId: String, reset: Date?, now: Date) -> String {
+        let period = reset.map { String(Int(($0.timeIntervalSince1970 / 3600).rounded())) }
+            ?? "w\(Int(now.timeIntervalSince1970 / 604_800))"
+        return "f:\(accountId):\(period)"
+    }
+
+    /// « 62 % de la semaine utilisés · remise à zéro lun. 26 oct. à 20:00 ».
+    static func forecastBody(_ week: UsageWindow, now: Date) -> String {
+        var body = "\(Fmt.pct(week.pct)) de la semaine utilisés"
+        if let reset = week.resetsAt { body += " · remise à zéro \(Fmt.reset(reset, now: now))" }
+        return body
     }
 
     /// Un compte passe 90 % de sa session pendant qu'une conversation ouverte tourne dessus : elle va bientôt
@@ -480,7 +513,7 @@ final class Notifier {
                 store.showAccounts(accountId)
             }
         } else if kind == NotifyKind.accountWeek.rawValue {
-            store.showAccounts(nil)
+            store.showAccounts(accountId)
         } else if kind == NotifyKind.background.rawValue {
             store.route = .background
         } else if let conversationId, store.conversation(conversationId) != nil {

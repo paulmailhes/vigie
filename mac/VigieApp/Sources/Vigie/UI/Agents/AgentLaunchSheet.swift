@@ -548,8 +548,10 @@ struct AgentLaunchSheet: View {
     /// leur bloc, « Outils »).
     @ViewBuilder
     private var notes: some View {
-        let account = store.agentsState?.account?.displayName
-        let accountID = store.agentsState?.account?.id
+        // le compte des nouvelles conversations : changé d'ici (avertissement), il se voit tout de suite
+        let launchAccount = AgentAccountWarning.launchAccount(store)
+        let account = launchAccount?.name
+        let accountID = launchAccount?.id
         if !autoSend {
             HStack(spacing: 8) {
                 Label("Pour que l'agent démarre tout seul, autorise Vigie dans Accessibilité (une fois) : il appuiera sur Entrée dans le champ de Claude, et fera confiance au dossier du projet dans VS Code.",

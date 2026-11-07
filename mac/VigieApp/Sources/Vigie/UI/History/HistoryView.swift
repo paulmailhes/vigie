@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Historique : toutes les demandes d'autorisation et leur issue (acceptée, refusée, refusée d'office, échouée…), avec
-/// des filtres. Un clic sur une ligne ouvre son détail à droite : pourquoi, la commande entière, de quoi la relancer.
+/// Historique : toutes les demandes d'autorisation et leur issue (acceptée, refusée, refusée d'office, en échec…), avec
+/// des filtres ; les mots, icônes et couleurs viennent de `HistoryStatus`. Un clic sur une ligne ouvre son détail à droite : pourquoi, la commande entière, de quoi la relancer.
 /// Même bord gauche que les autres pages (28 pt) ; la table défile seule, elle n'entre pas dans `Page`.
 struct HistoryView: View {
     @Environment(VigieStore.self) private var store
@@ -110,7 +110,7 @@ struct HistoryView: View {
             ForEach(HistoryStatus.allCases) { status in
                 let count = counts[status.rawValue] ?? 0
                 if count > 0 || store.historyStatus == status.rawValue {
-                    filterChip("\(status.shownTitle) \(Fmt.int(count))", symbol: status.symbol,
+                    filterChip("\(status.title) \(Fmt.int(count))", symbol: status.symbol,
                                selected: store.historyStatus == status.rawValue) {
                         store.historyStatus = store.historyStatus == status.rawValue ? nil : status.rawValue
                     }
@@ -145,8 +145,8 @@ struct HistoryView: View {
                 }
                 .width(min: 70, ideal: 90, max: 130)
                 TableColumn("Résultat") { item in
-                    Label(item.historyStatus.shownLabel, systemImage: item.historyStatus.symbol)
-                        .foregroundStyle(item.historyStatus.shownColor)
+                    Label(item.historyStatus.label, systemImage: item.historyStatus.symbol)
+                        .foregroundStyle(item.historyStatus.color)
                         .labelStyle(.titleAndIcon)
                 }
                 .width(min: 110, ideal: 160, max: 190)
@@ -180,27 +180,6 @@ struct HistoryView: View {
     }
 }
 
-/// Les mots et les couleurs de l'Historique, avec le vocabulaire de Vigie : « Refusée d'office » (par Vigie : délai
-/// ou règle), jamais « Bloquée » ; une couleur de TEXTE lisible en mode clair.
-extension HistoryStatus {
-    var shownTitle: String {
-        self == .blocked ? "Refusées d'office" : title
-    }
-
-    var shownLabel: String {
-        self == .blocked ? "Refusée d'office" : label
-    }
-
-    var shownColor: Color {
-        switch self {
-        case .accepted: Theme.liveText
-        case .blocked, .failed: Theme.alertText
-        case .waiting: Theme.warnText
-        case .refused, .question, .vscode: .secondary
-        }
-    }
-}
-
 /// Le détail d'une ligne : ce qui s'est passé, la commande entière, et de quoi la débloquer.
 struct HistoryDetail: View {
     @Environment(VigieStore.self) private var store
@@ -215,7 +194,7 @@ struct HistoryDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Chip(item.historyStatus.shownLabel, symbol: item.historyStatus.symbol, tone: tone)
+                Chip(item.historyStatus.label, symbol: item.historyStatus.symbol, tone: item.historyStatus.tone)
                 ObjectHeader(item.title ?? item.tool ?? "Action")
                 if let reason = item.reason {
                     Text(reason).fixedSize(horizontal: false, vertical: true)
@@ -248,15 +227,6 @@ struct HistoryDetail: View {
                 actions
             }
             .padding(16)
-        }
-    }
-
-    private var tone: Chip.Tone {
-        switch item.historyStatus {
-        case .accepted: .live
-        case .blocked, .failed: .alert
-        case .waiting: .warn
-        case .refused, .question, .vscode: .neutral
         }
     }
 

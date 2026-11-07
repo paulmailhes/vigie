@@ -180,7 +180,8 @@ struct AccountCard: View {
                     if !account.isCodex || usage?.session != nil {
                         UsageGaugeRow(title: "Session 5 h", window: usage?.session)
                     }
-                    UsageGaugeRow(title: "Semaine", window: usage?.week)
+                    UsageGaugeRow(title: "Semaine", window: usage?.week,
+                                  forecast: WeekForecast.text(usage?.week, now: store.now))
                     if let model = usage?.weekModel {
                         UsageGaugeRow(title: "Semaine \(model.label ?? "modèle")", window: model)
                     }
@@ -304,31 +305,48 @@ struct AccountCard: View {
     }
 }
 
-/// Une jauge : « Semaine   ▬▬▬▬▭▭   39 %   remise à zéro lun. 26 oct. à 20:00 » ; « — » sans chiffre récent.
+/// Une jauge : « Semaine   ▬▬▬▬▭▭   39 %   remise à zéro lun. 26 oct. à 20:00 » ; « — » sans chiffre récent. Sous la
+/// jauge Semaine, quand le moteur la voit pleine avant la remise à zéro : « À ce rythme : pleine vers jeu. 14 h, avant
+/// la remise à zéro de lun. 20:00 » (`WeekForecast`), en orange, sous la barre.
 struct UsageGaugeRow: View {
     @Environment(VigieStore.self) private var store
     let title: String
     let window: UsageWindow?
+    var forecast: String? = nil
+
+    /// Largeur du titre et écart : la phrase de prévision commence sous la barre.
+    private static let titleWidth: CGFloat = 118
+    private static let spacing: CGFloat = 14
 
     var body: some View {
         let pct = window?.pct
-        HStack(spacing: 14) {
-            Text(title)
-                .frame(width: 118, alignment: .leading)
-            UsageBar(pct: pct, height: 6)
-            Text(Fmt.pct(pct))
-                .bold()
-                .monospacedDigit()
-                .foregroundStyle(pct == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                .frame(width: 52, alignment: .trailing)
-            Text(resetText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(width: 240, alignment: .leading)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: Self.spacing) {
+                Text(title)
+                    .frame(width: Self.titleWidth, alignment: .leading)
+                UsageBar(pct: pct, height: 6)
+                Text(Fmt.pct(pct))
+                    .bold()
+                    .monospacedDigit()
+                    .foregroundStyle(pct == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                    .frame(width: 52, alignment: .trailing)
+                Text(resetText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 240, alignment: .leading)
+                    .lineLimit(1)
+            }
+            if let forecast {
+                Text(forecast)
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.warnText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Self.titleWidth + Self.spacing)
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title) : \(pct.map(Fmt.pct) ?? "pas de chiffre récent"), \(resetText)")
+        .accessibilityLabel(InfoLine.text(["\(title) : \(pct.map(Fmt.pct) ?? "pas de chiffre récent"), \(resetText)", forecast]))
     }
 
     private var resetText: String {

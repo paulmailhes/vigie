@@ -3,11 +3,20 @@ import SwiftUI
 
 /// Tes lancements d'agents (page Agents) : pour chacun, le rapport que l'agent tient à jour — en cours ou terminé, le
 /// verdict, ce qu'il a fait, ce qui te reste à faire (à cocher), le rapport détaillé et la conversation.
-/// Chaque lancement s'ouvre et se referme ; le plus récent est ouvert. Mis à jour à la seconde (GET /api/v2/changes).
+/// Chaque lancement s'ouvre et se referme ; le plus récent est ouvert (`opened` nil : rien de touché). Mis à jour à la
+/// seconde (GET /api/v2/changes). « Voir le rapport » (`store.agentRunFocus`) : la page défile jusqu'à lui, ouvert.
 struct RecipeRunsSection: View {
     @Environment(VigieStore.self) private var store
     let runs: [RecipeRun]
-    @State private var opened: Set<String>?
+    @Binding var opened: Set<String>?
+
+    /// L'identifiant de défilement d'un lancement (distinct de celui des recettes de la même page).
+    nonisolated static func anchor(_ runID: String) -> String { "run:\(runID)" }
+
+    /// Les lancements ouverts, `focus` en plus : le plus récent tant que rien n'a été touché.
+    nonisolated static func opening(_ focus: String, in opened: Set<String>?, runs: [RecipeRun]) -> Set<String> {
+        (opened ?? Set(runs.prefix(1).map(\.id))).union([focus])
+    }
 
     var body: some View {
         Section {
@@ -19,6 +28,7 @@ struct RecipeRunsSection: View {
                     if open { set.insert(run.id) } else { set.remove(run.id) }
                     opened = set
                 })
+                .id(Self.anchor(run.id))
             }
         } header: {
             SectionHeader("Tes lancements", count: runs.count,

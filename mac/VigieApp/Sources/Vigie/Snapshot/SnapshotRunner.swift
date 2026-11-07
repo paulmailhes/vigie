@@ -107,6 +107,12 @@ final class SnapshotRunner {
             await settle(0.9)
             await capture(window, "17-en-fond-\(theme)")
 
+            // Historique : ses lignes viennent de history.json (sans lui, la page attend ses données)
+            store.route = .history
+            _ = await waitUntil(seconds: 3) { self.store.historyPage != nil }
+            await settle(0.9)
+            await capture(window, "18-historique-\(theme)")
+
             if let question {
                 store.route = .overview
                 await settle(0.5)
@@ -135,6 +141,9 @@ final class SnapshotRunner {
                 ])
                 await captureAlone(sheet, "17-feuille-agent-\(theme)", appearance: NSAppearance(named: appearanceName))
             }
+            // Réglages › Général, la vue seule, à la largeur de la fenêtre Réglages et assez haute pour tout lire
+            await captureAlone(GeneralSettingsView().frame(width: 520, height: 900), "19-reglages-\(theme)",
+                               appearance: NSAppearance(named: appearanceName))
         }
 
         finish(code: 0, message: "\(written.count) captures dans \(folder.path)")

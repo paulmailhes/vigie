@@ -192,48 +192,64 @@ struct MenuBarPanel: View {
 }
 
 /// Chaque compte : pastille verte s'il consomme, ce qui tourne dessus, débit, session et semaine. Une fenêtre pleine
-/// s'écrit en toutes lettres, en rouge (« Session pleine · 03:40 »), comme dans la barre latérale.
+/// s'écrit en toutes lettres, en rouge (« Session pleine · 03:40 »), comme dans la barre latérale ; une semaine qui
+/// serait pleine avant sa remise à zéro le dit dessous, en orange (`WeekForecast`).
 struct PanelAccounts: View {
     @Environment(VigieStore.self) private var store
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(store.accounts) { account in
-                let working = store.working(on: account.id)
-                let rate = store.ratePerHour(on: account.id)
                 let gauge = AccountGauge(usage: account.usage, now: store.now)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Circle()
-                        .fill(working.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
-                        .frame(width: 7, height: 7)
-                        .opacity(account.isConnected ? 1 : Theme.dim)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(account.displayName)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(account.isConnected ? .primary : .secondary)
-                        Text(account.isConnected ? (working.isEmpty ? "Rien ne tourne" : working.map(\.shortTitle).joined(separator: ", "))
-                             : "Pas connecté")
+                VStack(alignment: .leading, spacing: 2) {
+                    row(account)
+                    if account.isConnected, let forecast = gauge.forecast {
+                        Text(forecast)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    if account.isConnected {
-                        if rate > 0.005 {
-                            Text(Fmt.rate(rate))
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .help("Débit des 10 dernières minutes, en % de la semaine par heure")
-                        }
-                        VStack(alignment: .trailing, spacing: 1) {
-                            usage("Session", account.usage?.session, session: true)
-                            usage("Semaine", account.usage?.week, session: false)
-                        }
-                        .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.warnText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            // sous le nom du compte (pastille de 7 pt et écart de 8)
+                            .padding(.leading, 15)
                     }
                 }
                 .help(gauge.help)
+            }
+        }
+    }
+
+    private func row(_ account: Account) -> some View {
+        let working = store.working(on: account.id)
+        let rate = store.ratePerHour(on: account.id)
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Circle()
+                .fill(working.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Theme.live))
+                .frame(width: 7, height: 7)
+                .opacity(account.isConnected ? 1 : Theme.dim)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.displayName)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(account.isConnected ? .primary : .secondary)
+                Text(account.isConnected ? (working.isEmpty ? "Rien ne tourne" : working.map(\.shortTitle).joined(separator: ", "))
+                     : "Pas connecté")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if account.isConnected {
+                if rate > 0.005 {
+                    Text(Fmt.rate(rate))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .help("Débit des 10 dernières minutes, en % de la semaine par heure")
+                }
+                VStack(alignment: .trailing, spacing: 1) {
+                    usage("Session", account.usage?.session, session: true)
+                    usage("Semaine", account.usage?.week, session: false)
+                }
+                .font(.caption)
             }
         }
     }

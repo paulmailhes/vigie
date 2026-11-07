@@ -1,34 +1,44 @@
 import SwiftUI
 
 /// Message qui flotte en bas de la fenêtre (verre : élément flottant) : trois lignes au plus, et un message long reste
-/// plus longtemps (une consigne coupée ou disparue trop vite ne sert à rien).
+/// plus longtemps (une consigne coupée ou disparue trop vite ne sert à rien). VoiceOver l'annonce à son apparition ;
+/// l'icône et le texte se lisent ensemble, la croix reste un bouton à part.
 struct ToastView: View {
     let toast: Toast
     let dismiss: (UUID) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
-                .foregroundStyle(toast.isError ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
-            Text(toast.text)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Fermer", systemImage: "xmark") { dismiss(toast.id) }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                    .foregroundStyle(toast.isError ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
+                    .accessibilityHidden(true)
+                // une phrase, parfois longue : en couleur normale, seule l'icône dit l'erreur
+                Text(toast.text)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spoken)
+            IconButton("Fermer", systemImage: "xmark") { dismiss(toast.id) }
         }
         .font(.callout)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(toast.isError ? Color.red.opacity(0.10) : nil), in: .rect(cornerRadius: 18))
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .padding(.vertical, 2)
+        .glassEffect(.regular.tint(toast.isError ? Theme.alert.opacity(0.10) : nil), in: .rect(cornerRadius: 18))
         .frame(maxWidth: 560)
         .task(id: toast.id) {
+            AccessibilityNotification.Announcement(spoken).post()
             try? await Task.sleep(for: .seconds(min(14, 6 + max(0, toast.text.count - 80) / 30)))
             dismiss(toast.id)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isStaticText)
+    }
+
+    /// Ce que VoiceOver lit (et annonce) : « Erreur : … » pour une erreur, l'icône seule ne se lit pas.
+    private var spoken: String {
+        toast.isError ? "Erreur : \(toast.text)" : toast.text
     }
 }
 

@@ -445,7 +445,7 @@ test('lanceur : cas où l\'on ne touche à rien', () => {
   assert.equal(fs.readFileSync(VSC, 'utf8'), other);
   // réglages illisibles
   w(VSC, '{ "a": ');
-  assert.deepEqual(A.wrapper(true), { ok: false, error: 'Réglages VS Code illisibles : rien n\'a été changé.' });
+  assert.deepEqual(A.wrapper(true), { ok: false, error: 'Réglages VS Code illisibles : rien n\'a été changé. Ouvre-les dans VS Code (⌘,) et corrige l\'erreur signalée.' });
   assert.equal(fs.readFileSync(VSC, 'utf8'), '{ "a": ');
   // lanceur absent ou non exécutable
   w(VSC, '{}');

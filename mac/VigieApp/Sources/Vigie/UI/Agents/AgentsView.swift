@@ -7,6 +7,8 @@ import SwiftUI
 struct AgentsView: View {
     @Environment(VigieStore.self) private var store
     @State private var launching: AgentInfo?
+    /// Les lancements ouverts (nil : le plus récent seul, rien de touché).
+    @State private var openedRuns: Set<String>?
 
     var body: some View {
         Group {
@@ -52,32 +54,50 @@ struct AgentsView: View {
     }
 
     private func content(_ state: AgentLibrary) -> some View {
-        Form {
-            // Tes lancements d'abord, dès qu'il y en a un : leurs rapports t'attendent, les recettes se lancent
-            // rarement. Ordre fixe : la page ne saute pas quand un lancement finit.
-            if let runs = store.agentRuns?.runs, !runs.isEmpty {
-                RecipeRunsSection(runs: runs)
-            }
-            Section {
-                ForEach(state.agents) { agent in
-                    AgentRecipeRow(agent: agent) { launching = agent }
+        ScrollViewReader { proxy in
+            Form {
+                // Tes lancements d'abord, dès qu'il y en a un : leurs rapports t'attendent, les recettes se lancent
+                // rarement. Ordre fixe : la page ne saute pas quand un lancement finit.
+                if let runs = store.agentRuns?.runs, !runs.isEmpty {
+                    RecipeRunsSection(runs: runs, opened: $openedRuns)
                 }
-            } header: {
-                SectionHeader("Prêts à lancer", count: state.agents.count,
-                              note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.",
-                              inset: 0)
-            } footer: {
-                footer(state)
+                Section {
+                    ForEach(state.agents) { agent in
+                        AgentRecipeRow(agent: agent) { launching = agent }
+                    }
+                } header: {
+                    SectionHeader("Prêts à lancer", count: state.agents.count,
+                                  note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude.",
+                                  inset: 0)
+                } footer: {
+                    footer(state)
+                }
             }
+            .pageForm()
+            .onAppear { focusRun(proxy) }
+            .onChange(of: store.agentRunFocus) { focusRun(proxy) }
+            // le lancement demandé peut arriver avec la relecture suivante
+            .onChange(of: store.agentRuns?.runs.map(\.id)) { focusRun(proxy) }
         }
-        .pageForm()
+    }
+
+    /// « Voir le rapport » d'un lancement (`store.agentRunFocus`) : son rapport s'ouvre, la page défile jusqu'à lui,
+    /// puis la demande est oubliée. Pas encore dans la liste : on attend la relecture suivante.
+    private func focusRun(_ proxy: ScrollViewProxy) {
+        guard let id = store.agentRunFocus, let runs = store.agentRuns?.runs, runs.contains(where: { $0.id == id }) else { return }
+        openedRuns = RecipeRunsSection.opening(id, in: openedRuns, runs: runs)
+        store.agentRunFocus = nil
+        // au tour suivant : le rapport est déplié, la page sait jusqu'où défiler
+        Task { @MainActor in
+            withAnimation(.smooth) { proxy.scrollTo(RecipeRunsSection.anchor(id), anchor: .top) }
+        }
     }
 
     private func footer(_ state: AgentLibrary) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let account = state.account, let name = account.displayName {
+            if let account = AgentAccountWarning.launchAccount(store) {
                 HStack(spacing: 6) {
-                    Label("Un agent lancé partira sur le compte \(name) (celui des nouvelles conversations).",
+                    Label("Un agent lancé partira sur le compte \(account.name) (celui des nouvelles conversations).",
                           systemImage: Icon.account)
                     Button("Changer") { store.showAccounts(account.id) }
                         .buttonStyle(.link)
@@ -102,41 +122,67 @@ struct AgentsView: View {
 }
 
 /// Le compte de départ d'un agent est presque plein (session ou semaine à 90 % ou plus) : l'avertir avant de lancer,
-/// avec le compte qui a le plus de marge. Un conseil seulement : rien ne change sans clic (et un lancement part
-/// toujours sur le compte des nouvelles conversations).
+/// avec le compte qui a le plus de marge et « Mettre les nouvelles conversations sur Perso ». Un conseil seulement :
+/// rien ne change sans ce clic, et il ne change que le compte des nouvelles conversations (celui d'un lancement) ; une
+/// conversation déjà commencée garde le sien.
 struct AgentAccountWarning: View {
     @Environment(VigieStore.self) private var store
     let accountID: String?
 
     var body: some View {
-        if let text = Self.text(accountID: accountID, accounts: store.accounts, now: store.now) {
-            Label {
-                Text(text)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.warn)
+        if let warning = Self.warning(accountID: accountID, accounts: store.accounts, now: store.now) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label {
+                    Text(warning.text)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.warn)
+                }
+                if let roomiest = warning.roomiest {
+                    AsyncButton("Mettre les nouvelles conversations sur \(roomiest.displayName)") {
+                        await store.setDefaultAccount(roomiest.id)
+                    }
+                    .glassButton()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Les prochains lancements et les nouvelles conversations partiront sur \(roomiest.displayName) ; une conversation déjà commencée garde son compte")
+                }
             }
         }
+    }
+
+    /// Le compte de départ d'un agent : celui des nouvelles conversations, lu dans les comptes de l'app (changé d'ici,
+    /// il se voit tout de suite), sinon celui que dit le moteur.
+    static func launchAccount(_ store: VigieStore) -> (id: String, name: String)? {
+        let known = store.accountsState?.defaultForNew ?? store.accounts.first(where: { $0.isDefault == true })?.id
+        if let id = known, let account = store.accounts.first(where: { $0.id == id }) { return (id, account.displayName) }
+        guard let account = store.agentsState?.account, let id = account.id else { return nil }
+        return (id, account.displayName ?? id)
     }
 
     /// Seuil d'alerte d'une jauge (session ou semaine).
     nonisolated static let threshold: Double = 90
 
-    /// « Travail 1 est à 100 % de sa session (remise à zéro aujourd'hui à 03:40). Perso a plus de marge : pour lancer
-    /// dessus, change le compte des nouvelles conversations dans Comptes. » ; nil si le compte a de la marge.
+    /// « Travail 1 est à 100 % de sa session (remise à zéro aujourd'hui à 03:40). Perso a plus de marge. » ; nil si le
+    /// compte a de la marge.
     nonisolated static func text(accountID: String?, accounts: [Account], now: Date) -> String? {
+        warning(accountID: accountID, accounts: accounts, now: now)?.text
+    }
+
+    /// La phrase, et le compte qui a le plus de marge (bien connecté : ni mauvaise adresse, ni doublon ; sous le
+    /// seuil), s'il y en a un ; nil si le compte de départ a de la marge.
+    nonisolated static func warning(accountID: String?, accounts: [Account], now: Date) -> (text: String, roomiest: Account?)? {
         guard let accountID, let account = accounts.first(where: { $0.id == accountID }),
               let full = fullest(account, now: now) else { return nil }
         let reset = full.window.resetsAt.map { " (remise à zéro \(Fmt.reset($0, now: now)))" } ?? ""
         let head = "\(account.displayName) est à \(Fmt.pct(full.window.pct)) de sa \(full.name)\(reset)."
-        // un autre compte bien connecté (ni mauvaise adresse, ni doublon) et sous le seuil
         let others = accounts.filter {
             $0.id != accountID && !$0.isCodex && !AccountCard.hasProblem($0) && fullest($0, now: now) == nil
         }
-        guard let roomiest = others.min(by: { load($0) < load($1) }) else { return head }
-        return "\(head) \(roomiest.displayName) a plus de marge : pour lancer dessus, change le compte des nouvelles conversations dans Comptes."
+        guard let roomiest = others.min(by: { load($0) < load($1) }) else { return (head, nil) }
+        return ("\(head) \(roomiest.displayName) a plus de marge.", roomiest)
     }
 
     /// La jauge pleine (session d'abord, puis semaine) ; nil si les deux sont sous le seuil, ou déjà remises à zéro

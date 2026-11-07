@@ -207,8 +207,8 @@ struct AgentMCPFixes: View {
         let toFix = agent.mcpNeeds.filter { $0.isMissing || [.needsAuth, .failed, .pendingApproval, .disabled].contains($0.mcpStatus) }
         ForEach(toFix) { AgentMCPFix(mcp: $0, titled: true) }
         if toFix.contains(where: { !Self.fixedHere($0) }) {
-            Button("Régler dans MCP") { store.route = .mcp }
-                .help("Ouvre la page MCP pour connecter ce qui manque")
+            Button("Voir la page MCP") { store.route = .mcp }
+                .help("Ce qui manque se connecte sur la page MCP de Vigie")
         }
     }
 
@@ -244,6 +244,8 @@ struct AgentMCPFix: View {
 /// plusieurs), son état, et de quoi le connecter ou le vérifier. Vert partout : l'agent a ce qu'il lui faut.
 struct AgentMCPPanel: View {
     @Environment(VigieStore.self) private var store
+    /// Le formulaire est une feuille : « Voir la page MCP » la ferme.
+    @Environment(\.dismiss) private var dismiss
     let agent: AgentInfo
     @Binding var picks: [String: String]
     var disabled = false
@@ -347,10 +349,14 @@ struct AgentMCPPanel: View {
             AgentMCPFix(mcp: mcp)
                 .controlSize(.small)
             if !AgentMCPFixes.fixedHere(mcp), mcp.isMissing || [.needsAuth, .failed, .pendingApproval, .disabled].contains(mcp.mcpStatus) {
-                Text("page MCP")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .help("À régler sur la page MCP de Vigie")
+                Button("Voir la page MCP") {
+                    dismiss()
+                    store.route = .mcp
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+                .fixedSize()
+                .help("Ferme ce formulaire et montre la page MCP de Vigie, où se règle ce qui manque")
             }
         }
         .padding(.horizontal, 10)
