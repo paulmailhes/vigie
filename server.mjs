@@ -1870,11 +1870,11 @@ function readBody(req) {
 async function processesView() {
   if (!PROCESSES) return [200, processes.view()];
   try { return [200, processes.view(await processes.snapshot({ fresh: true, withFootprint: true }))]; }
-  catch (e) { return bad(e.message || 'Relevé des processus impossible.', 500); }
+  catch (e) { return bad(e.message || 'Impossible de lire les processus.', 500); }
 }
 // POST /api/v2/processes/stop { ids, confirm? } → { ok, results: [{ id, ok, gone?, needsConfirm?, error? }] }
 async function postProcessesStop(b) {
-  if (!PROCESSES) return bad('Relevé des processus coupé.', 409);
+  if (!PROCESSES) return bad('Le suivi des processus est coupé.', 409);
   const r = await processes.stop(b?.ids, { confirm: b?.confirm === true, app: b?.app === true });
   return r.status ? bad(r.error, r.status) : [200, r];
 }

@@ -514,14 +514,17 @@ final class VigieStore {
         _ = await write("/api/v2/settings", body)
     }
 
+    /// En démonstration, les lignes viennent de history.json, filtrées ici comme le moteur le ferait.
     func refreshHistory() async {
-        guard !isDemo else { return }
         var query = "window=\(historyWindow)"
         if let historyStatus { query += "&status=\(historyStatus)" }
         if let historyConversation { query += "&conversation=\(encode(historyConversation))" }
         let q = historyQuery.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { query += "&q=\(encode(q))" }
-        guard let page = try? await client.get("/api/v2/history?\(query)", as: HistoryPage.self) else { return }
+        guard var page = try? await client.get("/api/v2/history?\(query)", as: HistoryPage.self) else { return }
+        if isDemo {
+            page = page.filtered(window: historyWindow, status: historyStatus, conversation: historyConversation, query: q, now: now)
+        }
         update(\.historyPage, page)
     }
 

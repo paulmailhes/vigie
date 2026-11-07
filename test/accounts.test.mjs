@@ -108,9 +108,12 @@ test('nom de l\'entrée de trousseau : sha256 du chemin brut, 8 caractères', ()
 });
 
 test('estimation de relecture', () => {
-  assert.equal(rereadEstimate(152_340), '≈ 152 k tokens relus sur le nouveau compte.');
-  assert.equal(rereadEstimate(300), '≈ 1 k tokens relus sur le nouveau compte.');
-  assert.equal(rereadEstimate(1_234_567), '≈ 1,2 M tokens relus sur le nouveau compte.');
+  // la même phrase que la confirmation de l'app (AccountSwitch.reread)
+  assert.equal(rereadEstimate(152_340, 'Perso'), 'Elle relira toute la conversation sur Perso (environ 152 k tokens).');
+  assert.equal(rereadEstimate(300, 'Perso'), 'Elle relira toute la conversation sur Perso (environ 1 k tokens).');
+  assert.equal(rereadEstimate(1_234_567, 'Perso'), 'Elle relira toute la conversation sur Perso (environ 1,2 M tokens).');
+  assert.equal(rereadEstimate(2_000_000, 'Perso'), 'Elle relira toute la conversation sur Perso (environ 2 M tokens).');
+  assert.equal(rereadEstimate(80_000), 'Elle relira toute la conversation sur le nouveau compte (environ 80 k tokens).');
   assert.equal(rereadEstimate(undefined), null);
   assert.equal(rereadEstimate(0), null);
 });
@@ -581,7 +584,7 @@ test('bascule : refus clairs', () => {
 
 test('bascule d\'une conversation fermée : noté pour la prochaine reprise', () => {
   const r = A.switchConversation(SID, 'travail2', { liveSessions: [], contextTokens: 152_340 });
-  assert.deepEqual(r, { ok: true, switch: { state: 'done', message: 'C\'est noté : elle reprendra sur Travail 2. ≈ 152 k tokens relus sur le nouveau compte.', estimate: '≈ 152 k tokens relus sur le nouveau compte.' } });
+  assert.deepEqual(r, { ok: true, switch: { state: 'done', message: 'C\'est noté : elle reprendra sur Travail 2. Elle relira toute la conversation sur Travail 2 (environ 152 k tokens).', estimate: 'Elle relira toute la conversation sur Travail 2 (environ 152 k tokens).' } });
   assert.equal(A.accountOf(SID), 'travail2');
   assert.equal(vigieModel().sessions[SID], 'travail2');
   assert.deepEqual(kills, []);
@@ -602,7 +605,7 @@ test('bascule au repos : processus vérifié puis arrêté, message pour relance
   proc();
   const r = A.switchConversation(SID, 'travail2', { liveSessions: new Map([[SID, live]]), contextTokens: 152_340 });
   assert.equal(r.switch.state, 'done');
-  assert.equal(r.switch.message, 'Envoie un message dans la conversation pour la relancer sur Travail 2. ≈ 152 k tokens relus sur le nouveau compte.');
+  assert.equal(r.switch.message, 'Envoie un message dans la conversation pour la relancer sur Travail 2. Elle relira toute la conversation sur Travail 2 (environ 152 k tokens).');
   assert.deepEqual(kills, [[PID, 'SIGINT']]);
   // ps interrogé en UTC pour comparer avec procStart
   const ls = runner.calls.filter((c) => c.cmd === '/bin/ps' && c.args[1] === 'lstart=');
@@ -638,7 +641,7 @@ test('bascule pendant le travail : en attente, appliquée dès le repos', () => 
   // sans ligne du lanceur, le processus tourne sur Travail 1
   let live = liveEntry({ status: 'busy' });
   const r = A.switchConversation(SID, 'travail2', { liveSessions: [live], contextTokens: 80_000 });
-  assert.deepEqual(r.switch, { state: 'pending', message: 'Elle passera sur Travail 2 dès qu\'elle aura fini. ≈ 80 k tokens relus sur le nouveau compte.', estimate: '≈ 80 k tokens relus sur le nouveau compte.' });
+  assert.deepEqual(r.switch, { state: 'pending', message: 'Elle passera sur Travail 2 dès qu\'elle aura fini. Elle relira toute la conversation sur Travail 2 (environ 80 k tokens).', estimate: 'Elle relira toute la conversation sur Travail 2 (environ 80 k tokens).' });
   assert.deepEqual(A.sessionAccount(SID), { accountId: 'travail2', pendingTo: 'travail2' });
   assert.deepEqual(A.processPending([live]).applied, []);
   // au repos depuis moins de 2 s : on attend encore

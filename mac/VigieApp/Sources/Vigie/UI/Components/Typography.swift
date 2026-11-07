@@ -19,7 +19,9 @@ import SwiftUI
 // Règles :
 // - Titre de page (niv. 0) : le nom n'est jamais répété dans le corps de la page. Le sous-titre dit un état chiffré,
 //   3 infos au plus, jamais une description (« 4 conversations ouvertes · 3 à décider »). Exception : la page d'une
-//   conversation a pour sous-titre son identité (titre de VS Code) ; son état est dans la tuile d'état.
+//   conversation a pour sous-titre son identité (son titre de VS Code), précédé de sa place quand plusieurs
+//   conversations attendent une décision et qu'elle en est (« 1 sur 3 à décider · Refonte du site de la boutique »,
+//   ⌘J passe à la suivante) ; son état est dans la tuile d'état.
 // - Un seul titre d'objet (niv. 1) par vue ; les blocs suivants se titrent en `CardTitle`.
 // - Panneau de la barre des menus : il est lui-même une seule carte, ses groupes se titrent en surtitre (`CardTitle`,
 //   chiffre à droite), jamais en `SectionHeader`.

@@ -63,7 +63,7 @@ struct UsageSection: View {
                 }
             }
         } else if store.usageUnavailable {
-            Label("Graphique indisponible pour l'instant", systemImage: "chart.line.downtrend.xyaxis")
+            Label("Graphique indisponible pour l'instant. Vigie réessaie toutes les 30 s.", systemImage: "chart.line.downtrend.xyaxis")
                 .foregroundStyle(.secondary)
         } else {
             ProgressView()
@@ -419,7 +419,7 @@ struct AccountUsageRow: Identifiable, Equatable {
         let weekText: String? = weekAlert ? nil : week.map { "semaine à \(Fmt.pct($0))" }
         let parts = [hour, now, weekText]
         let empty = parts.allSatisfy { $0?.isEmpty ?? true }
-        return empty && !weekAlert ? ["pas encore de relevé"] : parts
+        return empty && !weekAlert ? ["pas encore de données"] : parts
     }
 
     @MainActor

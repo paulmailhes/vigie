@@ -74,6 +74,13 @@ struct ToolPagesTests {
         let reset = try #require(week.resetsAt)
         #expect(full < reset)
         #expect(Calendar.current.component(.weekday, from: full) == 5, "un jeudi")
+        // la vue d'ensemble dit la même chose que la page Comptes (adresse, prévision de la semaine)
+        let overview = try JSONDecoder().decode(Overview.self, from: Data(contentsOf: Self.previewFolder.appending(path: "overview.json")))
+        for account in overview.accounts {
+            let same = try #require(state.accounts.first { $0.id == account.id })
+            #expect(account.email == same.email && account.expectedEmail == same.expectedEmail, "\(account.id)")
+            #expect(account.usage?.week?.fullAt == same.usage?.week?.fullAt, "\(account.id)")
+        }
     }
 
     // MARK: Jusqu'où tient chaque compte

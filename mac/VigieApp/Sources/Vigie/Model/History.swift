@@ -5,6 +5,24 @@ struct HistoryPage: Decodable, Equatable, Sendable {
     var window: Int?
     @Lossy var items: [HistoryItem]
     var counts: [String: Int]?
+
+    /// Les filtres du moteur, pour les données d'exemple (un seul history.json pour toutes les requêtes) : la période,
+    /// la conversation et la recherche, puis les compteurs, puis l'issue (les puces gardent leurs chiffres).
+    func filtered(window: Int, status: String?, conversation: String?, query: String, now: Date) -> HistoryPage {
+        let since = now.addingTimeInterval(-Double(window) * 60)
+        let words = query.lowercased()
+        let kept = items.filter { item in
+            guard let ts = item.ts, ts >= since, conversation == nil || item.conversationId == conversation else { return false }
+            guard !words.isEmpty else { return true }
+            return [item.title, item.command, item.reason, item.conversationTitle, item.project]
+                .contains { $0?.lowercased().contains(words) == true }
+        }
+        var page = self
+        page.window = window
+        page.counts = Dictionary(grouping: kept, by: \.status).mapValues(\.count)
+        page.items = kept.filter { status == nil || $0.status == status }
+        return page
+    }
 }
 
 struct HistoryItem: Decodable, Equatable, Sendable, Identifiable {

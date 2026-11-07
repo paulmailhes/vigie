@@ -31,13 +31,21 @@ enum AccountSwitch {
     }
 
     /// Le texte de la confirmation : ce que devient la conversation, et ce que coûte la relecture sur le nouveau compte.
+    /// Le même partout (menu Compte de la conversation, limite de la vue d'ensemble).
     static func message(working: Bool, to account: Account, contextTokens: Int?) -> String {
-        var text = working
-            ? "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
-            : "Elle reprend sur \(account.displayName) avec tout son historique."
-        if let contextTokens, contextTokens > 0 {
-            text += " ≈ \(Fmt.tokens(contextTokens)) tokens relus sur le nouveau compte."
+        let reread = reread(on: account, contextTokens: contextTokens)
+        if working {
+            let base = "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
+            return reread.map { "\(base) \($0)" } ?? base
         }
-        return text
+        return reread.map { "Elle garde tout son historique. \($0)" } ?? "Elle reprend sur \(account.displayName) avec tout son historique."
+    }
+
+    /// Ce que coûte la bascule : un autre compte n'a pas son cache, il relit toute la conversation. Vigie ne sait pas
+    /// encore le dire en part de semaine (le cache froid coûte plus qu'un tour ordinaire) : la taille de la
+    /// conversation, entre parenthèses. La même phrase que le moteur (`rereadEstimate`). nil : taille inconnue.
+    static func reread(on account: Account, contextTokens: Int?) -> String? {
+        guard let contextTokens, contextTokens > 0 else { return nil }
+        return "Elle relira toute la conversation sur \(account.displayName) (environ \(Fmt.tokens(contextTokens)) tokens)."
     }
 }

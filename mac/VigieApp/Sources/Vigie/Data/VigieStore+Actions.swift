@@ -237,9 +237,14 @@ extension VigieStore {
     func switchAccount(of id: String, to accountID: String, now: Bool = false) async {
         var body: [String: JSONValue] = ["accountId": .string(accountID)]
         if now { body["now"] = .bool(true) }
-        let result = await write("/api/v2/conversation/\(encode(id))/settings", .object(body))
-        guard let result else { return }
+        // le compte change tout de suite à l'écran, et revient si le moteur refuse (son message dit pourquoi)
+        let before = conversations.first { $0.id == id }?.accountId
         patchConversation(id) { $0.accountId = accountID }
+        let result = await write("/api/v2/conversation/\(encode(id))/settings", .object(body))
+        guard let result else {
+            patchConversation(id) { $0.accountId = before }
+            return
+        }
         let label = accounts.first(where: { $0.id == accountID })?.displayName ?? accountID
         show(info: result.switchInfo?.message ?? result.message ?? "Elle passera sur \(label) à ton prochain message")
         await reloadAfterWrite(conversation: id)
@@ -603,6 +608,8 @@ extension VigieStore {
         merged.startedAt = merged.startedAt ?? detail.startedAt
         merged.cwd = merged.cwd ?? detail.cwd
         merged.contextTokens = merged.contextTokens ?? detail.contextTokens
+        merged.checks = merged.checks ?? detail.checks
+        merged.compactions = merged.compactions ?? detail.compactions
         return merged
     }
 

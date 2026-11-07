@@ -63,8 +63,8 @@ struct MarkdownBlocks: View {
     }
 
     /// Découpe en blocs : une ligne de liste ou de titre est un bloc ; les lignes de texte qui se suivent forment un
-    /// paragraphe ; un bloc de code va de ``` à ```.
-    static func blocks(_ text: String) -> [Block] {
+    /// paragraphe ; un bloc de code va de ``` à ```. Pur : appelable hors de l'acteur principal (essais).
+    nonisolated static func blocks(_ text: String) -> [Block] {
         var out: [Block] = []
         var paragraph: [String] = []
         var code: [String]?

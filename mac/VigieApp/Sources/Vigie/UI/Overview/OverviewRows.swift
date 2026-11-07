@@ -242,9 +242,8 @@ struct ReviewRow: View {
     }
 
     private func switchHelp(_ account: Account) -> String {
-        var text = "\(account.displayName) a de la marge. Une confirmation d'abord : elle reprend dessus à ton prochain message, avec tout son historique"
-        if let tokens = switchContextTokens, tokens > 0 { text += " (≈ \(Fmt.tokens(tokens)) tokens relus sur le nouveau compte)" }
-        return text + "."
+        let text = "\(account.displayName) a de la marge. Une confirmation d'abord : elle reprend dessus à ton prochain message, avec tout son historique."
+        return AccountSwitch.reread(on: account, contextTokens: switchContextTokens).map { "\(text) \($0)" } ?? text
     }
 
     /// La même action que le menu Compte de la conversation. Le bouton s'efface tout de suite ; si le moteur refuse,

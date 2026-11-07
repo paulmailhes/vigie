@@ -116,6 +116,13 @@ struct DecodingTests {
                 let folder = try decoder.decode(AgentFolderInfo.self, from: data)
                 #expect(folder.exists && folder.problem == nil, "\(name)")
                 #expect(!folder.resumable.isEmpty && !folder.sources.isEmpty, "\(name)")
+            case "history.json":
+                let page = try decoder.decode(HistoryPage.self, from: data)
+                // une ligne par issue que l'Historique sait dire, et des compteurs justes (aucune ligne écartée)
+                let statuses: Set<HistoryStatus> = [.accepted, .refused, .blocked, .failed, .waiting, .question]
+                #expect(Set(page.items.map(\.historyStatus)).isSuperset(of: statuses), "\(name)")
+                #expect(page.counts?.values.reduce(0, +) == page.items.count, "\(name)")
+                #expect(page.items.allSatisfy { $0.ts != nil && $0.conversationId != nil && $0.reason != nil }, "\(name)")
             case let usage where usage.hasPrefix("usage-series-"):
                 let series = try decoder.decode(UsageSeries.self, from: data)
                 #expect(!series.conversations.isEmpty, "\(name)")

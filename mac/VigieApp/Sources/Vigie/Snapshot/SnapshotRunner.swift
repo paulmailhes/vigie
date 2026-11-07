@@ -47,6 +47,8 @@ final class SnapshotRunner {
 
         let conversationID = store.conversations.first(where: \.isOpen)?.id
         let secondID = store.conversations.first { $0.project == "boutique" && $0.id != conversationID }?.id
+        // au repos, sa demande finie : la tuile « Finie » et son verdict (Portail, modifié après les tests)
+        let finishedID = store.conversations.first { $0.isOpen && store.finishedReport(for: $0) != nil }?.id
         let question = store.toReview.first { $0.reviewKind == .question }
 
         for (theme, appearanceName) in [("clair", NSAppearance.Name.aqua), ("sombre", NSAppearance.Name.darkAqua)] {
@@ -56,6 +58,13 @@ final class SnapshotRunner {
             await settle(1.0)
             await capture(window, "01-vue-ensemble-\(theme)")
 
+            // Au retour d'une absence de plus de 2 h : « Pendant ton absence · depuis… » sous « À décider »
+            await store.previewAbsence(from: store.now.addingTimeInterval(-8 * 3600))
+            await settle(1.0)
+            await capture(window, "01b-vue-ensemble-absence-\(theme)")
+            await store.previewAbsence(from: nil)
+            await settle(0.5)
+
             // Page d'une conversation, puis son détail à droite (agent, plan, journal, MCP).
             for (number, id, name) in [(2, conversationID, "atelier"), (3, secondID, "boutique")] {
                 guard let id else { continue }
@@ -64,6 +73,13 @@ final class SnapshotRunner {
                 _ = await waitUntil(seconds: 5) { self.store.details[id] != nil }
                 await settle(1.0)
                 await capture(window, "0\(number)-conversation-\(name)-\(theme)")
+            }
+            if let finishedID {
+                store.conversationPanel = nil
+                store.route = .conversation(finishedID)
+                _ = await waitUntil(seconds: 5) { self.store.details[finishedID] != nil }
+                await settle(1.0)
+                await capture(window, "03c-conversation-finie-\(theme)")
             }
             if let conversationID {
                 store.route = .conversation(conversationID)

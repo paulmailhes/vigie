@@ -229,7 +229,7 @@ Toutes les réponses portent `X-Frame-Options: DENY` et une `Content-Security-Po
 - `status` : `blocked` quand un garde-fou attend la décision de l'utilisateur dans VS Code, `waiting` quand une question attend (ou quand Claude Code dit « en attente »).
 - `weekPct` = poids d'usage de la conversation depuis le début de la semaine du compte (`week.resetsAt` − 7 j), divisé par le poids de toutes les conversations de ce compte sur la même période, multiplié par `week.pct`. Poids = input + 5 × output + 1,25 × écriture cache + 0,1 × lecture cache, rangé par organisation (pièces jointes `credential_org`), l'organisation du compte venant de `oauthAccount.organizationUuid`. Arrondi au dixième. `null` si le compte n'a pas de relevé hebdomadaire, pas d'organisation connue, ou aucun usage sur la période.
 - `needsYou` = nombre d'éléments de `toReview` de cette conversation.
-- Champs ajoutés : `contextTokens` (? taille du contexte, pour « ≈ N k tokens relus » en cas de bascule), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? texte de Claude Code). Dans le détail seulement : `branch`, `startedAt`.
+- Champs ajoutés : `contextTokens` (? taille du contexte, pour « Elle relira toute la conversation sur Perso (environ N k tokens) » en cas de bascule), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? texte de Claude Code). Dans le détail seulement : `branch`, `startedAt`.
 
 ### toReview
 Ce qui attend l'utilisateur maintenant d'abord (plus récent d'abord), puis ce qui s'est passé depuis `since`, 100 au plus. Le préfixe de `id` dit d'où vient l'élément :

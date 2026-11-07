@@ -232,7 +232,7 @@ struct AgentReportTile: View {
 
     private func status(_ report: AgentReport?) -> String {
         guard let report else { return "pas encore de rapport" }
-        if report.isBlocked { return "bloqué" }
+        if report.isBlocked { return "arrêté" } // comme la page Agents
         return report.isRunning ? "en cours" : "fini"
     }
 

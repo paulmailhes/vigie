@@ -136,9 +136,17 @@ struct OverviewFactsTests {
 
     @Test func theConfirmationSaysWhatTheSwitchCosts() throws {
         let perso = try #require(try accounts(#"[ { "id": "perso", "label": "Perso" } ]"#).first)
+        let working = "Elle travaille : elle change de compte à la fin de son tour, ou tout de suite en l'interrompant (tu écris « continue » pour la reprendre)."
+        // au repos : elle garde son historique, et relit toute la conversation sur le nouveau compte (la phrase du moteur)
         #expect(AccountSwitch.message(working: false, to: perso, contextTokens: 182_000)
-                == "Elle reprend sur Perso avec tout son historique. ≈ 182 k tokens relus sur le nouveau compte.")
-        #expect(AccountSwitch.message(working: true, to: perso, contextTokens: nil).hasPrefix("Elle travaille :"))
+                == "Elle garde tout son historique. Elle relira toute la conversation sur Perso (environ 182 k tokens).")
+        #expect(AccountSwitch.message(working: false, to: perso, contextTokens: nil) == "Elle reprend sur Perso avec tout son historique.")
+        #expect(AccountSwitch.message(working: false, to: perso, contextTokens: 0) == "Elle reprend sur Perso avec tout son historique.")
+        // au travail : à la fin de son tour, ou tout de suite en l'interrompant
+        #expect(AccountSwitch.message(working: true, to: perso, contextTokens: nil) == working)
+        #expect(AccountSwitch.message(working: true, to: perso, contextTokens: 1_250_000)
+                == "\(working) Elle relira toute la conversation sur Perso (environ \(Fmt.tokens(1_250_000)) tokens).")
+        #expect(AccountSwitch.reread(on: perso, contextTokens: -5) == nil)
     }
 
     @Test func thePreviewLimitProposesPerso() async throws {
@@ -190,5 +198,64 @@ struct OverviewFactsTests {
         #expect(key(0.4) == key(0.9))     // « < 1 % »
         #expect(key(0.9) != key(1.2))     // « < 1 % » → « 1 % »
         #expect(key(nil) != key(0.4))
+    }
+}
+
+/// La ligne de faits d'une demande finie : le verdict des tests, ce qui n'est pas enregistré ou envoyé, et la coupe
+/// quand la ligne est trop longue.
+struct FinishedFactsTests {
+    private func checks(_ json: String) throws -> RequestChecks {
+        try JSONDecoder().decode(RequestChecks.self, from: Data(json.utf8))
+    }
+
+    @Test func aLongLineDropsWhatIsNotKeptFromTheEnd() {
+        let line = FactLine(facts: [.init("4 commits"), .init("modifié après les tests", tone: .warn, kept: true),
+                                    .init("38 fichiers"), .init("déployé"), .init("1 commit pas envoyé", tone: .warn, kept: true)])
+        #expect(line.limited(to: 5) == line)
+        #expect(line.limited(to: 9) == line)
+        #expect(line.limited(to: 4).facts.map(\.text) == ["4 commits", "modifié après les tests", "38 fichiers", "1 commit pas envoyé"])
+        #expect(line.limited(to: 3).facts.map(\.text) == ["4 commits", "modifié après les tests", "1 commit pas envoyé"])
+        #expect(line.limited(to: 2).facts.map(\.text) == ["modifié après les tests", "1 commit pas envoyé"])
+        // plus que des faits gardés : les premiers, dans leur ordre
+        #expect(line.limited(to: 1).facts.map(\.text) == ["modifié après les tests"])
+        #expect(line.limited(to: 0).isEmpty)
+        // les tons ne bougent pas
+        #expect(line.limited(to: 2).facts.allSatisfy { $0.tone == .warn && $0.kept })
+    }
+
+    @Test func theVerdictUsesTheEngineLabelElseOurs() throws {
+        // la phrase du moteur, telle quelle, dans la couleur du verdict
+        #expect(try checks(#"{ "verdict": "changedAfterTests", "label": "modifié après la dernière série de tests" }"#).verdictFact
+                == .init("modifié après la dernière série de tests", tone: .warn, kept: true))
+        // sans phrase (ou vide) : la nôtre
+        #expect(try checks(#"{ "verdict": "verified" }"#).verdictFact
+                == .init("tests verts après la dernière modification", tone: .checked, kept: true))
+        #expect(try checks(#"{ "verdict": "changedAfterTests", "label": "  " }"#).verdictFact
+                == .init("modifié après les tests", tone: .warn, kept: true))
+        #expect(try checks(#"{ "verdict": "testsFailed" }"#).verdictFact == .init("tests en échec", tone: .alert, kept: true))
+        #expect(try checks(#"{ "verdict": "noTests" }"#).verdictFact == .init("aucun test lancé", kept: true))
+        // verdict inconnu de cette version : la phrase du moteur sans couleur ; sans phrase, rien
+        #expect(try checks(#"{ "verdict": "nouveau", "label": "relu par quelqu'un" }"#).verdictFact == .init("relu par quelqu'un", kept: true))
+        #expect(try checks(#"{ "verdict": "nouveau" }"#).verdictFact == nil)
+        #expect(try checks("{}").verdictFact == nil)
+    }
+
+    @Test func notesComeFromTheEngineElseFromTheCounters() throws {
+        // les phrases du moteur passent avant les compteurs (les vides sont écartées)
+        let engine = try checks(#"{ "verdict": "verified", "uncommitted": 5, "notes": ["2 fichiers modifiés après le dernier commit", " ", "1 commit pas envoyé"] }"#)
+        #expect(engine.noteFacts == [.init("2 fichiers modifiés après le dernier commit", tone: .warn, kept: true),
+                                     .init("1 commit pas envoyé", tone: .warn, kept: true)])
+        // sans phrases : les nôtres, déduites des compteurs, en orange
+        let counted = try checks(#"{ "verdict": "verified", "uncommitted": 3, "unpushed": 2 }"#)
+        #expect(counted.noteFacts.map(\.text) == ["3 fichiers modifiés après le dernier commit", "2 commits pas envoyés"])
+        #expect(counted.noteFacts.allSatisfy { $0.tone == .warn && $0.kept })
+        #expect(try checks(#"{ "uncommitted": 1, "unpushed": 1 }"#).noteFacts.map(\.text)
+                == ["1 fichier modifié après le dernier commit", "1 commit pas envoyé"])
+        // tout est enregistré et envoyé (0), ou jamais commité ni poussé (nil) : rien
+        #expect(try checks(#"{ "uncommitted": 0, "unpushed": null }"#).noteFacts.isEmpty)
+        // la ligne entière : le verdict d'abord, puis ce qui reste à faire
+        #expect(counted.facts.map(\.text)
+                == ["tests verts après la dernière modification", "3 fichiers modifiés après le dernier commit", "2 commits pas envoyés"])
+        #expect(try checks(#"{ "verdict": "nouveau", "unpushed": 1 }"#).facts.map(\.text) == ["1 commit pas envoyé"])
     }
 }
