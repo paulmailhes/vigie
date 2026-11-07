@@ -163,14 +163,14 @@
     {
       "ts": "2026-10-19T23:10:00.000Z",
       "kind": "mcp",
-      "title": "Webflow · element_builder",
+      "title": "Webflow : element_builder",
       "detail": "Poser la double page 24 sur /songeries",
       "decision": "auto"
     },
     {
       "ts": "2026-10-19T23:02:00.000Z",
       "kind": "mcp",
-      "title": "Webflow · element_builder",
+      "title": "Webflow : element_builder",
       "detail": "Poser la double page 21 sur /songeries",
       "decision": "auto"
     },
@@ -184,7 +184,7 @@
     {
       "ts": "2026-10-19T19:40:00.000Z",
       "kind": "mcp",
-      "title": "Webflow · data_pages_tool",
+      "title": "Webflow : data_pages_tool",
       "detail": "Créer la page /songeries en brouillon",
       "decision": "you"
     }

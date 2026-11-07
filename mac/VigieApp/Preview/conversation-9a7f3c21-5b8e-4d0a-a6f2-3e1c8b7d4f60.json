@@ -79,7 +79,7 @@
     {
       "ts": "2026-10-19T21:20:00.000Z",
       "kind": "mcp",
-      "title": "postgres · query",
+      "title": "postgres : query",
       "detail": "Lire la table addresses",
       "decision": "auto"
     }

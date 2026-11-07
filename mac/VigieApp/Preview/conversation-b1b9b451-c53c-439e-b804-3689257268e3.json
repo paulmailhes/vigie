@@ -392,7 +392,7 @@
     {
       "ts": "2026-10-19T21:30:00.000Z",
       "kind": "mcp",
-      "title": "Supabase · list_tables",
+      "title": "Supabase : list_tables",
       "detail": "Lire la structure de la base",
       "decision": "auto"
     },
@@ -406,7 +406,7 @@
     {
       "ts": "2026-10-19T19:40:00.000Z",
       "kind": "file",
-      "title": "Crée Grain.tsx",
+      "title": "Écrire Grain.tsx",
       "detail": "apps/web/src/components/Grain.tsx",
       "decision": "auto"
     },
@@ -420,7 +420,7 @@
     {
       "ts": "2026-10-19T18:50:00.000Z",
       "kind": "mcp",
-      "title": "Netlify · deploy",
+      "title": "Netlify : deploy",
       "detail": "Déployer la version de test",
       "decision": "waiting"
     },
@@ -448,7 +448,7 @@
     {
       "ts": "2026-10-19T16:20:00.000Z",
       "kind": "mcp",
-      "title": "Resend · send_email",
+      "title": "Resend : send_email",
       "detail": "Envoyer le récapitulatif à l'équipe",
       "decision": "blocked"
     },
