@@ -15,6 +15,20 @@ cd "$ROOT"
 APP="$ROOT/mac/Vigie.app"
 ENGINE_FILES=(VERSION hook.mjs server.mjs lib bin scripts public agents README.md LICENSE)
 
+# Ce qui part dans l'app (moteur embarqué) et dans l'archive publique : seulement ce que suit git. Un fichier laissé
+# hors du dépôt dans ces dossiers (note de travail, essai) arrête la publication au lieu de partir avec elle. VERSION
+# est écrit par ce script ; .DS_Store est écarté par rsync et tar.
+LOOSE="$(git ls-files --others -- "${ENGINE_FILES[@]}" | grep -v -e '^VERSION$' -e '\(^\|/\)\.DS_Store$' || true)"
+if [ -n "$LOOSE" ]; then
+  printf 'Fichiers non suivis par git qui partiraient dans la version :\n%s\n' "$LOOSE" >&2
+  echo "Rien n'est publié : commite-les ou sors-les du dépôt." >&2
+  exit 1
+fi
+# La documentation : seulement les fichiers suivis par git (sans les captures du README). Un fichier de docs/ laissé
+# hors du dépôt n'y part pas. Une boucle plutôt que mapfile : bash 3.2 sur macOS.
+DOCS=()
+while IFS= read -r -d '' f; do DOCS+=("$f"); done < <(git ls-files -z -- docs ':!:docs/images')
+
 # Notarise un fichier. `notarytool --timeout` ne couvre que l'attente de la réponse d'Apple : un envoi bloqué ne s'arrête
 # jamais. Chaque essai a donc sa limite (NOTARY_TRY_SECONDS, 10 min), et un essai sans réponse recommence, deux fois au
 # plus. Un refus d'Apple ne se réessaie pas.
@@ -92,7 +106,15 @@ if [ -z "${VIGIE_LOCAL:-}" ]; then
 fi
 
 echo "5/6 Archive des mises à jour"
-tar -czf dist/vigie.tar.gz --exclude '.DS_Store' --exclude 'docs/images' "${ENGINE_FILES[@]}" docs mac/Vigie.app
+tar -czf dist/vigie.tar.gz --exclude '.DS_Store' "${ENGINE_FILES[@]}" ${DOCS[@]+"${DOCS[@]}"} mac/Vigie.app
+# Contrôle : hors de l'app et de VERSION, l'archive (publique) ne contient que des fichiers suivis par git.
+STRAY="$(tar -tzf dist/vigie.tar.gz | grep -v -e '/$' -e '^mac/Vigie\.app/' -e '^VERSION$' | grep -vxF -f <(git -c core.quotePath=false ls-files) || true)"
+if [ -n "$STRAY" ]; then
+  printf 'Fichiers non suivis par git dans dist/vigie.tar.gz :\n%s\n' "$STRAY" >&2
+  rm -f dist/vigie.tar.gz
+  echo "Rien n'est publié." >&2
+  exit 1
+fi
 
 echo "6/6 Image disque (Vigie.dmg)"
 STAGE="$(mktemp -d)"
