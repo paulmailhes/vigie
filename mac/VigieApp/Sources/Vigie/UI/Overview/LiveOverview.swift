@@ -3,15 +3,10 @@ import SwiftUI
 // Vue d'ensemble, la liste « Conversations » : une rangée chacune (état, ce qu'elle fait, compte, débit, avancée),
 // dans l'ordre stable de la liste (par nom : l'activité ne déplace rien). Les décisions sont toutes en tête de page,
 // dans « À décider » : la rangée garde seulement sa pastille (« À autoriser », « T'attend »). Sous une conversation
-// finie depuis moins de 24 h, son compte rendu : ce que Claude a fait, « À toi : … », sa question.
+// finie depuis moins de 24 h, son compte rendu : ce que Claude a fait, son verdict et ses faits, « À toi : … », sa
+// question.
 
 extension VigieStore {
-    /// Ce qui attend une décision maintenant dans cette conversation : la même liste que « À décider »
-    /// (`decisionItems(for:)`), gardée sous ce nom pour les écrans qui l'appellent encore.
-    func urgentItems(for conversationID: String) -> [ReviewItem] {
-        decisionItems(for: conversationID)
-    }
-
     /// Compte sur lequel tourne vraiment la conversation (processus lancé), sinon celui choisi.
     func runningAccountId(of conversation: ConversationSummary) -> String? {
         conversation.account?.running ?? conversation.accountId ?? account(nil)?.id
@@ -344,8 +339,8 @@ struct ConversationListRow: View {
     }
 }
 
-/// Sous une conversation finie depuis moins de 24 h : ce que Claude a fait, ses faits, sa durée et son heure,
-/// « À toi : … » en gras, la question qui finit le compte rendu, puis « Voir » et « Répondre dans VS Code ».
+/// Sous une conversation finie depuis moins de 24 h : ce que Claude a fait, son verdict et ses faits, sa durée et son
+/// heure, « À toi : … » en gras, la question qui finit le compte rendu, puis « Voir » et « Répondre dans VS Code ».
 struct FinishedReportRow: View {
     @Environment(VigieStore.self) private var store
     let conversation: ConversationSummary
@@ -358,9 +353,16 @@ struct FinishedReportRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .help(report.prompt.map { "Ta demande : \($0)" } ?? report.title ?? "")
-            InfoLine(parts: [report.detail,
-                             report.durationMs.flatMap { Fmt.duration(ms: $0).isEmpty ? nil : "a pris \(Fmt.duration(ms: $0))" },
-                             Fmt.when(report.ts, now: store.now)])
+            let facts = factsLine
+            if !facts.plain.isEmpty {
+                facts.text
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(facts.plain)
+            }
             if let toYou = report.toYou, !toYou.isEmpty {
                 Text("À toi : \(toYou)")
                     .font(.body.weight(.semibold))
@@ -398,5 +400,53 @@ struct FinishedReportRow: View {
         .padding(.bottom, 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Compte rendu de \(conversation.shortTitle)")
+    }
+
+    // MARK: Ligne de faits
+
+    /// Le verdict de la demande : celui de la conversation (jusqu'à maintenant), sinon celui du compte rendu.
+    private var checks: RequestChecks? { conversation.checks ?? report.checks }
+
+    /// Le verdict en couleur en tête (il ne se coupe jamais), puis ce qui reste à commiter ou envoyer, les autres
+    /// faits, la durée et l'heure, séparés par « · ». Le texte entier pour le survol.
+    private var factsLine: (text: Text, plain: String) {
+        let verdict = Self.verdict(checks)
+        let duration = report.durationMs.map { Fmt.duration(ms: $0) }.flatMap { $0.isEmpty ? nil : "a pris \($0)" }
+        let others = Self.facts(detail: report.detail, checks: checks)
+            + [duration, Fmt.when(report.ts, now: store.now)].compactMap { $0?.isEmpty == false ? $0 : nil }
+        var parts: [Text] = []
+        if let verdict {
+            let text = Text("\(Image(systemName: verdict.symbol)) \(verdict.text)")
+            parts.append(verdict.color.map { text.foregroundStyle($0) } ?? text)
+        }
+        parts += others.map { Text($0) }
+        guard let first = parts.first else { return (Text(verbatim: ""), "") }
+        let line = parts.dropFirst().reduce(first) { Text("\($0) \(Text("·").foregroundStyle(.tertiary)) \($1)") }
+        return (line, ([verdict?.text] + others).compactMap { $0 }.joined(separator: " · "))
+    }
+
+    /// Le verdict à afficher : sa phrase, son icône et sa couleur de texte. Réussi en gris avec une coche (le vert veut
+    /// dire « travaille », pas « réussi ») ; modifié après les tests ou aucun test lancé en orange ; en échec en rouge.
+    static func verdict(_ checks: RequestChecks?) -> (text: String, symbol: String, color: Color?)? {
+        guard let label = checks?.label?.trimmingCharacters(in: .whitespaces), !label.isEmpty else { return nil }
+        switch checks?.verdictKind ?? .unknown {
+        case .verified: return (label, Icon.verified, nil)
+        case .changedAfterTests, .noTests: return (label, Icon.unverified, Theme.warnText)
+        case .testsFailed: return (label, Icon.testFailed, Theme.alertText)
+        case .unknown: return nil
+        }
+    }
+
+    /// Les faits du compte rendu (« 3 commits · modifié après les tests · déployé »), sans ce que le verdict dit
+    /// déjà, et ses notes en tête (« 3 fichiers modifiés après le dernier commit »).
+    static func facts(detail: String?, checks: RequestChecks?) -> [String] {
+        let parts = (detail ?? "").components(separatedBy: " · ")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let checks else { return parts }
+        let notes = checks.notes.filter { !$0.isEmpty }
+        let shown = verdict(checks) != nil ? [checks.label ?? ""] : []
+        let said = Set((shown + notes).map { $0.lowercased() })
+        return notes + parts.filter { !said.contains($0.lowercased()) }
     }
 }

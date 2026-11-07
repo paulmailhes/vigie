@@ -64,7 +64,7 @@ struct RowIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(alert ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+            .foregroundStyle(alert ? AnyShapeStyle(Theme.alert) : AnyShapeStyle(.secondary))
             .font(.system(size: 15))
             .frame(width: 22)
             .accessibilityHidden(true)

@@ -5,9 +5,11 @@ import SwiftUI
 /// 2. « Conversations » : une rangée chacune, avec sa pastille, et le compte rendu de celles qui ont fini ;
 /// 3. « À regarder » : ce qui a mal tourné ou que tu dois faire toi-même ;
 /// 4. « À relire » : ce que Vigie a choisi pour toi ;
-/// 5. « Consommation » : une ligne par compte (le graphique est dans la page Comptes). Seule exception à l'ordre :
-///    elle passe juste sous « À décider » quand un compte qui fait tourner une conversation dépasse 90 % de sa semaine ;
-/// 6. « Depuis une heure » : les chiffres de l'heure, chacun ouvre l'Historique.
+/// 5. « Consommation » : une ligne par compte (le graphique est dans la page Comptes). Exception à l'ordre : elle
+///    passe juste sous « À décider » quand un compte qui fait tourner une conversation dépasse 90 % de sa semaine ;
+/// 6. « Depuis une heure » : les chiffres de l'heure, chacun ouvre l'Historique. Autre exception : au retour d'une
+///    absence de plus de 2 h, elle devient « Pendant ton absence · depuis 23:10 » et monte juste sous « À décider »,
+///    puis redevient « Depuis une heure » d'elle-même 30 min après le retour (pas de bouton « J'ai vu »).
 struct OverviewView: View {
     @Environment(VigieStore.self) private var store
     @State private var showAllReread = false
@@ -51,6 +53,10 @@ struct OverviewView: View {
                 }
             }
 
+            if store.absenceFrom != nil {
+                SinceSection()
+            }
+
             if usageAlert {
                 AccountUsageSection()
             }
@@ -80,9 +86,8 @@ struct OverviewView: View {
                 AccountUsageSection()
             }
 
-            // Fenêtre glissante d'une heure, tenue par le moteur : rien à remettre à zéro.
-            CardSection("Depuis une heure") {
-                SinceRow()
+            if store.absenceFrom == nil {
+                SinceSection()
             }
         }
     }
@@ -107,13 +112,34 @@ struct OverviewView: View {
     }
 }
 
-/// « Depuis une heure » : une ligne de chiffres, fenêtre glissante. Seulement ce qui ne se lit pas déjà plus haut
-/// (les tests en échec sont sur la rangée de leur conversation, une limite reste dans « À regarder »).
-struct SinceRow: View {
+/// « Depuis une heure » (fenêtre glissante tenue par le moteur : rien à remettre à zéro), ou « Pendant ton absence ·
+/// depuis 23:10 » dans les 30 min qui suivent ton retour. Le titre et les chiffres viennent de la même réponse.
+struct SinceSection: View {
     @Environment(VigieStore.self) private var store
 
     var body: some View {
-        FlowStats(items: items(store.sinceSummary)) { status in store.openHistory(status: status, window: 60) }
+        if let from = store.absenceFrom {
+            CardSection("Pendant ton absence · depuis \(Fmt.when(from, now: store.now))",
+                        note: store.absenceCapped ? "Ton absence a commencé plus tôt : voici les dernières 24 h." : nil) {
+                SinceRow(absent: true)
+            }
+        } else {
+            CardSection("Depuis une heure") {
+                SinceRow(absent: false)
+            }
+        }
+    }
+}
+
+/// Une ligne de chiffres. Seulement ce qui ne se lit pas déjà plus haut (les tests en échec sont sur la rangée de
+/// leur conversation, une limite reste dans « À regarder »). Chaque chiffre ouvre l'Historique : la dernière heure,
+/// ou les dernières 24 h après une absence.
+struct SinceRow: View {
+    @Environment(VigieStore.self) private var store
+    var absent = false
+
+    var body: some View {
+        FlowStats(items: items(store.sinceSummary)) { status in store.openHistory(status: status, window: absent ? 1440 : 60) }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
     }
@@ -141,7 +167,7 @@ struct SinceRow: View {
         }
         if results > 0 {
             list.append(.init(value: results, label: results > 1 ? "résultats" : "résultat",
-                              help: "Livrables publiés, workflows et agents finis dans l'heure ; une demande finie se lit sous sa conversation"))
+                              help: "Livrables publiés, workflows et agents finis \(absent ? "pendant ton absence" : "dans l'heure") ; une demande finie se lit sous sa conversation"))
         }
         return list
     }

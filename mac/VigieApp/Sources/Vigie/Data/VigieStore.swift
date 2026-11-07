@@ -42,10 +42,18 @@ final class VigieStore {
     @ObservationIgnored private var windowShown = true
     @ObservationIgnored private var screensAsleep = false
 
-    /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, la part de la semaine,
-    /// les tokens relus et les compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit
-    /// change au-delà de ce qui s'affiche : comparés sans eux (débit pris tel qu'il s'écrit à l'écran), ils ne
-    /// redessinent plus toute la fenêtre toutes les 3 s.
+    /// « Pendant ton absence » : début de la période que résume la bande « Depuis… » (30 min après un retour d'une
+    /// absence de plus de 2 h) ; nil : la dernière heure. Tiré de la réponse du moteur, comme ses chiffres.
+    private(set) var absenceFrom: Date?
+    /// L'absence a commencé il y a plus de 24 h : la bande résume les dernières 24 h seulement.
+    private(set) var absenceCapped = false
+    /// Tes absences (fenêtre cachée, écrans en veille), gardées dans UserDefaults (jamais en démonstration).
+    @ObservationIgnored private var absence = Absence()
+
+    /// Ce qui se voit d'une liste de conversations. Pendant le travail, la dernière activité, les tokens relus et les
+    /// compteurs d'acceptations changent à chaque relevé sans s'afficher tels quels, et le débit et la part de la
+    /// semaine changent au-delà de ce qui s'affiche : comparés sans eux (débit pris tel qu'il s'écrit à l'écran, part
+    /// de la semaine arrondie à l'unité), ils ne redessinent plus toute la fenêtre toutes les 3 s.
     struct ScreenRow: Equatable {
         var conversation: ConversationSummary
         var rate: String
@@ -58,7 +66,8 @@ final class VigieStore {
         list.map { conversation in
             var c = conversation
             c.lastActivity = nil
-            c.weekPct = nil
+            // « 14 % de la semaine » : à l'unité, comme à l'écran ; sous 1 %, « < 1 % » à part
+            c.weekPct = c.weekPct.map { $0 <= 0 ? 0 : $0 < 1 ? 0.5 : $0.rounded() }
             c.contextTokens = nil
             c.accepted = nil
             let rate = c.rate
@@ -187,6 +196,7 @@ final class VigieStore {
 
     init(client: VigieClient) {
         self.client = client
+        if !client.isDemo { absence = Absence.load() }
     }
 
     // MARK: Sondage
@@ -219,28 +229,64 @@ final class VigieStore {
         pollingChanged()
     }
 
-    /// Le rythme change : la boucle repart tout de suite (relecture immédiate), au lieu de finir une attente de 15 ou
-    /// 60 s ; les pages repartent d'elles-mêmes avec `windowVisible` (`.task(id:)`).
+    /// Le rythme change, ou tu reviens d'une absence de plus de 2 h : la boucle repart tout de suite (relecture
+    /// immédiate), au lieu de finir une attente de 15 ou 60 s ; les pages repartent d'elles-mêmes avec
+    /// `windowVisible` (`.task(id:)`).
     @ObservationIgnored private var lastPollSeconds = 3
     private func pollingChanged() {
         let visible = windowShown && !screensAsleep
+        let returned = noteAbsence(visible: visible)
         if visible != windowVisible { windowVisible = visible }
         let seconds = pollSeconds
-        guard seconds != lastPollSeconds else { return }
         let faster = seconds < lastPollSeconds
         lastPollSeconds = seconds
-        guard faster, pollTask != nil else { return }
+        guard faster || returned, pollTask != nil else { return }
         pollTask?.cancel()
         pollTask = nil
         start()
     }
 
+    /// Note le début d'une absence (fenêtre cachée, écrans en veille) ou le retour. Rend vrai au retour d'une
+    /// absence de plus de 2 h : « Depuis… » la résume dès la prochaine lecture.
+    @discardableResult
+    private func noteAbsence(visible: Bool) -> Bool {
+        guard !isDemo else { return false }
+        var next = absence
+        if visible { next.back(at: .now) } else { next.leave(at: .now) }
+        guard next != absence else { return false }
+        let returned = next.returnedAt != absence.returnedAt
+        absence = next
+        absence.save()
+        return returned
+    }
+
+    /// L'app se ferme : l'absence commence maintenant (au prochain lancement, elle comptera si elle a duré).
+    func appWillQuit() {
+        noteAbsence(visible: false)
+    }
+
+    /// Captures (--snapshot) : la vue d'ensemble telle qu'au retour d'une absence commencée à `from`, sur les données
+    /// d'exemple ; nil la remet sur la dernière heure. Rien n'est gardé.
+    func previewAbsence(from: Date?) async {
+        absence = from.map { Absence(from: $0, returnedAt: now) } ?? Absence()
+        await refreshOverview()
+    }
+
     func refreshOverview() async {
         let started = ContinuousClock.now
+        // au retour d'une absence de plus de 2 h, « Depuis… » la résume (30 min, 24 h au plus) ; sinon la dernière heure
+        let since = absence.since(now: now)
+        let capped = since != nil && (absence.from ?? .distantFuture) < (since ?? .distantPast)
+        let path = since.map { "/api/v2/overview?since=\($0.formatted(.iso8601))" } ?? "/api/v2/overview"
         do {
-            let overview = try await client.get("/api/v2/overview", as: Overview.self)
+            let overview = try await client.get(path, as: Overview.self)
             guard isFresh(started) else { return }
             apply(overview)
+            // la période que le moteur a vraiment résumée : un moteur plus ancien ignore since et répond sur la
+            // dernière heure, la bande le dit alors comme d'habitude
+            let from = since == nil ? nil : overview.sinceWindow?.from
+            update(\.absenceFrom, from)
+            update(\.absenceCapped, from != nil && (capped || overview.sinceWindow?.capped == true))
             readSucceeded()
             Notifier.shared.process(self)
         } catch {

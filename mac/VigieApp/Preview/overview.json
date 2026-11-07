@@ -221,6 +221,31 @@
     },
     {
       "kind": "missionDone",
+      "id": "fin:d4c3b2a1-6e5f-4a7b-8c9d-0e1f2a3b4c5d:a-1",
+      "conversationId": "d4c3b2a1-6e5f-4a7b-8c9d-0e1f2a3b4c5d",
+      "conversationTitle": "Portail",
+      "title": "La documentation de l'API est à jour : 14 routes décrites, exemples compris.",
+      "detail": "3 commits · modifié après les tests · 3 fichiers modifiés après le dernier commit",
+      "prompt": "Mets à jour la documentation de l'API du portail avec les nouvelles routes de paiement",
+      "question": "Je publie la documentation sur le site maintenant ?",
+      "toYou": "relire la page Paiements avant de publier",
+      "durationMs": 3900000,
+      "url": null,
+      "ts": "2026-10-19T21:35:00.000Z",
+      "checks": {
+        "verdict": "changedAfterTests",
+        "label": "modifié après les tests",
+        "lastTestAt": "2026-10-19T21:12:00.000Z",
+        "lastCodeAt": "2026-10-19T21:30:00.000Z",
+        "uncommitted": 3,
+        "unpushed": null,
+        "notes": [
+          "3 fichiers modifiés après le dernier commit"
+        ]
+      }
+    },
+    {
+      "kind": "missionDone",
       "conversationId": "4e0c8a7d-2f61-4b8e-9c3a-7d5e1f0b9a24",
       "conversationTitle": "Boutique",
       "title": "Lot 5 terminé",
@@ -643,6 +668,89 @@
         "kind": "emballe",
         "since": "2026-10-19T22:58:00.000Z",
         "reason": "Les mêmes tests échouent en boucle depuis 20 min (14 lancements)."
+      }
+    },
+    {
+      "id": "d4c3b2a1-6e5f-4a7b-8c9d-0e1f2a3b4c5d",
+      "title": "Documentation de l'API du portail",
+      "project": "portail",
+      "cwd": "/Users/alex/Code/portail",
+      "status": "idle",
+      "running": true,
+      "accountId": "perso",
+      "autoAccept": true,
+      "autoAcceptOverride": null,
+      "connectors": "off",
+      "agentsRunning": 0,
+      "workflowsRunning": 0,
+      "weekPct": 1.6,
+      "lastActivity": "2026-10-19T21:35:00.000Z",
+      "needsYou": 0,
+      "headline": "Documentation de l'API à jour",
+      "startedAt": "2026-10-19T20:30:00.000Z",
+      "contextTokens": 182000,
+      "tests": {
+        "failedRecent": 0,
+        "running": 0,
+        "lastOk": true,
+        "lastTs": "2026-10-19T21:12:00.000Z",
+        "lastTitle": "36 tests d'API"
+      },
+      "accepted": {
+        "today": 54,
+        "sinceSeen": 54
+      },
+      "artifacts": {
+        "count": 0
+      },
+      "rate": {
+        "weekPctPerHour": 0.0,
+        "tokensPerMin": 0,
+        "spark": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "trend": "flat"
+      },
+      "alert": null,
+      "checks": {
+        "verdict": "changedAfterTests",
+        "label": "modifié après les tests",
+        "lastTestAt": "2026-10-19T21:12:00.000Z",
+        "lastCodeAt": "2026-10-19T21:30:00.000Z",
+        "uncommitted": 3,
+        "unpushed": null,
+        "notes": [
+          "3 fichiers modifiés après le dernier commit"
+        ]
       }
     },
     {

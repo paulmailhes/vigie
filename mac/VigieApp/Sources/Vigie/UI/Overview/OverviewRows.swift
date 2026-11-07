@@ -8,23 +8,51 @@ import SwiftUI
 /// - Les boutons ne se coupent jamais : quand la place manque, ils passent sous le texte (`ViewThatFits`, sans risque
 ///   dans une colonne à taille minimale fixe). Une décision a toujours « Voir · Refuser · Autoriser ».
 /// - La croix « Retirer » (ce qui n'attend aucune décision) reste à part, en haut à droite, jamais à côté d'un refus.
+/// - Une limite atteinte propose « Passer sur Perso » quand un autre compte connecté a de la marge (sinon « Voir les
+///   comptes ») : le clic ouvre la confirmation du menu Compte de la conversation, qui dit ce que coûte la relecture.
+///   Jamais automatique : sans ce choix, la conversation garde son compte.
 struct ReviewRow: View {
     @Environment(VigieStore.self) private var store
     let item: ReviewItem
     /// Affichée dans la page de sa conversation : son nom n'est pas répété, et on propose d'y répondre dans VS Code.
     var inConversation = false
 
+    /// Limite atteinte : le compte choisi au clic, en attente de la confirmation.
+    @State private var pendingSwitch: Account?
+    /// Bascule partie à l'instant : le bouton s'efface tout de suite, et revient si le moteur la refuse.
+    @State private var switching = false
+
     /// Largeur sous laquelle le texte ne descend pas : en deçà, les boutons passent dessous.
     private static let textWidth: CGFloat = 240
 
     var body: some View {
-        // Le délai d'une action en attente se tient à jour tout seul ; le reste suit les relevés.
-        if item.reviewKind == .blocked, item.isPendingDecision, item.expiresAt != nil {
-            TimelineView(.periodic(from: .now, by: 5)) { context in
-                row(now: store.isDemo ? store.now : context.date)
+        Group {
+            // Le délai d'une action en attente se tient à jour tout seul ; le reste suit les relevés.
+            if item.reviewKind == .blocked, item.isPendingDecision, item.expiresAt != nil {
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    row(now: store.isDemo ? store.now : context.date)
+                }
+            } else {
+                row(now: store.now)
             }
-        } else {
-            row(now: store.now)
+        }
+        // la même confirmation que le menu Compte de la barre de la conversation
+        .confirmationDialog(pendingSwitch.map { "Passer sur \($0.displayName) ?" } ?? "",
+                            isPresented: Binding(get: { pendingSwitch != nil }, set: { if !$0 { pendingSwitch = nil } }),
+                            titleVisibility: .visible, presenting: pendingSwitch) { account in
+            if let conversation = switchConversation {
+                let working = conversation.state == .working
+                Button(working ? "À la fin de son travail" : "Passer sur \(account.displayName)") {
+                    runSwitch(conversation, to: account, now: false)
+                }
+                if working {
+                    Button("Tout de suite (l'interrompt)") { runSwitch(conversation, to: account, now: true) }
+                }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: { account in
+            Text(AccountSwitch.message(working: switchConversation?.state == .working, to: account,
+                                       contextTokens: switchContextTokens))
         }
     }
 
@@ -134,10 +162,16 @@ struct ReviewRow: View {
                 }
                 .glassButton()
             case .limit:
-                Button("Voir les comptes") {
-                    store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
+                if let target = switchTarget {
+                    Button("Passer sur \(target.displayName)") { pendingSwitch = target }
+                        .glassButton()
+                        .help(switchHelp(target))
+                } else {
+                    Button("Voir les comptes") {
+                        store.showAccounts(item.conversationId.flatMap { store.conversation($0)?.accountId })
+                    }
+                    .glassButton()
                 }
-                .glassButton()
             case .blocked where item.needsDecision:
                 if stacked {
                     VStack(alignment: .leading, spacing: 6) {
@@ -183,5 +217,43 @@ struct ReviewRow: View {
         }
         .glassButton(.primary)
         .help("Ouvre cette conversation dans VS Code")
+    }
+
+    // MARK: Limite atteinte : passer sur un compte libre
+
+    private var switchConversation: ConversationSummary? {
+        item.conversationId.flatMap { store.conversation($0) }
+    }
+
+    /// Le compte libre sur lequel passer la conversation arrêtée par cette limite. Rien si elle a déjà changé de compte
+    /// (ou va le faire), pour une conversation Codex (son compte ChatGPT), ou si aucun compte n'a de marge.
+    private var switchTarget: Account? {
+        guard item.reviewKind == .limit, !switching, let conversation = switchConversation, conversation.isOpen,
+              !conversation.isCodex, conversation.resume == nil, conversation.account?.pending == nil else { return nil }
+        let limited = item.accountId ?? conversation.accountId
+        if let limited, let chosen = conversation.accountId, chosen != limited { return nil }
+        return AccountSwitch.freeAccount(in: store.accounts, limited: limited, now: store.now)
+    }
+
+    /// Ce que le nouveau compte relira (le détail lu, sinon le dernier relevé de la vue d'ensemble).
+    private var switchContextTokens: Int? {
+        guard let id = item.conversationId else { return nil }
+        return store.details[id]?.raw.contextTokens ?? store.latestConversations.first { $0.id == id }?.contextTokens
+    }
+
+    private func switchHelp(_ account: Account) -> String {
+        var text = "\(account.displayName) a de la marge. Une confirmation d'abord : elle reprend dessus à ton prochain message, avec tout son historique"
+        if let tokens = switchContextTokens, tokens > 0 { text += " (≈ \(Fmt.tokens(tokens)) tokens relus sur le nouveau compte)" }
+        return text + "."
+    }
+
+    /// La même action que le menu Compte de la conversation. Le bouton s'efface tout de suite ; si le moteur refuse,
+    /// il revient (la conversation n'a pas changé de compte).
+    private func runSwitch(_ conversation: ConversationSummary, to account: Account, now: Bool) {
+        switching = true
+        Task { @MainActor in
+            await store.switchAccount(of: conversation.id, to: account.id, now: now)
+            switching = false
+        }
     }
 }

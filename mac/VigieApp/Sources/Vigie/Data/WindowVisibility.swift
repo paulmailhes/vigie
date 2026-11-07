@@ -2,7 +2,8 @@ import AppKit
 
 /// Rythme des relevés : la fenêtre principale est-elle à l'écran (ni réduite, ni cachée, ni recouverte, ni sur un
 /// autre bureau) ? Les écrans dorment-ils ? Fenêtre invisible, Vigie ne relit plus ses pages et espace la vue
-/// d'ensemble (VigieStore.start).
+/// d'ensemble (VigieStore.start). Les mêmes avis disent quand tu t'absentes et quand tu reviens (« Pendant ton
+/// absence ») ; l'app qui se ferme compte comme un départ.
 @MainActor
 enum WindowVisibility {
     private static var observers: [NSObjectProtocol] = []
@@ -24,6 +25,10 @@ enum WindowVisibility {
         })
         observers.append(workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { store.setScreensAsleep(false) }
+        })
+        // tout de suite (pas après coup) : l'app n'attend pas pour se fermer
+        observers.append(app.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { store.appWillQuit() }
         })
         store.setWindowVisible(mainWindowVisible())
     }
