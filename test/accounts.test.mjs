@@ -953,6 +953,32 @@ test('connecté : l\'état du coffre fait foi s\'il est frais ; inconnu ou trop 
   runner.keychain.delete(keychainItem(T2DIR));
 });
 
+test('affichage : jamais d\'attente du trousseau dans une requête, la dernière valeur en attendant la relecture en fond', async () => {
+  const XQ = path.join(TMP, 'data trousseau en fond');
+  const asyncCalls = [];
+  let answer = 0;
+  const Q = createAccounts({ ...opts, dataDir: XQ, cacheMs: 60_000, runnerAsync: (cmd, args) => { asyncCalls.push([cmd, ...args]); return Promise.resolve(answer); } });
+  const before = runner.calls.filter((c) => c.cmd === '/usr/bin/security').length;
+  // aucun état du coffre : la vue d'ensemble répond tout de suite (« connecté » tant qu'on ne sait pas)
+  assert.equal(Q.summaries()[0].connected, true);
+  assert.equal(runner.calls.filter((c) => c.cmd === '/usr/bin/security').length, before, 'aucune lecture synchrone');
+  // une relecture par compte (les dossiers créés par les essais précédents en sont aussi)
+  const n = asyncCalls.length;
+  assert.ok(n >= 1);
+  assert.equal(new Set(asyncCalls.map((c) => c.join(' '))).size, n, 'un compte, une relecture');
+  for (const c of asyncCalls) {
+    assert.deepEqual(c.slice(0, 3), ['/usr/bin/security', 'find-generic-password', '-s']);
+    assert.ok(!c.includes('-w') && !c.includes('-g'), 'existence seulement, jamais le secret');
+  }
+  Q.summaries();
+  assert.equal(asyncCalls.length, n, 'une seule relecture à la fois');
+  await new Promise((r) => setImmediate(r));
+  // la réponse est gardée une minute : pas de nouvelle lecture au tour suivant
+  answer = 44;
+  assert.equal(Q.summaries()[0].connected, true);
+  assert.equal(asyncCalls.length, n, 'gardée une minute');
+});
+
 test('conversation jamais associée : le compte des nouvelles conversations, partout (comme le lanceur)', () => {
   const FREE = 'dd3be56b-8888-4999-8aaa-0bbb2222dddd';
   X.setDefault('perso');

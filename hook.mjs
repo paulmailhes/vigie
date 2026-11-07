@@ -397,6 +397,7 @@ async function onQuestionRequest(input) {
   let since = Date.now();
   let waitMin = state.questionWaitMin;
   const resolved = transcriptWatcher(input, since);
+  let early = resolved(); // lecture placée dès le départ : sur un Mac chargé, rien n'est manqué pendant la première attente
   // Réponse donnée dans Vigie (decisions.json, à ce pid) : une entrée laissée par un ancien processus ne compte pas.
   const pendingId = String(process.pid);
   clearDecision(pendingId);
@@ -411,10 +412,10 @@ async function onQuestionRequest(input) {
   // La fenêtre reste affichée ; on reste en éveil pour suivre un changement de réglage fait dans Vigie.
   for (;;) {
     onKill = mode === 'wait' ? () => log(input, 'question-tu-as-repondu') : null;
-    let done = null;
+    let done = early; early = null;
     const r = await waitFor(() => (mode === 'wait' ? since + waitMin * 60_000 : Infinity), (s) => {
       if ((given = takeAnswer(pendingId, { since, sessionId: sid }))) return 'app';
-      if ((done = resolved())) return 'repondu';
+      if (done || (done = resolved())) return 'repondu';
       const m = effective(s, sid).questions;
       if (m !== mode) return `mode:${m}`;
       waitMin = s.questionWaitMin;
@@ -493,17 +494,18 @@ async function onPermissionRequest(input) {
     // Décision depuis l'app : une entrée laissée pour ce pid par un ancien processus ne compte pas.
     const start = Date.now();
     const resolved = transcriptWatcher(input, start);
+    // lecture placée dès le départ (et non au premier tour, 1 s plus tard) : sur un Mac chargé, rien n'est manqué
+    let done = resolved();
     const pendingId = String(process.pid);
     const bare = clearDecision(pendingId);
     log(input, 'garde-fou-attente', { ...ruleInfo(rule), minutes });
     onKill = () => log(input, 'garde-fou-tu-as-repondu', ruleInfo(rule));
-    let done = null;
     // Les réglages sont relus à chaque tour : garde-fou coupé, règle désactivée ou délai changé
     // s'appliquent tout de suite. La décision de l'utilisateur (app ou VS Code) passe avant tout le reste.
     const r = await waitFor(() => start + minutes * 60_000, (s) => {
       const d = takeDecision(pendingId, { since: start, sessionId: sid, allowBare: bare });
       if (d) return d === 'allow' ? 'app-allow' : 'app-deny';
-      if ((done = resolved())) return 'repondu';
+      if (done || (done = resolved())) return 'repondu';
       if (!effective(s, sid, { cwd: input.cwd }).autoAccept) return 'off';
       const g = matchGuard(s, tool, input.tool_input);
       if (!g) return 'allow';

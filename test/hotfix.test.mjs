@@ -108,6 +108,15 @@ function vscodeSession() {
   fs.writeFileSync(path.join(HOME, '.claude', 'sessions', '1.json'), JSON.stringify({ pid: 1, sessionId: 'test-session', entrypoint: 'claude-vscode' }));
 }
 const events = () => fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').map((l) => JSON.parse(l).event);
+// Le crochet est en attente (il l'a noté) : la suite de l'essai part de là, pas d'un délai fixe qu'un Mac chargé dépasse.
+async function waiting(event = 'garde-fou-attente', ms = 30_000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try { if (fs.readFileSync(HISTORY_FILE, 'utf8').includes(`"${event}"`)) return; } catch { /* pas encore écrit */ }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`le crochet n'a pas noté ${event} en ${ms / 1000} s`);
+}
 
 test('garde-fou en attente puis refus à l\'échéance', () => {
   vscodeSession();
@@ -146,9 +155,9 @@ test('L\'utilisateur répond lui-même pendant l\'attente : l\'interruption est 
   fs.rmSync(HISTORY_FILE, { force: true });
   setState({ autoAccept: true, guard: { ...DEFAULT_STATE.guard, waitMin: 5 } });
   const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME } });
+  const exited = new Promise((resolve) => p.on('exit', resolve));
   p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'Bash', tool_input: { command: 'sudo ls' }, transcript_path: '/nonexistent' }));
-  setTimeout(() => p.kill('SIGTERM'), 1500);
-  return new Promise((resolve) => p.on('exit', () => { assert.deepEqual(events(), ['garde-fou-attente', 'garde-fou-tu-as-repondu']); resolve(); }));
+  return waiting().then(() => { p.kill('SIGTERM'); return exited; }).then(() => assert.deepEqual(events(), ['garde-fou-attente', 'garde-fou-tu-as-repondu']));
 });
 
 test('garde-fou coupé pendant l\'attente : accepté tout de suite', () => {
@@ -215,17 +224,21 @@ test('transcript énorme qui grossit vite : la réponse de l\'utilisateur est vu
   const filler = (n) => Array.from({ length: n }, (_, i) => JSON.stringify({ type: 'system', i, pad: 'x'.repeat(10_000) })).join('\n') + '\n';
   fs.writeFileSync(tp, filler(300) + JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_Y', name: 'Bash', input: { command: cmd } }] } }) + '\n');
   const p = spawn(process.execPath, [HOOK], { env: { ...env, HOME, VIGIE_POLL_MS: '200' } });
+  const exited = new Promise((resolve) => p.on('exit', resolve));
   p.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'test-session', tool_name: 'Bash', tool_input: { command: cmd }, transcript_path: tp }));
-  // la conversation écrit 3 Mo (au-delà des 2 derniers Mo relus avant), puis le résultat de l'action acceptée
-  setTimeout(() => fs.appendFileSync(tp, filler(300)), 600);
-  setTimeout(() => fs.appendFileSync(tp, JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_Y', content: 'ok' }] } }) + '\n'), 1200);
-  const guardTimer = setTimeout(() => p.kill('SIGKILL'), 15_000);
-  return new Promise((resolve) => p.on('exit', () => {
+  // filet de sécurité seulement (le crochet sort dès qu'il voit la réponse) : large, pour un Mac chargé
+  const guardTimer = setTimeout(() => p.kill('SIGKILL'), 45_000);
+  // une fois le crochet en attente, la conversation écrit 3 Mo (au-delà des 2 derniers Mo relus au départ), puis le
+  // résultat de l'action acceptée
+  return waiting().then(() => {
+    fs.appendFileSync(tp, filler(300));
+    fs.appendFileSync(tp, JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_Y', content: 'ok' }] } }) + '\n');
+    return exited;
+  }).then(() => {
     clearTimeout(guardTimer);
     const ev = fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.deepEqual(ev.map((e) => e.event), ['garde-fou-attente', 'garde-fou-tu-as-repondu']);
-    resolve();
-  }));
+  });
 });
 
 // ---------- garde-fous retenus dans Vigie (Codex : il ne sait pas afficher sa fenêtre à la demande) ----------

@@ -83,6 +83,7 @@ function stateChanged() {
   changeWaiters.clear();
 }
 function changesSince(url) {
+  if (!url.searchParams.has('since')) return [200, { version: changeVersion }];
   const since = Number(url.searchParams.get('since'));
   if (!Number.isInteger(since) || since < 0 || since !== changeVersion) return [200, { version: changeVersion }];
   return new Promise((resolve) => {
@@ -309,10 +310,10 @@ function pendingWaits(state, now = Date.now()) {
   const open = new Map();
   for (const h of history) {
     if (!h.sessionId) continue;
-    const k = `${h.sessionId}\u0000${h.action}`;
     // « toujours me demander » : la question attend aussi, et peut se répondre depuis Vigie (choix notés)
-    if (WAIT_EVENTS.has(h.event) || (h.event === 'question-pour-toi' && Array.isArray(h.questions))) open.set(k, h);
-    else if (CLOSES_WAIT.test(String(h.event || ''))) open.delete(k);
+    if (WAIT_EVENTS.has(h.event) || (h.event === 'question-pour-toi' && Array.isArray(h.questions))) open.set(`${h.sessionId}\u0000${h.action}`, h);
+    // 30 000 lignes, presque toutes fermantes : leur clé n'est construite que s'il reste une attente à fermer
+    else if (open.size && CLOSES_WAIT.test(String(h.event || ''))) open.delete(`${h.sessionId}\u0000${h.action}`);
   }
   const bySession = new Map();
   const add = (sid, w) => bySession.set(sid, [...(bySession.get(sid) || []), w]);
@@ -1152,7 +1153,8 @@ function conversationV2(id) {
   const d = conv.detail(id);
   if (!d) return null;
   const ctx = context();
-  const needs = countBy(reviewItems(ctx, conv.summaries()));
+  // « À regarder » de cette conversation seulement (le résumé de toutes les autres ne sert pas ici)
+  const needs = countBy(reviewItems(ctx, conv.isThrowaway(id) ? [] : [d.summary]));
   const summary = decorate(d.summary, ctx, needs, acceptedCounts(ctx));
   return {
     summary,
@@ -1914,6 +1916,14 @@ async function handle(req, res) {
     const origin = req.headers.origin;
     if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return send(res, 403, { ok: false, error: 'Origine refusée.' });
     body = await readBody(req);
+  }
+  // Lecture que l'app a déjà abandonnée (moteur occupé plus de 5 s, elle redemande ensuite) : rien à calculer. Sinon,
+  // à la reprise, le moteur exécutait toutes les requêtes empilées, et restait pris d'autant. Deux tours de boucle :
+  // la fermeture de la connexion n'est vue qu'au second.
+  if (req.method === 'GET' && url.pathname !== '/api/v2/health') {
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    if (req.socket.destroyed) return;
   }
   const [status, out] = await route.fn(route.m.slice(1), body, url);
   return send(res, status, out);

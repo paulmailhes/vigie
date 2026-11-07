@@ -1190,6 +1190,7 @@ test('conversations d\'un dossier : ce dossier exactement (chemin réel, casse p
   // des milliers de conversations dans quelques dossiers : chaque dossier n'est résolu qu'une fois
   const big = new Map();
   for (let k = 0; k < 20_000; k++) big.set(id(100 + k), { id: id(100 + k), cwd: path.join(H, 'Code', `p${k % 40}`), lastTs: '2026-10-26T10:00:00.000Z', agents: new Map() });
-  const t0 = ms(() => folderConversations(path.join(H, 'Code', 'p3'), { ...src, sessions: big }));
+  // la meilleure de trois mesures : un Mac chargé ne doit pas faire échouer l'essai, une vraie lenteur si
+  const t0 = Math.min(...[1, 2, 3].map(() => ms(() => folderConversations(path.join(H, 'Code', 'p3'), { ...src, sessions: big }))));
   assert.ok(t0 < 500, `${Math.round(t0)} ms`);
 });

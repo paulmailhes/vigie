@@ -440,3 +440,22 @@ test('coupure réseau pendant un renouvellement : rien n\'est marqué « à réa
   assert.equal(gw.status()['webflow-pro'].profiles[0].error, null);
   shut(eng, svc);
 });
+
+test('trousseau : une entrée absente n\'est pas relue à chaque affichage (30 s), un jeton trouvé reste en mémoire', () => {
+  let clock = 1_000;
+  const kc = memoryKeychain();
+  let reads = 0;
+  const counting = { ...kc, get: (a) => { reads++; return kc.get(a); } };
+  const dir = path.join(TMP, 'absent');
+  fs.mkdirSync(dir, { recursive: true });
+  const gw = createGateway({ dataDir: dir, keychain: counting, openUrl: () => {}, now: () => clock });
+  fs.writeFileSync(path.join(dir, 'gateway.json'), JSON.stringify({ v: 1, servers: { webflow: { url: 'https://mcp.webflow.test/mcp', active: 'p1', profiles: [{ id: 'p1', label: 'Perso' }] } } }));
+  assert.equal(gw.status().webflow?.connected, false);
+  const after1 = reads;
+  assert.ok(after1 >= 1, 'lu une première fois');
+  gw.status(); gw.status();
+  assert.equal(reads, after1, 'pas relu pendant 30 s');
+  clock += 31_000;
+  gw.status();
+  assert.ok(reads > after1, 'relu après 30 s');
+});
