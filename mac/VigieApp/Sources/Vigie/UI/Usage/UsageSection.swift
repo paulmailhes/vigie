@@ -238,7 +238,9 @@ struct UsageLine: Identifiable, Equatable {
             colored.color = colors[(rank[line.id] ?? 0) % colors.count]
             return colored
         }
-        if let others { result.append(others) }
+        // « Autres » seulement s'il pèse quelque chose : une ligne « Autres 0 % » n'apprend rien (les conversations
+        // regroupées n'ont presque rien consommé sur la période)
+        if let others, others.totalPct >= 0.05 { result.append(others) }
         return result
     }
 
