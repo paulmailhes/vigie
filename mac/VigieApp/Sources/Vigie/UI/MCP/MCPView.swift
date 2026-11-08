@@ -89,7 +89,14 @@ struct MCPView: View {
             Text(removal.projectPath == nil ? "Il sera retiré de tous tes comptes." : "Il sera retiré de ce projet (une copie de sauvegarde est gardée).")
         }
         .task(id: store.windowVisible) { await store.followMCP() }
-        .onChange(of: allFixes.map(\.id), initial: true) { pruneHidden() }
+        .onChange(of: pruneTrigger, initial: true) { pruneHidden() }
+    }
+
+    /// Ce qui relance le ménage des masquages : l'arrivée des MCP et des comptes, pas seulement un changement de ce qui
+    /// est à régler (à la première visite, la liste peut passer de vide à vide quand les MCP arrivent).
+    private var pruneTrigger: [String] {
+        [store.mcp == nil ? "mcp:attendu" : "mcp:lu", "comptes:" + store.accounts.map(\.id).joined(separator: ",")]
+            + allFixes.map(\.id)
     }
 
     /// Ce qui est à régler, une ligne par MCP et par compte, masqué ou non.
@@ -150,7 +157,7 @@ struct MCPView: View {
     private func content(_ mcp: MCPState) -> some View {
         let allFixes = self.allFixes
         let fixes = store.hiddenFixes.visible(allFixes)
-        let hiddenCount = allFixes.count - fixes.count
+        let hiddenCount = store.hiddenFixes.hiddenCount(in: allFixes)
         let projects = mcp.projects + mcp.local
         return Form {
             if !fixes.isEmpty {

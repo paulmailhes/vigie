@@ -77,6 +77,46 @@ struct HiddenFixesTests {
         #expect(hidden.visible(otherAccount).map(\.text) == ["À connecter sur Perso"])
     }
 
+    /// webflow (par Vigie) dans l'état donné : `profiles` en JSON, l'espace actif, connecté ou non.
+    private func gatewayFixes(profiles: String, active: String? = nil, connected: Bool = false) throws -> [MCPFix] {
+        let activeField = active.map { #""active": "\#($0)", "# } ?? ""
+        let mcp = try JSONDecoder().decode(MCPState.self, from: Data("""
+        { "user": [ { "name": "webflow", "service": "webflow", "health": [] } ],
+          "projects": [], "local": [], "connectors": [],
+          "gateway": { "webflow": { \(activeField)"connected": \(connected), "profiles": \(profiles) } } }
+        """.utf8))
+        return MCPFix.all(in: mcp, accounts: try accounts())
+    }
+
+    @Test func aGatewayLineComesBackWhenTheServiceCutsAccess() throws {
+        // pas encore connecté : masqué d'une croix
+        let new = try gatewayFixes(profiles: "[]")
+        #expect(new.map(\.text) == ["Pas encore connecté : une seule connexion pour tous tes comptes"])
+        var hidden = HiddenFixes()
+        hidden.hide(new[0].id)
+        #expect(hidden.visible(new).isEmpty)
+        // connecté à l'espace « Studio », puis le service coupe l'accès : une autre ligne, elle revient
+        let cut = try gatewayFixes(profiles: #"[ { "id": "p1", "label": "Studio", "error": "révoqué" } ]"#,
+                                   active: "p1", connected: true)
+        #expect(cut.map(\.text) == ["Le service a coupé l'accès à l'espace « Studio »"])
+        #expect(cut[0].id != new[0].id)
+        #expect(hidden.visible(cut).count == 1)
+        #expect(hidden.hiddenCount(in: cut) == 0)
+        // masquée à son tour : elle reste masquée tant que c'est le même espace coupé
+        hidden.hide(cut[0].id)
+        let same = try gatewayFixes(profiles: #"[ { "id": "p1", "label": "Studio", "error": "révoqué" } ]"#,
+                                    active: "p1", connected: true)
+        #expect(hidden.visible(same).isEmpty)
+        #expect(hidden.hiddenCount(in: same) == 1)
+        // un autre espace coupé : il revient
+        let otherSpace = try gatewayFixes(profiles: #"[ { "id": "p1", "label": "Studio" }, { "id": "p2", "label": "Client B", "error": "révoqué" } ]"#,
+                                          active: "p2", connected: true)
+        #expect(hidden.visible(otherSpace).map(\.text) == ["Le service a coupé l'accès à l'espace « Client B »"])
+        // les autres sortes gardent leur identité d'avant (masquages déjà retenus)
+        let figma = try fixes(figma: ["travail1": "needs-auth", "perso": "connected"], supabase: [:])
+        #expect(figma.map(\.id) == ["connect|figma-pro||travail1"])
+    }
+
     @Test func linesThatNoLongerMatchAreForgottenAfterADay() throws {
         let list = try fixes(figma: ["travail1": "needs-auth", "perso": "connected"],
                              supabase: ["travail1": "pending-approval"])

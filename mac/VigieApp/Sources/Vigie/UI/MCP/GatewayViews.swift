@@ -30,6 +30,12 @@ struct GatewayLine: View {
             : "Le service a coupé l'accès à l'espace « \(server.activeProfile?.label ?? "Espace") »"
     }
 
+    /// L'état à régler, en clé courte (identité d'une ligne de « À régler », voir `MCPFix.state`) : « new » ou
+    /// « cut:<espace actif> ».
+    nonisolated static func fixState(_ server: GatewayServer) -> String {
+        server.profiles.isEmpty ? "new" : "cut:\(server.active ?? "")"
+    }
+
     var body: some View {
         Group {
             switch mode {

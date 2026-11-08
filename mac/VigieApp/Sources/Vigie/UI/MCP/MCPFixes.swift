@@ -27,8 +27,16 @@ struct MCPFix: Identifiable, Equatable {
     let origin: String
     /// L'erreur du dernier contrôle (en échec) ou la phrase de la passerelle.
     var message: String? = nil
+    /// Ce qui distingue deux états d'une même ligne quand la sorte ne le dit pas. Passerelle : « new » (pas encore
+    /// connecté) ou « cut:<espace> » (le service a coupé l'accès à cet espace). Nil pour les autres sortes.
+    var state: String? = nil
 
-    var id: String { "\(kind)|\(name)|\(path ?? "")|\(accounts.map(\.id).joined(separator: ","))" }
+    /// L'identité de la ligne, sur laquelle un masquage est retenu : sorte, nom, dossier, comptes, et l'état de la
+    /// passerelle. Masquée en « pas encore connecté », une passerelle dont l'accès est coupé ensuite revient.
+    var id: String {
+        let base = "\(kind)|\(name)|\(path ?? "")|\(accounts.map(\.id).joined(separator: ","))"
+        return state.map { "\(base)|\($0)" } ?? base
+    }
 
     /// Ce qui est à régler, en mots : « À connecter sur Perso ».
     var text: String {
@@ -50,7 +58,7 @@ struct MCPFix: Identifiable, Equatable {
             if let gateway = mcp.gateway?[server.name] {
                 if GatewayLine.needsFix(gateway) {
                     fixes.append(MCPFix(kind: .gateway, name: server.name, service: server.service, origin: origin,
-                                        message: GatewayLine.fixText(gateway)))
+                                        message: GatewayLine.fixText(gateway), state: GatewayLine.fixState(gateway)))
                 }
                 continue
             }

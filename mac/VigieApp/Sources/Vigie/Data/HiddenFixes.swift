@@ -1,8 +1,9 @@
 import Foundation
 
 /// « À régler » (page MCP) : les lignes que tu as masquées d'une croix, parce que ce MCP ne t'intéresse pas là. Elles
-/// sont retenues sur l'identité de la chose à régler (`MCPFix.id` : sorte, nom, dossier, comptes). Si l'état change
-/// (en échec au lieu de « à connecter », un compte de plus à approuver), c'est une autre ligne : elle revient.
+/// sont retenues sur l'identité de la chose à régler (`MCPFix.id` : sorte, nom, dossier, comptes, état de la
+/// passerelle). Si l'état change (en échec au lieu de « à connecter », un compte de plus à approuver, une passerelle
+/// coupée par le service après « pas encore connecté »), c'est une autre ligne : elle revient.
 /// La puce d'état reste sur la rangée du MCP, plus bas : elle dit l'état réel.
 ///
 /// Une règle pure, sans horloge (essais : HiddenFixesTests). Le store la tient dans UserDefaults (jamais en
