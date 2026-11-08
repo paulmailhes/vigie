@@ -324,9 +324,10 @@ struct AgentTile: View {
     }
 }
 
-/// Un workflow : son nom lisible, où il en est (« 3 sur 7 finis · 1 en échec · 2 en cours »), puis la liste de son
-/// avancée, une ligne par étape (ou par agent) avec un repère d'état à gauche : fini, en cours (ce qu'il fait, depuis
-/// quand, ce qu'il reste), en échec, arrêté, à faire. Longue, la liste garde les derniers finis, ce qui tourne et les
+/// Un workflow : son nom (la partie du plan qu'il fait, sinon son nom lisible), où il en est (« 3 sur 7 finis · 1 en
+/// échec · 2 en cours »), puis la liste de son avancée, une ligne par étape (une par agent quand plusieurs y tournent
+/// à la fois) avec un repère d'état à gauche : fini, en cours (ce qu'il fait, depuis quand, ce qu'il reste), en échec,
+/// arrêté, à faire. Longue, la liste garde les derniers finis, ce qui tourne et les
 /// prochains à faire, et « Tout afficher » la déplie. Fini, il se replie sur son résultat ; en échec ou arrêté, il
 /// garde aussi les lignes qui ont mal fini. La règle : `WorkflowProgress`.
 struct WorkflowTile: View {
@@ -348,7 +349,7 @@ struct WorkflowTile: View {
                 VStack(alignment: .leading, spacing: 6) {
                     CardTitle("Workflow", trailing: trailing, alert: failed)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(Fmt.workflowTitle(raw))
+                        Text(WorkflowProgress.title(raw, agents: agents, plan: plan))
                             .textRole(.item)
                             .lineLimit(1)
                             .help(raw)

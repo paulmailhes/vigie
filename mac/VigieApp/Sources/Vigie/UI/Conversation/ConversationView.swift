@@ -78,8 +78,26 @@ struct ConversationView: View {
         }
     }
 
-    @ViewBuilder
     private func page(_ summary: ConversationSummary, _ model: ConversationDetailModel?) -> some View {
+        ScrollViewReader { proxy in
+            tiles(summary, model)
+                // mesurée sur la page elle-même, pas dans ce qui défile : le contenu ne peut pas changer cette mesure ;
+                // les marges de `Page` retirées, la largeur des tuiles s'en déduit sans dépendre de leur contenu
+                .onGeometryChange(for: CGFloat.self) { $0.size.width - PageMetrics.margin * 2 } action: { width = $0 }
+                // une section demandée (capture de « Au travail ») : amenée en haut, puis la demande oubliée
+                .onChange(of: store.conversationScrollTarget, initial: true) { _, target in
+                    guard let target else { return }
+                    proxy.scrollTo(target, anchor: .top)
+                    store.conversationScrollTarget = nil
+                }
+        }
+    }
+
+    /// La section « Au travail », pour `store.conversationScrollTarget`.
+    static let workSection = "au-travail"
+
+    @ViewBuilder
+    private func tiles(_ summary: ConversationSummary, _ model: ConversationDetailModel?) -> some View {
         let verdict = ConversationVerdict.make(summary: summary, detail: model?.raw, urgent: store.decisionItems(for: conversationID),
                                                now: store.now) { store.account($0)?.displayName ?? "l'autre compte" }
         Page {
@@ -111,9 +129,6 @@ struct ConversationView: View {
                 }
             }
         }
-        // mesurée sur la page elle-même, pas dans ce qui défile : le contenu ne peut pas changer cette mesure ; les
-        // marges de `Page` retirées, la largeur des tuiles s'en déduit sans dépendre de leur contenu
-        .onGeometryChange(for: CGFloat.self) { $0.size.width - PageMetrics.margin * 2 } action: { width = $0 }
     }
 
     /// Au travail : les workflows (une tuile chacun, avec la liste de son avancée) et les agents seuls, sous un titre
@@ -156,6 +171,7 @@ struct ConversationView: View {
             }
             // 20 pt avant un titre de section (12 d'écart entre tuiles, plus 8)
             .padding(.top, 8)
+            .id(Self.workSection)
         }
     }
 

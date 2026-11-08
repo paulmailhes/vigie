@@ -93,6 +93,11 @@ struct WorkflowProgressTests {
         // les compteurs du moteur disent la même chose, par agent : 6 finis, 1 en échec, 2 en cours
         #expect(workflow.counts == RunCounts(running: 2, done: 6, failed: 1))
         #expect(progress.shown().hidden == 0)
+        // le workflow porte le nom de la partie du plan qu'il fait ; sa demande compte ses 9 agents
+        #expect(WorkflowProgress.title(workflow.name ?? workflow.id, agents: agents, plan: detail.now?.plan)
+                == "C. La charte appliquée aux écrans")
+        #expect(detail.chapters.first?.stats?.agents == 9)
+        #expect(workflow.agents == 9)
     }
 
     @Test func upcomingStepsComeFromThePlanOnly() throws {
@@ -121,7 +126,96 @@ struct WorkflowProgressTests {
         let progress = WorkflowProgress.make(agents: agents, plan: nil, running: true)
         #expect(progress.items.map(\.title) == ["Préparer la migration", "Agent serveur", "Relire le contrat"])
         #expect(progress.items.map(\.state) == [.stopped, .running, .running])
-        #expect(progress.summary(running: true) == ["0 sur 3 fini", "1 arrêté", "2 en cours"])
+        // rien de bien fini : les ennuis d'abord, jamais « 0 sur 3 fini »
+        #expect(progress.summary(running: true) == ["1 arrêté", "2 en cours"])
+    }
+
+    @Test func parallelAgentsOnAStepEachHaveTheirLine() throws {
+        // « L3 » faite, puis 4 relecteurs lancés ensemble : 4 lignes en cours, comme « Au travail 4 »
+        let steps = try plan([("L2", "Socle", nil), ("L3", "Relecture du lot", nil), ("L4", "Publication", nil)],
+                             statuses: ["L2": "done", "L3": "doing"])
+        let agents = [try agent("f2", step: "L2", status: "done", start: 0, last: 20),
+                      try agent("f3", step: "L3", status: "done", start: 25, last: 50),
+                      try agent("r1", step: "L3", status: "running", phase: "Relire", start: 52, title: "Relire L3 côté sécurité"),
+                      try agent("r2", step: "L3", status: "running", phase: "Relire", start: 53, title: "Relire L3 côté textes"),
+                      try agent("r3", step: "L3", status: "running", phase: "Relire", start: 54, title: "relire:L3"),
+                      try agent("r4", step: "L3", status: "running", phase: "Relire", start: 55)]
+        let progress = WorkflowProgress.make(agents: agents, plan: steps, running: true)
+        #expect(progress.items.map(\.state) == [.done, .running, .running, .running, .running, .todo])
+        #expect(progress.items.compactMap { $0.agent?.id } == ["f2", "r1", "r2", "r3", "r4"])
+        #expect(Set(progress.items.map(\.id)).count == progress.items.count)
+        // chacun par sa description quand elle se lit, sinon par le nom de l'étape
+        #expect(progress.items.map(\.title) == ["L2 Socle", "Relire L3 côté sécurité", "Relire L3 côté textes",
+                                                "L3 Relecture du lot", "L3 Relecture du lot", "L4 Publication"])
+        #expect(progress.running == 4)
+        #expect(progress.summary(running: true) == ["1 sur 6 fini", "4 en cours"])
+        // un seul qui tourne : une seule ligne, au nom de l'étape, comme avant
+        let one = WorkflowProgress.make(agents: Array(agents.prefix(3)), plan: steps, running: true)
+        #expect(one.items.map(\.title) == ["L2 Socle", "L3 Relecture du lot", "L4 Publication"])
+        #expect(one.items.map(\.id) == ["étape:L2", "étape:L3", "étape:L4"])
+    }
+
+    @Test func aFailureStaysUntilARealRelaunch() throws {
+        // deux relecteurs ensemble sur S1 : l'un échoue (fin à +10), l'autre finit bien après (+12) ; S2 tourne
+        let failed = try agent("a", step: "S1", status: "failed", phase: "Relire", start: 0, last: 10)
+        let alongside = try agent("b", step: "S1", status: "done", phase: "Relire", start: 1, last: 12)
+        let other = try agent("c", step: "S2", status: "running", start: 15)
+        let progress = WorkflowProgress.make(agents: [failed, alongside, other], plan: nil, running: true)
+        #expect(progress.items.map(\.state) == [.failed, .running])
+        #expect(progress.items.first?.agent?.id == "a")
+        #expect(progress.summary(running: true) == ["1 en échec", "1 en cours"])
+
+        // l'autre relecteur tourne encore : la ligne en échec et la sienne, en cours
+        let running = try agent("b", step: "S1", status: "running", phase: "Relire", start: 1, last: 12)
+        let both = WorkflowProgress.make(agents: [failed, running], plan: nil, running: true)
+        #expect(both.items.map(\.state) == [.failed, .running])
+        #expect(both.items.map(\.id) == ["étape:S1", "étape:S1#b"])
+
+        // vraie relance (démarrée après la fin de l'échec) : faite si elle a fini, en cours sinon
+        let redone = try agent("d", step: "S1", status: "done", start: 15, last: 30)
+        let fixed = WorkflowProgress.make(agents: [failed, alongside, redone], plan: nil, running: false)
+        #expect(fixed.items.map(\.state) == [.done])
+        #expect(fixed.items.first?.agent?.id == "d")
+        let retry = try agent("e", step: "S1", status: "running", start: 15)
+        #expect(WorkflowProgress.make(agents: [failed, alongside, retry], plan: nil, running: true).items.map(\.state) == [.running])
+    }
+
+    @Test func aPlanOfBareNumbersIsOnePart() throws {
+        // « ### Task 1 », « ### Task 2 », « ### Task 3 » : ni groupe (le moteur efface le groupe unique) ni préfixe
+        let three = try plan([("1", "Modèle", nil), ("2", "Lecture", nil), ("3", "Écran", nil)], statuses: ["1": "done"])
+        let started = [try agent("a1", step: "1", status: "done", start: 0), try agent("a2", step: "2", status: "running", start: 40)]
+        let progress = WorkflowProgress.make(agents: started, plan: three, running: true)
+        #expect(progress.items.map(\.id) == ["étape:1", "étape:2", "étape:3"])
+        #expect(progress.items.map(\.state) == [.done, .running, .todo])
+        #expect(progress.summary(running: true) == ["1 sur 3 fini", "1 en cours"])
+
+        // ce qui reste vient après la dernière étape prise, dans l'ordre du plan : ni 2 (sautée, avant), ni 5 (faite)
+        let six = try plan([("1", "Un", nil), ("2", "Deux", nil), ("3", "Trois", nil), ("4", "Quatre", nil),
+                            ("5", "Cinq", nil), ("6", "Six", nil)], statuses: ["1": "done", "3": "doing", "5": "done"])
+        let taken = [try agent("b1", step: "1", status: "done", start: 0), try agent("b3", step: "3", status: "running", start: 40)]
+        #expect(WorkflowProgress.make(agents: taken, plan: six, running: true).items.map(\.id)
+                == ["étape:1", "étape:3", "étape:4", "étape:6"])
+        // des groupes dans le plan, mais pas sur ses étapes : rien d'inventé
+        let grouped = try plan([("1", "Un", "Partie 1"), ("2", "Deux", nil), ("3", "Trois", nil)])
+        #expect(WorkflowProgress.upcoming(steps: grouped.steps, taken: ["2"]).isEmpty)
+    }
+
+    @Test func aWorkflowIsNamedAfterItsPartOfThePlan() throws {
+        let agents = try atelierAgents()
+        let atelier = try atelierPlan()
+        #expect(WorkflowProgress.title("partie-c-charte-ecrans", agents: agents, plan: atelier) == "C. La charte appliquée aux écrans")
+        // un agent sans étape parmi beaucoup (une synthèse à la fin) ne change pas le nom
+        let synthesis = try agent("synthese", status: "running", start: 600, title: "Synthèse de la partie")
+        #expect(WorkflowProgress.title("partie-c-charte-ecrans", agents: agents + [synthesis], plan: atelier)
+                == "C. La charte appliquée aux écrans")
+        // sans plan, des étapes dans deux parties, ou la plupart des agents sans étape : son nom lisible
+        #expect(WorkflowProgress.title("partie-c-charte-ecrans", agents: agents, plan: nil) == "Partie C charte ecrans")
+        let spread = agents + [try agent("ag-26", step: "L2.26", status: "running", start: 500)]
+        #expect(WorkflowProgress.title("partie-c-charte-ecrans", agents: spread, plan: atelier) == "Partie C charte ecrans")
+        let loose = [try agent("x1", status: "running", start: 0), try agent("x2", status: "running", start: 1),
+                     try agent("x3", step: "L2.24", status: "running", start: 2)]
+        #expect(WorkflowProgress.title("revue-securite", agents: loose, plan: atelier) == "Revue securite")
+        #expect(WorkflowProgress.title("revue-securite", agents: [], plan: atelier) == "Revue securite")
     }
 
     @Test func theLatestAttemptSaysHowAStepEnded() throws {

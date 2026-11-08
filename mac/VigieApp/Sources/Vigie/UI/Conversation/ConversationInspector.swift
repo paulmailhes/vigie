@@ -83,15 +83,22 @@ struct ConversationInspector: View {
         case .agent(let id):
             guard let agent = agent(id, in: model) else { return PanelHeading(title: fallbackTitle) }
             let raw = InfoLine.text([agent.title, agent.workflow])
+            // son workflow sous le même nom que sa tuile
+            let workflow = nonEmpty(agent.workflow).map { name in
+                WorkflowProgress.title(name, agents: (model.runningAgents + model.doneAgents).filter { $0.workflow == name },
+                                       plan: detail.now?.plan)
+            }
             return PanelHeading(title: Fmt.agentTitle(name: agent.name, title: agent.title, id: agent.id,
                                                       planSteps: detail.now?.plan?.steps ?? []),
                                 subtitle: InfoLine.text(["Agent", nonEmpty(agent.phase).map { "phase \($0)" },
-                                                         nonEmpty(agent.workflow).map { "workflow \(Fmt.workflowTitle($0))" }]),
+                                                         workflow.map { "workflow \($0)" }]),
                                 help: raw.isEmpty ? nil : raw)
         case .workflow(let id):
             guard let workflow = detail.workflows.first(where: { $0.id == id }) else { return PanelHeading(title: fallbackTitle) }
             let raw = workflow.name ?? workflow.id
-            return PanelHeading(title: Fmt.workflowTitle(raw),
+            // le même nom que sa tuile : la partie du plan qu'il fait, sinon son nom lisible
+            let agents = WorkflowProgress.agents(of: workflow, among: detail.workflows, in: model.runningAgents + model.doneAgents)
+            return PanelHeading(title: WorkflowProgress.title(raw, agents: agents, plan: detail.now?.plan),
                                 subtitle: InfoLine.text(["Workflow \(WorkflowDetail.status(workflow))",
                                                          workflow.startedAt.map { "lancé \(Fmt.when($0, now: store.now))" },
                                                          Fmt.duration(ms: workflow.durationMs)]),

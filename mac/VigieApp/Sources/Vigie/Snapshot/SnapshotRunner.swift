@@ -73,6 +73,12 @@ final class SnapshotRunner {
                 _ = await waitUntil(seconds: 5) { self.store.details[id] != nil }
                 await settle(1.0)
                 await capture(window, "0\(number)-conversation-\(name)-\(theme)")
+                if number == 2 {
+                    // « Au travail » d'Atelier : la liste d'avancée du workflow, la page défilée jusqu'à elle
+                    store.conversationScrollTarget = ConversationView.workSection
+                    await settle(1.0)
+                    await capture(window, "02b-conversation-au-travail-\(theme)")
+                }
             }
             // Boutique vient d'un agent de Vigie : « Voir le rapport » de sa tuile ouvre le rapport entier à droite
             if let secondID, store.details[secondID]?.raw.agentRun != nil {

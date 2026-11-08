@@ -257,7 +257,7 @@
       "durationMs": 29100000,
       "stats": {
         "workflows": 1,
-        "agents": 11,
+        "agents": 9,
         "artifacts": 0,
         "files": 24,
         "tests": 40,

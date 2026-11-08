@@ -126,6 +126,9 @@ final class VigieStore {
     /// appartient (une autre page ne le montre pas).
     var conversationPanel: ConversationPanel?
     var conversationPanelOwner: String?
+    /// Une section de la page d'une conversation à amener en haut (`ConversationView.workSection` : « Au travail ») ;
+    /// la page la fait défiler puis remet nil. Sert à la capture de « Au travail ».
+    var conversationScrollTarget: String?
     /// Ce que les conversations ont laissé tourner (page En fond, GET /api/v2/processes).
     var background: BackgroundList?
     /// Le résumé du dernier relevé, venu avec la vue d'ensemble (barre latérale, barre des menus).
