@@ -4,7 +4,8 @@ import SwiftUI
 /// Graphique « Consommation » (page Comptes ; il se suffit à lui-même) : une courbe par conversation sur 1 h, 10 h,
 /// 24 h ou 48 h, en % de la semaine du compte (tokens au survol), cases pour afficher ou masquer chaque conversation.
 /// Une conversation fermée reste sur le graphique tant qu'elle a travaillé dans la fenêtre (le moteur garde 48 h) :
-/// trait en pointillés qui s'arrête après son dernier appel, rond creux et « fermée » dans la légende.
+/// trait en pointillés qui s'arrête après son dernier appel, rond creux et « fermée » dans la légende, « fermée 16:11 »
+/// au survol après la fin de sa courbe. Une conversation porte le même nom sur toutes les périodes.
 /// La vue d'ensemble n'en garde qu'une ligne par compte (`AccountUsageSection`).
 struct UsageSection: View {
     @Environment(VigieStore.self) private var store
@@ -59,7 +60,7 @@ struct UsageSection: View {
                 let shownLines = lines.filter { !hidden.contains($0.id) }
                 UsageChart(lines: shownLines.isEmpty ? lines : shownLines, allIDs: lines.map(\.id),
                            cumulative: cumulative, span: span, window: series.window, selected: $selected)
-                UsageLegend(lines: lines, hidden: hidden, cumulative: cumulative) { id, visible in
+                UsageLegend(lines: lines, hidden: hidden, cumulative: cumulative, span: span) { id, visible in
                     setVisible(id, visible)
                 } setAll: { visible in
                     hiddenRaw = visible ? "" : lines.map(\.id).joined(separator: ",")
@@ -118,6 +119,7 @@ struct UsageLine: Identifiable, Equatable {
     @MainActor
     static func make(_ series: UsageSeries, store: VigieStore, span: UsageSpan, cumulative: Bool) -> [UsageLine] {
         let step = max(series.stepMin ?? span.defaultStep, 1)
+        let shared = sharedNames(series, store: store)
         var lines: [UsageLine] = []
         for conversation in series.conversations {
             var points: [Point] = []
@@ -144,10 +146,10 @@ struct UsageLine: Identifiable, Equatable {
                 }
             }
             guard !points.isEmpty else { continue }
-            let name = live?.shortTitle
-                ?? conversation.project.map { ProjectName.display($0, cwd: conversation.cwd) }
-                ?? conversation.title ?? "Conversation"
             let title = live?.title ?? conversation.title
+            var name = baseName(conversation, live: live)
+            // Une autre conversation connue a le même projet : celle-ci se nomme par son titre, sur toutes les périodes.
+            if shared.contains(name), let title, !title.isEmpty { name = title }
             let accountID = live?.accountId ?? conversation.accountId
             lines.append(UsageLine(id: conversation.id, name: name,
                                    subtitle: title == name ? nil : title,
@@ -158,16 +160,64 @@ struct UsageLine: Identifiable, Equatable {
                                    totalPct: conversation.totalPct, totalTokens: conversation.totalTokens,
                                    points: points))
         }
-        // Deux conversations du même projet (une ouverte et une fermée, souvent) : chacune se nomme par son titre.
-        let sameName = Dictionary(grouping: lines, by: \.name).filter { $0.value.count > 1 }
-        lines = lines.map { line in
-            guard sameName[line.name] != nil, let title = line.subtitle else { return line }
-            var renamed = line
-            renamed.name = title
-            return renamed
-        }
         // Rangées par compte, puis les plus gourmandes d'abord.
         return lines.sorted { ($0.account ?? "~", -$0.totalPct) < ($1.account ?? "~", -$1.totalPct) }
+    }
+
+    /// Le nom d'une conversation partout ailleurs dans Vigie : son projet (« Atelier », « Portail/back »), sinon son titre.
+    @MainActor
+    private static func baseName(_ conversation: UsageSeriesConversation, live: ConversationSummary?) -> String {
+        live?.shortTitle
+            ?? conversation.project.map { ProjectName.display($0, cwd: conversation.cwd) }
+            ?? conversation.title ?? "Conversation"
+    }
+
+    /// Les noms de projet portés par au moins deux conversations connues de Vigie (vue d'ensemble, plus les
+    /// conversations de la série qu'elle ne liste pas : les jetables ouvertes, présentes sur toutes les périodes). Le
+    /// calcul ne dépend pas de la période affichée : une conversation garde le même nom de 1 h à 48 h, même quand
+    /// l'autre conversation de son projet n'a rien consommé dans l'heure.
+    @MainActor
+    static func sharedNames(_ series: UsageSeries, store: VigieStore) -> Set<String> {
+        var names: [String: Set<String>] = [:]
+        for summary in store.conversations {
+            let live = store.conversation(summary.id) ?? summary
+            names[live.shortTitle, default: []].insert(live.id)
+        }
+        for conversation in series.conversations where store.conversation(conversation.id) == nil {
+            names[baseName(conversation, live: nil), default: []].insert(conversation.id)
+        }
+        return Set(names.filter { $0.value.count > 1 }.keys)
+    }
+
+    /// Fermée : quand sa courbe s'arrête (sa dernière activité, sinon son dernier point qui consomme).
+    var closedAt: Date? {
+        guard !running else { return nil }
+        return lastActivity ?? points.last(where: { $0.value > 0 || $0.tokens > 0 })?.t ?? points.last?.t
+    }
+
+    /// Au survol d'une fermée dans la légende : elle reste tant qu'elle a consommé dans la période affichée (le moteur
+    /// ne la garde que si elle a travaillé depuis le début de la fenêtre).
+    static func closedNote(lastActivity: Date?, span: UsageSpan, now: Date) -> String {
+        let when = lastActivity.map { ", dernière activité \(Fmt.when($0, now: now))" } ?? ""
+        return "Fermée\(when). Elle reste sur le graphique tant qu'elle a consommé dans la période affichée (\(span.label))."
+    }
+
+    /// Les rangées de l'infobulle à une heure : les courbes qui ont un point là (les plus fortes d'abord), puis les
+    /// fermées dont la courbe s'est arrêtée avant (les plus récentes d'abord), qui disent quand. L'axe couvre toute la
+    /// fenêtre : sans conversation ouverte (le matin), la droite du graphique dit encore quelque chose au survol.
+    static func tooltipRows(_ lines: [UsageLine], at date: Date) -> [UsageTooltipRow] {
+        var values: [UsageTooltipRow] = []
+        var ended: [UsageTooltipRow] = []
+        for line in lines {
+            if let point = line.point(near: date) {
+                values.append(UsageTooltipRow(line: line, point: point))
+            } else if !line.running, let last = line.points.last, date > last.t {
+                ended.append(UsageTooltipRow(line: line, point: nil))
+            }
+        }
+        values.sort { ($0.point?.value ?? 0) > ($1.point?.value ?? 0) }
+        ended.sort { ($0.line.closedAt ?? .distantPast) > ($1.line.closedAt ?? .distantPast) }
+        return values + ended
     }
 
     /// Les courbes du graphique : une couleur par conversation tant qu'il y a assez de couleurs (4). Au-delà, les 4 plus
@@ -223,6 +273,13 @@ struct UsageLine: Identifiable, Equatable {
     var stroke: StrokeStyle {
         StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round, dash: running ? [] : [4, 4])
     }
+}
+
+/// Une rangée de l'infobulle : la valeur d'une courbe à l'heure survolée, ou (point nil) une fermée dont la courbe
+/// s'est arrêtée avant, qui dit « fermée 16:11 » sans valeur.
+struct UsageTooltipRow: Equatable {
+    var line: UsageLine
+    var point: UsageLine.Point?
 }
 
 /// Pastille d'une courbe (légende, infobulle) : ronde et pleine pour une conversation ouverte, creuse pour une
@@ -352,29 +409,43 @@ private struct UsageChart: View {
     }
 
     private func tooltip(at date: Date) -> some View {
-        let rows = lines.compactMap { line in line.point(near: date).map { (line, $0) } }
-            .sorted { $0.1.value > $1.1.value }
+        let rows = UsageLine.tooltipRows(lines, at: date)
         return VStack(alignment: .leading, spacing: 3) {
-            Text(Fmt.when(rows.first?.1.t ?? date, now: store.now))
+            Text(Fmt.when(rows.first?.point?.t ?? date, now: store.now))
                 .font(.caption.bold())
                 .monospacedDigit()
+            if rows.isEmpty {
+                // jamais un repère vide (courbes affichées toutes arrêtées avant cette heure)
+                Text("Aucune consommation à cette heure")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             ForEach(Array(rows.prefix(8).enumerated()), id: \.offset) { _, row in
-                let (line, point) = row
+                let line = row.line
                 HStack(spacing: 6) {
                     UsageSwatch(color: line.color, running: line.running, size: 7)
                     Text(line.name).lineLimit(1)
                     if let account = line.account {
                         Text(account).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    if !line.running {
-                        Text("fermée").foregroundStyle(.secondary).lineLimit(1)
+                    if let point = row.point {
+                        if !line.running {
+                            Text("fermée").foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 10)
+                        Text(cumulative ? Fmt.pctFine(point.value) : Fmt.rate(point.value))
+                            .monospacedDigit()
+                        Text(Fmt.tokensShort(point.tokens) + " tokens")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    } else {
+                        // sa courbe s'est arrêtée avant l'heure survolée : quand, plutôt que rien
+                        Spacer(minLength: 10)
+                        Text(line.closedAt.map { "fermée \(Fmt.when($0, now: store.now))" } ?? "fermée")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    Spacer(minLength: 10)
-                    Text(cumulative ? Fmt.pctFine(point.value) : Fmt.rate(point.value))
-                        .monospacedDigit()
-                    Text(Fmt.tokensShort(point.tokens) + " tokens")
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
                 }
                 .font(.caption)
             }
@@ -392,6 +463,7 @@ private struct UsageLegend: View {
     let lines: [UsageLine]
     let hidden: Set<String>
     let cumulative: Bool
+    let span: UsageSpan
     let setVisible: (String, Bool) -> Void
     let setAll: (Bool) -> Void
 
@@ -446,8 +518,7 @@ private struct UsageLegend: View {
         if line.totalTokens > 0 { parts.append("\(Fmt.tokensShort(line.totalTokens)) tokens") }
         var text = parts.joined(separator: " · ")
         if !line.running {
-            let when = line.lastActivity.map { ", dernière activité \(Fmt.when($0, now: store.now))" } ?? ""
-            text += "\nFermée\(when). Sa courbe reste 48 h."
+            text += "\n" + UsageLine.closedNote(lastActivity: line.lastActivity, span: span, now: store.now)
         }
         return text
     }
