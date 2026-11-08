@@ -549,7 +549,9 @@ et borné (un fichier, pas un lien, 256 Ko au plus ; textes sur une ligne ; 100 
 chaque action porte son `index` dans le fichier. Il surveille les dossiers `.vigie` des lancements montrés : un rapport
 réécrit réveille `GET /api/v2/changes`.
 Le détail d'une conversation lancée par un agent porte ce lancement (`agentRun`, même forme qu'une entrée de `runs`) :
-l'app en fait la tuile « Agent Vigie » et le panneau Rapport de la conversation. Depuis le 2026-11-08, elle ne lit plus
+l'app en fait la tuile « Agent Vigie » et le panneau Rapport de la conversation. Un lancement ne va qu'à SA
+conversation : celle qu'il a reprise (`session`), sinon la première conversation commencée dans son dossier dans les
+15 min qui suivent le lancement ; jamais les conversations suivantes du dossier (`agentRun: null` pour elles). Depuis le 2026-11-08, elle ne lit plus
 `GET /api/v2/agents/runs` (gardé tel quel pour les apps d'avant) ; `POST` sert toujours à cocher et à retirer.
 
 ### POST /api/v2/agents/launch

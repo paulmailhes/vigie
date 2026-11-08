@@ -505,18 +505,28 @@ extension VigieStore {
     }
 
     /// Retire le rapport d'un agent de la page de sa conversation (tuile et panneau Rapport) : le moteur ne le donne
-    /// plus ; le fichier reste dans le dossier du projet. Le panneau se ferme tout de suite ; en arrière si le moteur
-    /// refuse.
+    /// plus ; le fichier reste dans le dossier du projet. Le panneau se ferme tout de suite ; si le moteur refuse, la
+    /// tuile revient et le panneau Rapport se rouvre (sauf si un autre panneau a pris sa place entre-temps).
     func hideAgentRun(_ run: RecipeRun, in conversationID: String) async {
         patchAgentRun(in: conversationID) { current in
             if current?.id == run.id { current = nil }
         }
-        if conversationPanel == .report, conversationPanelOwner == conversationID { conversationPanel = nil }
+        let panelWasOpen = conversationPanel == .report && conversationPanelOwner == conversationID
+        if panelWasOpen { conversationPanel = nil }
         guard !isDemo else { return }
         if await write("/api/v2/agents/runs", ["action": "hide", "id": .string(run.id)]) == nil {
-            patchAgentRun(in: conversationID) { current in
-                if current == nil { current = run }
-            }
+            undoHideAgentRun(run, in: conversationID, reopenPanel: panelWasOpen)
+        }
+    }
+
+    /// Le moteur a refusé de retirer le rapport : la tuile revient, et le panneau Rapport s'il était ouvert et que rien
+    /// n'a pris sa place entre-temps.
+    func undoHideAgentRun(_ run: RecipeRun, in conversationID: String, reopenPanel: Bool) {
+        patchAgentRun(in: conversationID) { current in
+            if current == nil { current = run }
+        }
+        if reopenPanel, conversationPanel == nil, conversationPanelOwner == conversationID {
+            conversationPanel = .report
         }
     }
 

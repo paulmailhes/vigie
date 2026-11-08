@@ -129,6 +129,12 @@ function seed() {
   w(VSC, '{\n  // réglages de test\n  "editor.fontSize": 13,\n}\n');
   wj(path.join(DATA, 'state.json'), { version: 1, autoAccept: true, questions: 'ask', questionWaitMin: 20, guard: { enabled: true, waitMin: 10 }, sessions: {} });
   wj(path.join(DATA, 'ui.json'), { lastSeen: iso(-90) });
+  // lancements d'agents sans session : atelier 2 min avant la première ligne de A (A est sa conversation) ; autre
+  // 20 min avant celle de B (hors de la fenêtre de 15 min : B n'a rien à voir avec lui)
+  wj(path.join(DATA, 'agent-runs.json'), { runs: [
+    { id: 'lance-atelier', agent: 'controle', name: 'Contrôler un site', icon: null, folder: CWD, surface: 'vscode', session: null, at: iso(-62) },
+    { id: 'lance-autre', agent: 'demarrer', name: 'Démarrer', icon: null, folder: OTHER, surface: 'vscode', session: null, at: iso(-140) },
+  ] });
   // relevés du % de la semaine : 9 % il y a 30 h, 10 % il y a 24 h, 40 % maintenant → pleine dans 48 h
   wj(path.join(DATA, 'usage', 'semaine.json'), { travail1: [{ t: iso(-30 * 60), pct: 9, resetsAt: iso(3 * 24 * 60) },
     { t: iso(-24 * 60), pct: 10, resetsAt: iso(3 * 24 * 60) }] });
@@ -519,6 +525,9 @@ test('détail : acceptées avec type et décision, MCP par étage, secrets masqu
   assert.deepEqual([mcp.supabase.scope, mcp.supabase.enabled], ['project', true]);
   assert.deepEqual([mcp.Gmail.scope, mcp.Gmail.uses, mcp.Gmail.enabled, mcp.Gmail.service], ['connector', 1, true, 'gmail']);
   assert.ok(d.mcp.every((m) => m.status === 'unknown'), 'pas encore de relevé');
+  // le lancement d'agent : seulement sur SA conversation (la première de son dossier dans les 15 min qui le suivent)
+  assert.deepEqual([d.agentRun?.id, d.agentRun?.agent, d.agentRun?.conversation], ['lance-atelier', 'controle', SID_A]);
+  assert.equal((await get(`/api/v2/conversation/${SID_B}`)).body.agentRun, null, 'commencée 20 min après le lancement de son dossier');
   assert.equal((await get('/api/v2/conversation/00000000-0000-4000-8000-000000000000')).status, 404);
   assert.equal((await get('/api/v2/conversation/pas-un-identifiant')).status, 404);
 });

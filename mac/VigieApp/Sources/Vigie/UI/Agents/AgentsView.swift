@@ -54,7 +54,7 @@ struct AgentsView: View {
                 }
             } header: {
                 SectionHeader("Prêts à lancer", count: state.agents.count,
-                              note: "Chacun prépare le dossier du projet, puis ouvre une conversation Claude Code qui suit sa consigne, dans VS Code ou dans l'app Claude. Son rapport se lit ensuite sur la page de cette conversation.",
+                              note: "Son rapport se lit sur la page de la conversation qu'il ouvre.",
                               inset: PageMetrics.formHeaderInset)
             } footer: {
                 footer(state)

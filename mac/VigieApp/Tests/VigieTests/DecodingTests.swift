@@ -366,7 +366,28 @@ struct DecodingTests {
 
         let running = try #require(try detail(#"{ "id": "b", "agent": "demarrer", "folder": "/Users/alex/Code/atelier", "report": { "status": "running" } }"#).agentRun)
         #expect(RecipeRunState(running.report) == .running && running.displayName == "demarrer")
-        #expect(AgentReportPanel.summary(running, now: now) == "L'agent travaille.")
+        #expect(AgentReportPanel.summary(running, now: now) == "Pas encore de rapport.")
+        // juste après le lancement, le rapport de départ du moteur a pour titre le nom de l'agent : jamais redit comme
+        // verdict (ni dans le panneau ni dans la tuile)
+        let launched = try #require(try detail("""
+        { "id": "d", "agent": "demarrer", "name": "Démarrer un projet", "folder": "/Users/alex/Code/atelier",
+          "at": "2026-10-27T15:29:00Z", "report": { "status": "running", "title": "Démarrer un projet" } }
+        """).agentRun)
+        #expect(launched.verdict == nil)
+        let launchedAt = try #require(launched.at)
+        #expect(AgentReportPanel.summary(launched, now: now) == "Pas encore de rapport · lancé \(Fmt.when(launchedAt, now: now))")
+        // l'agent a commencé à écrire, sans verdict encore : il travaille
+        let writing = try #require(try detail("""
+        { "id": "e", "agent": "demarrer", "name": "Démarrer un projet", "folder": "/Users/alex/Code/atelier",
+          "report": { "status": "running", "title": "demarrer", "done": ["Dossier créé"] } }
+        """).agentRun)
+        #expect(writing.verdict == nil)
+        #expect(AgentReportPanel.summary(writing, now: now) == "L'agent travaille.")
+        // un vrai titre reste le verdict quand il n'y en a pas d'autre
+        let titled = try #require(try detail("""
+        { "id": "f", "agent": "controle", "name": "Contrôler", "folder": "/x", "report": { "status": "done", "title": "Site prêt" } }
+        """).agentRun)
+        #expect(titled.verdict == "Site prêt" && AgentReportPanel.summary(titled, now: now) == "Site prêt")
         let unreadable = try #require(try detail(#"{ "id": "c", "agent": "x", "folder": "/x", "report": "illisible", "unreadable": true }"#).agentRun)
         #expect(unreadable.report == nil && RecipeRunState(nil) == .running)
         #expect(AgentReportPanel.summary(unreadable, now: now)?.hasPrefix("Le rapport est illisible") == true)

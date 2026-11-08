@@ -20,6 +20,17 @@ struct RecipeRun: Decodable, Equatable, Sendable, Identifiable {
 
     var displayName: String { name ?? agent }
     var project: String { (folder as NSString).lastPathComponent }
+
+    /// Le verdict de l'agent, s'il en a écrit un : `verdict`, sinon `title`. Jamais le nom de l'agent : juste après le
+    /// lancement, le moteur écrit un rapport de départ « en cours » qui a ce nom pour titre (déjà le titre du panneau).
+    var verdict: String? {
+        for text in [report?.verdict, report?.title] {
+            guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+            let isName = [displayName, agent].contains { $0.caseInsensitiveCompare(text) == .orderedSame }
+            if !isName { return text }
+        }
+        return nil
+    }
 }
 
 struct AgentReport: Decodable, Equatable, Sendable {

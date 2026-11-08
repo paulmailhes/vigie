@@ -77,13 +77,16 @@ struct AgentReportPanel: View {
                             help: run.agent, titleLines: 2)
     }
 
-    /// La phrase sous l'état : le verdict de l'agent ; sans verdict, ce qu'on sait (illisible, ou il travaille).
+    /// La phrase sous l'état : le verdict de l'agent ; sans verdict, ce qu'on sait (illisible, rien d'écrit encore, ou
+    /// il travaille). Le rapport de départ du moteur n'a que le nom de l'agent pour titre : « Pas encore de rapport ».
     static func summary(_ run: RecipeRun, now: Date) -> String? {
-        if let verdict = run.report?.verdict ?? run.report?.title, !verdict.isEmpty { return verdict }
+        if let verdict = run.verdict { return verdict }
         if run.unreadable == true { return "Le rapport est illisible pour l'instant : l'agent est peut-être en train de l'écrire." }
         guard RecipeRunState(run.report) == .running else { return nil }
+        let nothingYet = run.report.map { $0.done.isEmpty && $0.todo.isEmpty } ?? true
+        let head = nothingYet ? "Pas encore de rapport" : "L'agent travaille"
         let when = Fmt.when(run.at, now: now)
-        return when.isEmpty ? "L'agent travaille." : "L'agent travaille · lancé \(when)"
+        return when.isEmpty ? "\(head)." : "\(head) · lancé \(when)"
     }
 
     var body: some View {
@@ -124,7 +127,7 @@ struct AgentReportPanel: View {
                 }
             }
             if let done = report?.done, !done.isEmpty {
-                PanelBlock("Fait par l'agent", trailing: Fmt.int(done.count)) {
+                PanelBlock("Fait par l'agent", trailing: Fmt.count(done.count, "point")) {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(done.prefix(Self.doneShown).enumerated()), id: \.offset) { _, line in
                             Label(line, systemImage: "checkmark")

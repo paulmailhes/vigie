@@ -221,5 +221,21 @@ struct WindowNavigationTests {
         #expect(store.details[boutique]?.raw.agentRun == nil)
         #expect(store.conversationPanel == nil)
         #expect(store.route == .conversation(boutique))
+
+        // le moteur refuse : la tuile revient, et le panneau Rapport qui était ouvert se rouvre
+        store.undoHideAgentRun(checked, in: boutique, reopenPanel: true)
+        #expect(store.details[boutique]?.raw.agentRun?.id == checked.id)
+        #expect(store.conversationPanel == .report)
+        // un autre panneau a pris sa place entre-temps : il reste
+        await store.hideAgentRun(checked, in: boutique)
+        store.conversationPanel = .plan
+        store.undoHideAgentRun(checked, in: boutique, reopenPanel: true)
+        #expect(store.details[boutique]?.raw.agentRun?.id == checked.id)
+        #expect(store.conversationPanel == .plan)
+        // le panneau était fermé au retrait : il ne s'ouvre pas tout seul
+        store.conversationPanel = nil
+        await store.hideAgentRun(checked, in: boutique)
+        store.undoHideAgentRun(checked, in: boutique, reopenPanel: false)
+        #expect(store.conversationPanel == nil)
     }
 }

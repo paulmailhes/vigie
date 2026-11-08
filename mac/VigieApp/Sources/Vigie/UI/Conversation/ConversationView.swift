@@ -206,7 +206,8 @@ struct AgentReportTile: View {
                 Text(run.displayName)
                     .textRole(.item)
                     .lineLimit(1)
-                if let verdict = report?.verdict ?? report?.title {
+                // jamais le nom de l'agent une seconde fois (titre du rapport de départ, juste après le lancement)
+                if let verdict = run.verdict {
                     Text(verdict).lineLimit(2)
                 }
                 if let counts = report?.counts {

@@ -21,7 +21,7 @@ import { createUpdater } from './lib/update.mjs';
 import { createGateway, GatewayError } from './lib/gateway.mjs';
 import { createDesktop, surfaceOf, SURFACES, isScratch } from './lib/desktop.mjs';
 import { createAgents, folderConversations } from './lib/agents.mjs';
-import { createRuns } from './lib/agent-runs.mjs';
+import { createRuns, runOfConversation } from './lib/agent-runs.mjs';
 import { createProcesses } from './lib/processes.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio, weekFullAt } from './lib/usage.mjs';
@@ -199,17 +199,24 @@ function runsView() {
   runsCache = { at: Date.now(), value };
   return value;
 }
-// Le lancement d'agent Vigie d'une conversation, sans rien parcourir : celle qu'il a reprise, sinon une conversation du
-// même dossier commencée après lui. (L'app relit le détail toutes les 4 s : rien de lourd ici.)
+// Le lancement d'agent Vigie d'une conversation, seulement le sien (lib/agent-runs.mjs, runOfConversation) : celle
+// qu'il a reprise, sinon la première conversation commencée dans son dossier dans les 15 min qui le suivent, jamais
+// les suivantes. Les conversations du dossier ne sont parcourues que pour départager un lancement sans session de ce
+// dossier, dans la fenêtre. (L'app relit le détail toutes les 4 s : rien de lourd ici.)
 function agentRunOf(id) {
-  const s = indexer.sessions.get(id);
-  const dir = launchDirOf(id);
-  const start = s?.firstTs || null;
   const same = (a, b) => { try { return path.resolve(a) === path.resolve(b); } catch { return false; } };
-  const mine = runs.list().filter((r) => r.session === id || (!r.session && dir && start && same(r.folder, dir) && start >= r.at));
-  if (!mine.length) return null;
-  mine.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
-  return { ...mine[0], conversation: id };
+  const startsIn = (folder) => {
+    const out = [];
+    for (const s of indexer.sessions.values()) {
+      if (!s.firstTs) continue;
+      const dir = launchDirOf(s.id);
+      if (dir && same(dir, folder)) out.push({ id: s.id, start: s.firstTs });
+    }
+    return out;
+  };
+  const run = runOfConversation(runs.list(), { id, folder: launchDirOf(id), start: indexer.sessions.get(id)?.firstTs || null },
+    { startsIn, same });
+  return run ? { ...run, conversation: id } : null;
 }
 function postRuns(body) {
   const r = body?.action === 'todo' ? runs.setTodo({ id: body.id, index: body.index, done: body.done })
