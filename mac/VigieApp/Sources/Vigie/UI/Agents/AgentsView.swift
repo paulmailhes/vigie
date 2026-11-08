@@ -54,7 +54,7 @@ struct AgentsView: View {
                 }
             } header: {
                 SectionHeader("Prêts à lancer", count: state.agents.count,
-                              note: "Son rapport se lit sur la page de la conversation qu'il ouvre.",
+                              note: "Le rapport de chaque agent se lit sur la page de la conversation qu'il ouvre.",
                               inset: PageMetrics.formHeaderInset)
             } footer: {
                 footer(state)

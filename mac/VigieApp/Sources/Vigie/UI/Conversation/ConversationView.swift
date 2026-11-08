@@ -141,7 +141,9 @@ struct ConversationView: View {
         // agents seuls, et ceux dont le workflow n'a pas de tuile
         let solo = (model.runningAgents + model.doneAgents.filter { Self.recent($0, now: now) })
             .filter { $0.workflow == nil || !shown.contains($0.workflow ?? "") }
-        let run = model.raw.agentRun?.report != nil ? model.raw.agentRun : nil
+        // la tuile dès qu'un lancement mène à cette conversation, même sans rapport lisible : c'est le seul endroit
+        // où le lire depuis que la page Agents ne montre plus les lancements
+        let run = model.raw.agentRun
         let steps = model.raw.now?.plan?.steps ?? []
         if !workflows.isEmpty || !solo.isEmpty || run != nil {
             let running = model.runningAgents.count
@@ -206,9 +208,10 @@ struct AgentReportTile: View {
                 Text(run.displayName)
                     .textRole(.item)
                     .lineLimit(1)
-                // jamais le nom de l'agent une seconde fois (titre du rapport de départ, juste après le lancement)
-                if let verdict = run.verdict {
-                    Text(verdict).lineLimit(2)
+                // jamais le nom de l'agent une seconde fois (titre du rapport de départ, juste après le lancement) ;
+                // sans rapport lu, la phrase du panneau (« illisible pour l'instant », « pas encore de rapport »)
+                if let line = run.verdict ?? (report == nil ? AgentReportPanel.summary(run, now: store.now) : nil) {
+                    Text(line).lineLimit(2)
                 }
                 if let counts = report?.counts {
                     let parts = [counts.block.flatMap { $0 > 0 ? Fmt.count($0, "bloquant") : nil },
@@ -250,7 +253,7 @@ struct AgentReportTile: View {
     }
 
     private func status(_ report: AgentReport?) -> String {
-        guard let report else { return "pas encore de rapport" }
+        guard let report else { return run.unreadable == true ? "rapport illisible" : "pas encore de rapport" }
         if report.isBlocked { return "arrêté" } // comme le panneau Rapport
         return report.isRunning ? "en cours" : "fini"
     }
