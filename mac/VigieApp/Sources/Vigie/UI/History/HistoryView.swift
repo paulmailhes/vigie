@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Historique : toutes les demandes d'autorisation et leur issue (acceptée, refusée, refusée d'office, en échec…), avec
 /// des filtres ; les mots, icônes et couleurs viennent de `HistoryStatus`. Un clic sur une ligne ouvre son détail à droite : pourquoi, la commande entière, de quoi la relancer.
-/// Filtres et lignes à la marge des pages (28 pt) ; la table défile seule, jusqu'au bord droit du détail, hors de `Page`.
+/// Filtres et lignes à la marge des pages (28 pt, à gauche et à droite pour les filtres) ; la table défile seule,
+/// jusqu'au bord droit du détail, hors de `Page`.
 struct HistoryView: View {
     @Environment(VigieStore.self) private var store
     @State private var selection: HistoryItem.ID?
@@ -16,8 +17,8 @@ struct HistoryView: View {
                 filters
                 statusChips
             }
-            .padding(.leading, PageMetrics.margin)
-            .padding(.trailing, PageMetrics.tableRowInset)
+            // symétriques : le champ « Chercher » s'arrête à la marge des pages, comme les filtres commencent
+            .padding(.horizontal, PageMetrics.margin)
             // La table touche le bord droit de la fenêtre (sa barre de défilement y reste collée) ; à gauche, ses
             // lignes tombent sur la marge des pages, comme les filtres. Jamais collée à gauche : elle passerait sous la
             // barre latérale et répartirait ses colonnes sur une largeur fausse (« Résultat » coupé).

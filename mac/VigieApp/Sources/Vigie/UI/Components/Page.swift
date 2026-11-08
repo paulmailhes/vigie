@@ -28,6 +28,9 @@ enum PageMetrics {
     /// Retrait natif des lignes d'une `Table` en style `.inset`, entre le bord de la table et le fond d'une ligne
     /// (mesuré sur une capture) : l'Historique s'en sert pour poser ses lignes sur la marge des pages.
     static let tableRowInset: CGFloat = 10
+    /// Marge native d'un Form groupé entre le bord de la vue qui défile et ses cartes, fenêtre étroite (mesurée par un
+    /// rendu hors écran) : `pageForm()` y ajoute ce qui manque pour tomber sur `margin`.
+    static let formCardInset: CGFloat = 20
     /// Retrait d'un `SectionHeader` dans l'en-tête d'une Section de Form (MCP, Agents) : l'en-tête natif ajoute 4 pt,
     /// retirés ici pour que le titre tombe au même bord que ceux d'une `Page` (6 pt du bord de la carte).
     static let formHeaderInset: CGFloat = -4
