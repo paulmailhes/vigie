@@ -1552,7 +1552,7 @@ test('attente annoncée par Claude Code : rien avant 20 s, puis « Attend ton ac
     const d = (await get(`/api/v2/conversation/${SID_W}`)).body;
     assert.deepEqual([d.summary.status, d.summary.needsYou], ['waiting', 1]);
 
-    // Paul répond dans VS Code : le registre repasse à « busy ». La photo du moteur (jusqu'à 4 s) dit encore « en
+    // l'utilisateur répond dans VS Code : le registre repasse à « busy ». La photo du moteur (jusqu'à 4 s) dit encore « en
     // attente », mais le fichier relu à l'instant fait foi : plus rien, tout de suite.
     entry({ status: 'busy', statusUpdatedAt: Date.now(), updatedAt: Date.now() });
     v = await view();
@@ -1616,7 +1616,7 @@ test('décision donnée dans Vigie : pas de « Attend ton accord » le temps que
     let v = await until((x) => x.items.some((i) => i.id.startsWith('g:')), 'garde-fou en attente');
     assert.deepEqual(v.items.map((i) => i.id.slice(0, 2)), ['g:']);
 
-    // Paul autorise depuis Vigie ; le hook n'a pas encore lu decisions.json, le registre dit toujours « en attente »
+    // l'utilisateur autorise depuis Vigie ; le hook n'a pas encore lu decisions.json, le registre dit toujours « en attente »
     const r = await post(`/api/v2/pending/${hook1.pid}`, { decision: 'allow' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     v = await view();
@@ -1631,7 +1631,7 @@ test('décision donnée dans Vigie : pas de « Attend ton accord » le temps que
     v = await until((x) => x.items.some((i) => i.id === `c:${SID_D}`), 'autre fenêtre notifiée');
     assert.deepEqual(v.items.map((i) => [i.id, i.title, i.ts]), [[`c:${SID_D}`, 'Attend ton accord dans VS Code', new Date(later).toISOString()]]);
 
-    // auto-accept coupé pendant l'attente d'un garde-fou : le hook rend la fenêtre, qui attend vraiment Paul
+    // auto-accept coupé pendant l'attente d'un garde-fou : le hook rend la fenêtre, qui attend vraiment l'utilisateur
     const held = Date.now() - 30_000;
     entry(held);
     line(held, 'garde-fou-attente', hook2.pid, { minutes: 10 });

@@ -41,7 +41,7 @@ test('attente : 20 s sans interruption, comptées depuis statusUpdatedAt', () =>
 
 test('attente : le registre relu à l\'instant passe devant la photo', () => {
   const snapshot = waiting({ statusUpdatedAt: NOW - 25_000 });
-  // Paul vient de répondre : le fichier dit « busy », la photo (4 s au plus) dit encore « en attente »
+  // l'utilisateur vient de répondre : le fichier dit « busy », la photo (4 s au plus) dit encore « en attente »
   assert.equal(confirmedWait({ snapshot, fresh: { status: 'busy', statusUpdatedAt: NOW - 300 }, now: NOW }), null);
   // conversation fermée entre-temps
   assert.equal(confirmedWait({ snapshot, fresh: null, now: NOW }), null);
