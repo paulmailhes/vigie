@@ -406,7 +406,10 @@ async function onQuestionRequest(input) {
   const questions = (input.tool_input?.questions || []).slice(0, 4).map((q) => ({ question: String(q.question || '').slice(0, 500),
     header: q.header ? String(q.header).slice(0, 40) : null, multiSelect: !!q.multiSelect,
     options: (q.options || []).slice(0, 6).map((o) => ({ label: String(o.label || '').slice(0, 200), description: o.description ? String(o.description).slice(0, 300) : null })) }));
-  const asked = input.tool_name === 'AskUserQuestion' && questions.length ? { questions } : {};
+  // Ici, le hook attend vraiment (le mode « tout de suite », le terminal et les sous-agents sont sortis plus haut) : la
+  // ligne porte toujours `questions`, qui fait d'elle une attente du hook (opensHookWait, lib/live-wait.mjs), montrée
+  // tout de suite dans Vigie. Vide pour un plan : il s'approuve dans VS Code, jamais par une réponse envoyée depuis Vigie.
+  const asked = { questions: input.tool_name === 'AskUserQuestion' ? questions : [] };
   // pid (noté par log) : le serveur sait ainsi si l'attente est encore en cours (un hook tué par SIGKILL ne note rien).
   log(input, mode === 'wait' ? 'question-attente' : 'question-pour-toi', mode === 'wait' ? { minutes: waitMin, ...asked } : asked);
   // La fenêtre reste affichée ; on reste en éveil pour suivre un changement de réglage fait dans Vigie.
@@ -414,7 +417,7 @@ async function onQuestionRequest(input) {
     onKill = mode === 'wait' ? () => log(input, 'question-tu-as-repondu') : null;
     let done = early; early = null;
     const r = await waitFor(() => (mode === 'wait' ? since + waitMin * 60_000 : Infinity), (s) => {
-      if ((given = takeAnswer(pendingId, { since, sessionId: sid }))) return 'app';
+      if (input.tool_name === 'AskUserQuestion' && (given = takeAnswer(pendingId, { since, sessionId: sid }))) return 'app';
       if (done || (done = resolved())) return 'repondu';
       const m = effective(s, sid).questions;
       if (m !== mode) return `mode:${m}`;
@@ -426,7 +429,7 @@ async function onQuestionRequest(input) {
     if (r === 'mode:auto') return answerQuestion(input, 'PermissionRequest', { now: true });
     if (r === 'mode:wait') {
       mode = 'wait'; since = Date.now(); waitMin = readState().questionWaitMin;
-      log(input, 'question-attente', { minutes: waitMin });
+      log(input, 'question-attente', { minutes: waitMin, ...asked });
       continue;
     }
     if (r === 'mode:ask') { mode = 'ask'; log(input, 'question-rendue'); continue; }

@@ -11,7 +11,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vigie-test-'));
 process.env.VIGIE_DATA = path.join(TMP, 'data');
 const { ROOT, STATE_FILE, HISTORY_FILE, QUESTIONS_FILE, DEFAULT_STATE, writeState, readState, effective, questionsAuto, questionsMode, matchGuard, executedText } = await import('../lib/state.mjs');
-const { decide } = await import('../lib/decisions.mjs');
+const { decide, writeAnswer } = await import('../lib/decisions.mjs');
 assert.ok(STATE_FILE.startsWith(TMP), 'les tests doivent écrire dans le dossier temporaire');
 
 const HOOK = path.join(ROOT, 'hook.mjs');
@@ -535,6 +535,27 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
     assert.deepEqual(sb.events(), ['question-attente', 'question-rendue']);
     assert.equal(sb.history()[1].raison, 'orphelin');
     assert.deepEqual(sb.questions(), []);
+  });
+
+  // Un plan proposé en « toujours me demander » : le hook attend vraiment, sa ligne porte donc `questions` (vide : un plan
+  // se répond dans VS Code), pour que Vigie le montre tout de suite (« Plan à approuver »). Une réponse écrite pour son pid
+  // n'approuve pas le plan.
+  await t.test('plan « me demander » : attente du hook notée (questions vide), aucune réponse de Vigie ne l\'approuve', async () => {
+    const sb = sandbox({ questions: 'ask' });
+    const h = sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'ExitPlanMode', tool_input: { plan: '# Plan\n1. Refaire le menu' } });
+    try {
+      await sb.until('question-pour-toi');
+      const [line] = sb.history();
+      assert.deepEqual([line.tool, line.questions, line.pid], ['ExitPlanMode', [], h.child.pid]);
+      assert.ok(writeAnswer(String(h.child.pid), { 'Approuver le plan ?': 'Oui' }, { sessionId: 'vscode-session', file: path.join(sb.data, 'decisions.json') }));
+      await new Promise((r) => setTimeout(r, 400)); // une dizaine de tours du hook
+      h.child.kill('SIGTERM'); // l'utilisateur répond dans VS Code
+      const { out } = await h.done;
+      assert.equal(out, null, 'plan ni approuvé ni refusé par Vigie');
+      assert.deepEqual(sb.events(), ['question-pour-toi']);
+    } finally {
+      h.child.kill('SIGKILL'); // en mode « me demander », le hook attendrait 2 h
+    }
   });
 
   await t.test('plafond de vie : le hook s\'arrête seul avant son délai, sans répondre', async () => {

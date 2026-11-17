@@ -1403,7 +1403,8 @@ function postPending(raw, body) {
   // Réponse à une question en attente : { answers: { "<question>": "<choix>" } }
   if (body && typeof body.answers === 'object' && body.answers !== null) {
     const ctx = context();
-    const w = [...ctx.waits.values()].flat().find((x) => x.question && String(x.pid) === id && Array.isArray(x.questions));
+    // un plan en attente (questions vide) s'approuve dans VS Code, jamais par une réponse envoyée d'ici
+    const w = [...ctx.waits.values()].flat().find((x) => x.question && String(x.pid) === id && Array.isArray(x.questions) && x.questions.length);
     if (!w) return bad('Cette question n\'attend plus de réponse.', 404);
     if (!writeAnswer(id, body.answers, { sessionId: w.sessionId })) return bad('Réponse non envoyée : réessaie.');
     return [200, { ok: true, pendingId: id, message: 'Réponse envoyée à Claude.' }];

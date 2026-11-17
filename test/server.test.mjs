@@ -1646,3 +1646,57 @@ test('décision donnée dans Vigie : pas de « Attend ton accord » le temps que
     for (const p of [proc, hook1, hook2]) p.kill('SIGKILL');
   }
 });
+
+// Un plan proposé dans le réglage par défaut des questions (« toujours me demander ») : le vrai hook de Vigie attend avec
+// la fenêtre de VS Code. Vigie le montre tout de suite (« Plan à approuver », à répondre dans VS Code), jamais en
+// « Attend ton accord » au bout de 20 s, et aucune réponse envoyée depuis Vigie ne l'approuve.
+test('plan en « toujours me demander » : « Plan à approuver » tout de suite, sans « c: », rien à répondre depuis Vigie', async () => {
+  assert.equal((await post('/api/v2/settings', { questionsAuto: false })).status, 200);
+  const SID_P = 'ee11ff22-aa33-4b44-8c55-dd6677889900';
+  const F = path.join(CODE, 'carte');
+  fs.mkdirSync(F, { recursive: true });
+  const M = mk(SID_P, F);
+  const at = (min) => new Date(Date.now() + min * 60_000).toISOString();
+  writeLines(path.join(PROJECTS, '-maison-Code-carte', `${SID_P}.jsonl`), [M.human('prépare un plan pour la carte', at(-10)), M.call('Read', { file_path: path.join(F, 'carte.md') }, at(-9))]);
+  // la conversation (registre de Claude Code) : un processus qui dort
+  const proc = spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' });
+  const reg = path.join(SESSIONS, `${proc.pid}.json`);
+  const entry = (since) => wj(reg, { pid: proc.pid, sessionId: SID_P, cwd: F, startedAt: Date.now() - 600_000, entrypoint: 'claude-vscode',
+    name: 'carte', status: 'waiting', waitingFor: 'permission prompt', statusUpdatedAt: since, updatedAt: since });
+  entry(Date.now() - 3000); // la fenêtre du plan est ouverte depuis 3 s
+  // le vrai hook, sur le ~ et les données de l'essai
+  const hook = spawn(process.execPath, [path.join(ROOT, 'hook.mjs')], { stdio: ['pipe', 'ignore', 'ignore'],
+    env: { PATH: process.env.PATH, TMPDIR: os.tmpdir(), HOME, VIGIE_DATA: DATA, CLAUDE_PID: String(proc.pid), VIGIE_POLL_MS: '100' } });
+  hook.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: SID_P, cwd: F, transcript_path: '/nonexistent',
+    tool_name: 'ExitPlanMode', tool_input: { plan: '# Plan\n1. Refaire la carte' } }));
+  const view = async () => {
+    const o = (await get('/api/v2/overview')).body;
+    return { o, conv: o.conversations.find((c) => c.id === SID_P), items: o.toReview.filter((x) => x.conversationId === SID_P) };
+  };
+  const until = async (ok, what) => {
+    let v;
+    for (let i = 0; i < 120; i++) { v = await view(); if (ok(v)) return v; await new Promise((res) => setTimeout(res, 100)); }
+    assert.fail(`${what} : ${JSON.stringify({ conv: v.conv && { status: v.conv.status, needsYou: v.conv.needsYou }, items: v.items })}`);
+  };
+  try {
+    let v = await until((x) => x.items.some((i) => i.id.startsWith('w:')), 'plan du hook');
+    conforms(v.o, Overview);
+    const p = v.items.find((i) => i.id.startsWith('w:'));
+    assert.deepEqual(v.items.map((i) => i.id.slice(0, 2)), ['w:'], 'le plan seul, sans « c: »');
+    assert.deepEqual([p.kind, p.title, p.detail, p.pendingId, p.questions], ['waiting', 'Plan à approuver', 'Réponds dans VS Code.', undefined, undefined]);
+    assert.deepEqual([v.conv.status, v.conv.needsYou], ['waiting', 1]);
+    // une réponse envoyée pour son pid n'approuve pas le plan
+    const r = await post(`/api/v2/pending/${hook.pid}`, { answers: { 'Approuver le plan ?': 'Oui' } });
+    assert.equal(r.status, 404, JSON.stringify(r.body));
+    // la même fenêtre, ouverte depuis 25 s : toujours le plan seul
+    entry(Date.now() - 25_000);
+    await new Promise((res) => setTimeout(res, 300));
+    v = await view();
+    assert.deepEqual(v.items.map((i) => [i.id.slice(0, 2), i.title]), [['w:', 'Plan à approuver']]);
+    assert.equal(hook.exitCode, null, 'le hook attend toujours, sans avoir répondu');
+  } finally {
+    hook.kill('SIGKILL');
+    fs.rmSync(reg, { force: true });
+    proc.kill('SIGKILL');
+  }
+});
