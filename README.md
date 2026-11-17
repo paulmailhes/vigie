@@ -62,6 +62,8 @@ Une conversation sans compte choisi (une nouvelle, ou une ancienne jamais associ
 
 **Le compte du Mac** (celui de `~/.claude`) est celui que VS Code regarde pour dire « connecté » : s'il tombe, toutes les fenêtres affichent « déconnecté », quel que soit le compte de la conversation. Vigie le surveille en premier, et la connexion lancée depuis VS Code arrive bien sur lui.
 
+**Dossiers de confiance.** Pour un nouveau dossier, VS Code demande si Claude Code peut lui faire confiance (« Trust folder »). Il lit la réponse sur le compte du Mac, mais la conversation l'enregistre sur son propre compte. Sans Vigie, la question reviendrait à chaque fenêtre. Vigie recopie donc chaque accord sur tous tes comptes, en quelques secondes. Il ne fait jamais confiance à un dossier que tu n'as accepté sur aucun compte, et il ne retire rien. Exception : pour ton dossier perso, Claude Code repose la question à chaque fenêtre.
+
 ### Connexions gardées
 
 Vigie garde une copie de la connexion de chaque compte, tenue à jour à chaque renouvellement. Si une app la perd sans que tu te sois déconnecté, Vigie la remet après l'avoir constaté deux fois (15 s d'écart), en attendant que Claude Code ait fini d'écrire. Il ne remet jamais :

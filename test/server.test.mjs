@@ -237,6 +237,7 @@ before(async () => {
     VIGIE_MCP_CHECK: '0', // pas de relevé automatique : le test le demande lui-même
     VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
     VIGIE_APPS_DIR: APPS, VIGIE_IDE_WAIT_MS: '1500', // fenêtre VS Code attendue 1,5 s au plus (25 s pour de vrai)
+    VIGIE_TRUST_FIRST_MS: '300', // confiance des dossiers : premier passage tout de suite (10 s pour de vrai)
   };
   child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', (d) => { logs += d; });
@@ -907,6 +908,29 @@ test('comptes : création d\'un dossier de compte et lanceur VS Code (fichiers t
   r = await post('/api/v2/accounts', { action: 'inventer' });
   assert.equal(r.status, 400);
   assert.equal(r.body.error, 'Action inconnue.');
+});
+
+test('confiance des dossiers : accordée par une conversation sur un compte, recopiée sur le compte du Mac', async () => {
+  const other = (await get('/api/v2/accounts')).body.accounts.find((a) => a.id !== 'travail1');
+  assert.ok(other?.configDir, 'compte créé par l\'essai précédent');
+  const dir = path.join(CODE, 'confiance');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(other.configDir, '.claude.json');
+  const j = rj(file);
+  j.projects = { ...(j.projects || {}), [dir]: { hasTrustDialogAccepted: true } }; // « Trust folder » enregistré par la conversation
+  wj(file, j);
+  const mac = path.join(HOME, '.claude.json');
+  let ok = false;
+  for (let i = 0; i < 120 && !ok; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    ok = rj(mac).projects?.[dir]?.hasTrustDialogAccepted === true;
+  }
+  assert.ok(ok, `pas recopiée en 12 s : ${logs.slice(-500)}`);
+  const m = rj(mac);
+  assert.equal(m.mcpServers['figma-perso'].headers.Authorization, `Bearer ${SECRETS[0]}`, 'le reste du fichier est gardé');
+  assert.deepEqual(m.projects[CWD].mcpServers['figma-desktop'], { type: 'http', url: `http://127.0.0.1:3845/mcp?token=${SECRETS[1]}` });
+  assert.match(logs, /confiance des dossiers recopiée : .*confiance → /);
+  assert.equal(fs.statSync(path.join(DATA, 'trust-sync.json')).mode & 0o777, 0o600);
 });
 
 // ---------- HTTP ----------

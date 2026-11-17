@@ -117,6 +117,17 @@ test('appel annexe (auth status) : passe tel quel, sur Travail 1, sans journal',
   assert.equal(mcp.cfg, '<absent>');
 });
 
+// L'extension 2.1.323+ demande à chaque fenêtre si Claude Code fait confiance au dossier. Cette lecture n'est pas une
+// conversation : elle reste sur le compte du Mac, que le moteur tient à jour (lib/trust.mjs recopie chaque accord).
+test('lecture de la confiance du dossier (workspace-trust) : passe telle quelle, sur le compte du Mac, sans journal', () => {
+  const n = logLines();
+  const r = run(['--setting-sources', 'user', 'workspace-trust', '--json']);
+  assert.equal(r.status, 0);
+  assert.equal(r.cfg, '<absent>');
+  assert.deepEqual(r.args, ['--setting-sources', 'user', 'workspace-trust', '--json']);
+  assert.equal(logLines(), n);
+});
+
 test('reprise d\'une conversation associée : dossier exact du compte et connecteurs coupés', () => {
   const r = run([...CONV, `--resume=${S_PERSO}`]);
   assert.equal(r.status, 0);

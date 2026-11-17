@@ -27,6 +27,7 @@ import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from '
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio, weekFullAt } from './lib/usage.mjs';
 import { limitResetAt, limitView } from './lib/limits.mjs';
 import { confirmedWait, createWaitTracker, waitWording } from './lib/live-wait.mjs';
+import { createTrustSync } from './lib/trust.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
 const HOST = '127.0.0.1';
@@ -50,6 +51,10 @@ const MCP_CHECK_EVERY_MS = 60 * 60_000, MCP_CHECK_FIRST_MS = 20_000;
 // Coffre des connexions (lib/vault.mjs) : passage toutes les 20 s au démarrage, au réveil et tant qu'une connexion
 // est à remettre ou inconnue ; toutes les 60 s quand tout est en ordre.
 const VAULT_EVERY_MS = 20_000, VAULT_CALM_MS = 60_000;
+// Confiance des dossiers recopiée d'un compte à l'autre (lib/trust.mjs) : premier passage 10 s après le démarrage, puis
+// à chaque tour (4 s) dès qu'un .claude.json a changé. VIGIE_NO_TRUST_SYNC la coupe.
+const TRUST_SYNC = !process.env.VIGIE_NO_TRUST_SYNC;
+const TRUST_FIRST_MS = Number(process.env.VIGIE_TRUST_FIRST_MS) || 10_000;
 
 process.on('unhandledRejection', (e) => console.error('[vigie] promesse rejetée :', clean(e)));
 
@@ -161,6 +166,14 @@ const mcp = createMcp({
   canCheck: (a) => accounts.connected(a.id),
   openTerminal: (command) => openInTerminal(command, { osascript: OSASCRIPT }),
   onChange: stateChanged,
+});
+// L'extension Claude Code lit la confiance d'un dossier sur le compte du Mac, la conversation l'enregistre sur son
+// compte : chaque accord est recopié sur les autres comptes, en ajout seulement (lib/trust.mjs).
+const trust = createTrustSync({
+  dataDir: DATA,
+  home: HOME,
+  accounts: () => accounts.load().accounts.map((a) => ({ id: a.id, label: a.label, file: claudeJsonPath(a) })),
+  log: (m) => console.error(`[vigie] ${m}`),
 });
 const questions = createQuestions({ dataDir: DATA, sessionsDir: indexer.sessionsDir, projectsDir: indexer.projectsDir });
 // Agents : recettes livrées avec Vigie (agents/<id>/AGENT.md, remplacées à chaque mise à jour), lancées dans une
@@ -2103,6 +2116,8 @@ async function tick() {
       accounts.autoRefresh({ calm: calm() });
     }
   } catch (e) { console.error('[vigie] comptes :', clean(e)); }
+  // Confiance des dossiers : un stat par compte ; recopie en fond (jamais attendue ici) si un fichier a changé.
+  try { if (TRUST_SYNC) trust.poll(); } catch (e) { console.error('[vigie] confiance des dossiers :', clean(e)); }
   // État réel des MCP (`claude mcp list`, aucune requête au modèle) : en fond, un relevé à la fois, Mac calme.
   try {
     if (MCP_CHECK && Date.now() >= nextMcpCheck && calm()) {
@@ -2147,6 +2162,7 @@ server.listen(PORT, HOST, () => {
   if (PROCESSES) { setTimeout(() => processes.tick(), 5_000); setInterval(() => processes.tick(), processes.everyMs); }
   setTimeout(updateTick, 60_000);
   setInterval(updateTick, 30 * 60_000);
+  if (TRUST_SYNC) setTimeout(() => trust.sync(), TRUST_FIRST_MS);
   if (!process.env.VIGIE_NO_MCP_SYNC) {
     // espaces de la passerelle encore acceptés par leur service ?
     setTimeout(() => { for (const n of gateway.names()) gateway.verify(n).catch(() => {}); }, 10_000);
