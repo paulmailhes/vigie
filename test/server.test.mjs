@@ -1579,3 +1579,70 @@ test('attente annoncée par Claude Code : rien avant 20 s, puis « Attend ton ac
     sleeper.kill('SIGKILL');
   }
 });
+
+// Décision donnée dans Vigie : le moteur retire aussitôt l'attente du hook, mais le hook ne lit decisions.json qu'une
+// fois par seconde, et le registre dit encore « en attente » depuis l'ouverture de la fenêtre. L'app relit la vue tout de
+// suite : pas de « Attend ton accord » pour la fenêtre qu'on vient de fermer. Une autre fenêtre, ouverte plus tard, ou
+// une fenêtre que le hook rend à l'utilisateur, reste notifiée.
+test('décision donnée dans Vigie : pas de « Attend ton accord » le temps que le hook la lise', async () => {
+  const SID_D = 'dd11ee22-ff33-4a44-8b55-cc6677889900';
+  const F = path.join(CODE, 'publication');
+  fs.mkdirSync(F, { recursive: true });
+  const M = mk(SID_D, F);
+  const at = (min) => new Date(Date.now() + min * 60_000).toISOString();
+  writeLines(path.join(PROJECTS, '-maison-Code-publication', `${SID_D}.jsonl`), [M.human('publie la page', at(-10)), M.call('Bash', { command: 'npm run build' }, at(-9))]);
+  // la conversation (registre) et deux hooks en attente : des processus « hook.mjs » qui dorment
+  const [proc, hook1, hook2] = [0, 1, 2].map(() => spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' }));
+  const reg = path.join(SESSIONS, `${proc.pid}.json`);
+  const entry = (since) => wj(reg, { pid: proc.pid, sessionId: SID_D, cwd: F, startedAt: Date.now() - 600_000, entrypoint: 'claude-vscode',
+    name: 'publication', status: 'waiting', waitingFor: 'permission prompt', statusUpdatedAt: since, updatedAt: since });
+  const rule = { tool: 'Bash', action: 'git push --force origin main', rule: 'git push forcé ou suppression de branche distante', ruleId: 'force-push' };
+  const line = (ts, event, pid, more = {}) => fs.appendFileSync(path.join(DATA, 'history.jsonl'),
+    JSON.stringify({ ts: new Date(ts).toISOString(), event, sessionId: SID_D, cwd: F, ...rule, pid, ...more }) + '\n');
+  const view = async () => {
+    const o = (await get('/api/v2/overview')).body;
+    return { o, conv: o.conversations.find((c) => c.id === SID_D), items: o.toReview.filter((x) => x.conversationId === SID_D) };
+  };
+  const until = async (ok, what) => {
+    let v;
+    for (let i = 0; i < 120; i++) { v = await view(); if (ok(v)) return v; await new Promise((res) => setTimeout(res, 100)); }
+    assert.fail(`${what} : ${JSON.stringify({ conv: v.conv && { status: v.conv.status, needsYou: v.conv.needsYou }, items: v.items })}`);
+  };
+  try {
+    // la fenêtre de permission est ouverte depuis 60 s, et le hook de Vigie l'attend (garde-fou) : le garde-fou seul
+    const opened = Date.now() - 60_000;
+    entry(opened);
+    line(opened, 'garde-fou-attente', hook1.pid, { minutes: 10 });
+    let v = await until((x) => x.items.some((i) => i.id.startsWith('g:')), 'garde-fou en attente');
+    assert.deepEqual(v.items.map((i) => i.id.slice(0, 2)), ['g:']);
+
+    // Paul autorise depuis Vigie ; le hook n'a pas encore lu decisions.json, le registre dit toujours « en attente »
+    const r = await post(`/api/v2/pending/${hook1.pid}`, { decision: 'allow' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    v = await view();
+    assert.deepEqual(v.items, [], 'ni le garde-fou décidé, ni « Attend ton accord » pour la même fenêtre');
+    assert.deepEqual([v.conv.status, v.conv.needsYou], ['working', 0]);
+
+    // le hook a pris la décision ; une autre fenêtre, ouverte 35 s après celle du garde-fou, que Vigie n'a pas validée
+    // seule : notifiée
+    line(Date.now(), 'garde-fou-autorise-app', hook1.pid);
+    const later = Date.now() - 25_000;
+    entry(later);
+    v = await until((x) => x.items.some((i) => i.id === `c:${SID_D}`), 'autre fenêtre notifiée');
+    assert.deepEqual(v.items.map((i) => [i.id, i.title, i.ts]), [[`c:${SID_D}`, 'Attend ton accord dans VS Code', new Date(later).toISOString()]]);
+
+    // auto-accept coupé pendant l'attente d'un garde-fou : le hook rend la fenêtre, qui attend vraiment Paul
+    const held = Date.now() - 30_000;
+    entry(held);
+    line(held, 'garde-fou-attente', hook2.pid, { minutes: 10 });
+    await until((x) => x.items.some((i) => i.id.startsWith('g:')), 'second garde-fou en attente');
+    line(Date.now(), 'garde-fou-rendu', hook2.pid);
+    line(Date.now(), 'demande-pour-toi', hook2.pid);
+    v = await until((x) => !x.items.some((i) => i.id.startsWith('g:')), 'garde-fou rendu');
+    assert.deepEqual(v.items.map((i) => [i.id, i.title, i.ts]), [[`c:${SID_D}`, 'Attend ton accord dans VS Code', new Date(held).toISOString()]]);
+    assert.deepEqual([v.conv.status, v.conv.needsYou], ['waiting', 1]);
+  } finally {
+    fs.rmSync(reg, { force: true });
+    for (const p of [proc, hook1, hook2]) p.kill('SIGKILL');
+  }
+});

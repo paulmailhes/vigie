@@ -26,7 +26,7 @@ import { createProcesses } from './lib/processes.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio, weekFullAt } from './lib/usage.mjs';
 import { limitResetAt, limitView } from './lib/limits.mjs';
-import { confirmedWait, createWaitTracker, waitWording } from './lib/live-wait.mjs';
+import { confirmedWait, createWaitTracker, waitWording, HOOK_WAIT_EVENTS, opensHookWait, heldByHook } from './lib/live-wait.mjs';
 import { createTrustSync } from './lib/trust.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
@@ -313,7 +313,9 @@ function eventCounts(since) {
 // Quand l'utilisateur répond lui-même, Claude Code tue le hook, qui n'écrit parfois rien (« attente fantôme ») :
 // on écarte donc aussi les attentes dont le délai est passé, dont le processus est mort, ou dont la
 // conversation est fermée.
-const WAIT_EVENTS = new Set(['garde-fou-attente', 'question-attente']);
+// Lignes qui ouvrent une attente : opensHookWait (lib/live-wait.mjs, avec « question-pour-toi » quand elle porte ses
+// choix).
+const WAIT_EVENTS = HOOK_WAIT_EVENTS;
 // « garde-fou-refuse-app » / « garde-fou-autorise-app » : L'utilisateur a décidé depuis l'app.
 const CLOSES_WAIT = /bloque|auto|repondu|rendu|-app$/;
 function pidAlive(pid) {
@@ -333,7 +335,7 @@ function pendingWaits(state, now = Date.now()) {
   for (const h of history) {
     if (!h.sessionId) continue;
     // « toujours me demander » : la question attend aussi, et peut se répondre depuis Vigie (choix notés)
-    if (WAIT_EVENTS.has(h.event) || (h.event === 'question-pour-toi' && Array.isArray(h.questions))) open.set(`${h.sessionId}\u0000${h.action}`, h);
+    if (opensHookWait(h)) open.set(`${h.sessionId}\u0000${h.action}`, h);
     // 30 000 lignes, presque toutes fermantes : leur clé n'est construite que s'il reste une attente à fermer
     else if (open.size && CLOSES_WAIT.test(String(h.event || ''))) open.delete(`${h.sessionId}\u0000${h.action}`);
   }
@@ -690,7 +692,9 @@ function connectionNotices(sums) {
 const waitTracker = createWaitTracker();
 // { since, waitingFor } d'une attente confirmée, sinon null ; une fois par requête et par conversation (reviewItems puis
 // decorate). Seule une attente déjà assez longue sur la photo du registre (4 s au plus) fait relire son fichier : la
-// photo peut encore dire « en attente » juste après une réponse dans VS Code.
+// photo peut encore dire « en attente » juste après une réponse dans VS Code. La fenêtre d'une attente du hook à
+// laquelle l'utilisateur vient de répondre dans Vigie n'en est pas une : le hook n'a pas encore lu sa décision
+// (heldByHook).
 function liveWaitOf(ctx, s) {
   ctx.liveWaits ??= new Map();
   if (ctx.liveWaits.has(s.id)) return ctx.liveWaits.get(s.id);
@@ -701,6 +705,7 @@ function liveWaitOf(ctx, s) {
     if (confirmedWait({ snapshot, firstSeen, now: ctx.now })) {
       wait = confirmedWait({ snapshot, fresh: indexer.liveNow(s.id), firstSeen, now: ctx.now });
     }
+    if (wait && heldByHook({ wait, history, sessionId: s.id, firstSeen })) wait = null;
   }
   ctx.liveWaits.set(s.id, wait);
   return wait;

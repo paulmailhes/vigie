@@ -13,7 +13,8 @@ const CLAUDE = path.join(TMP, 'home', '.claude');
 process.env.HOME = path.join(TMP, 'home');
 process.env.VIGIE_DATA = path.join(TMP, 'data');
 process.env.VIGIE_CLAUDE_DIR = CLAUDE;
-const { WAIT_CONFIRM_MS, WAIT_SEEN_MS, isWaiting, waitStart, createWaitTracker, confirmedWait, waitWording } = await import('../lib/live-wait.mjs');
+const { WAIT_CONFIRM_MS, WAIT_SEEN_MS, HOOK_MARGIN_MS, SEEN_LATE_MS, HOOK_WAIT_EVENTS, isWaiting, waitStart, createWaitTracker, confirmedWait,
+  waitWording, opensHookWait, heldByHook } = await import('../lib/live-wait.mjs');
 const { Indexer } = await import('../lib/indexer.mjs');
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
@@ -101,6 +102,48 @@ test('attente : textes en français, jamais celui de Claude Code', () => {
     assert.equal(waitWording(other).title('l\'app Claude'), 'Attend ta réponse dans l\'app Claude');
     assert.equal(waitWording(other).detail, 'Elle attend ta réponse.');
   }
+});
+
+test('attente du hook : sa fenêtre n\'est pas une autre attente, même juste après une décision dans Vigie', () => {
+  assert.equal(HOOK_MARGIN_MS, 2000);
+  const SID = 'conv-1';
+  const at = (ms) => new Date(ms).toISOString();
+  const line = (ms, event, more = {}) => ({ ts: at(ms), event, sessionId: SID, action: 'git push --force', pid: 4242, ...more });
+  const since = NOW - 60_000;
+  const wait = { since, waitingFor: 'permission prompt' };
+  const held = (history, w = wait, firstSeen = null) => heldByHook({ wait: w, history, sessionId: SID, firstSeen });
+  // garde-fou, question en attente, « toujours me demander » avec ses choix : la fenêtre du hook (décidée dans Vigie,
+  // pas encore lue par le hook, ou déjà prise : le registre peut le dire encore un instant)
+  assert.equal(held([line(since + 150, 'garde-fou-attente')]), true);
+  assert.equal(held([line(since + 150, 'garde-fou-attente'), line(NOW - 100, 'garde-fou-autorise-app')]), true);
+  assert.equal(held([line(since + 150, 'question-attente', { minutes: 20 }), line(NOW - 100, 'question-repondue-app')]), true);
+  assert.equal(held([line(since + 300, 'question-pour-toi', { questions: [{ question: 'Quel menu ?' }] })]), true);
+  assert.equal(held([line(since - 1500, 'garde-fou-attente')]), true, 'le hook peut écrire juste avant le registre');
+  assert.equal(held([line(since - HOOK_MARGIN_MS, 'garde-fou-attente')]), true, 'limite : 2 s');
+  // pas une attente du hook : question laissée à VS Code (sans ses choix), autre conversation, attente plus ancienne
+  assert.equal(held([line(since + 150, 'question-pour-toi')]), false);
+  assert.equal(held([line(since + 150, 'garde-fou-attente', { sessionId: 'conv-2' })]), false);
+  assert.equal(held([line(since - 2001, 'garde-fou-attente')]), false, 'une autre fenêtre, ouverte plus de 2 s après celle du hook');
+  assert.equal(held([line(since - 30_000, 'garde-fou-attente'), line(since - 20_000, 'garde-fou-autorise-app')]), false);
+  // le hook rend la fenêtre à l'utilisateur : elle l'attend vraiment
+  for (const ev of ['garde-fou-rendu', 'question-rendue', 'demande-pour-toi', 'garde-fou-pour-toi', 'reponse-perdue']) {
+    assert.equal(held([line(since + 150, 'garde-fou-attente'), line(NOW - 100, ev)]), false, ev);
+  }
+  // … puis la reprend (mode « attendre » remis pendant la question) : de nouveau la sienne
+  assert.equal(held([line(since + 150, 'question-attente'), line(since + 9000, 'question-rendue'), line(since + 12_000, 'question-attente')]), true);
+  // registre sans statusUpdatedAt : `since` est la première photo qui l'a vue, jusqu'à un tour plus tard
+  assert.equal(held([line(since - 6000, 'garde-fou-attente')], wait, since), true);
+  assert.equal(held([line(since - 6000, 'garde-fou-attente')], wait, since - 6000), false);
+  assert.equal(held([line(since - 2000 - SEEN_LATE_MS - 1, 'garde-fou-attente')], wait, since), false);
+  // rien à juger
+  assert.equal(held([line(since, 'garde-fou-attente')], null), false);
+  assert.equal(heldByHook({ wait, history: null, sessionId: SID }), false);
+  assert.equal(held([]), false);
+  // même règle d'ouverture que pendingWaits
+  assert.deepEqual([...HOOK_WAIT_EVENTS], ['garde-fou-attente', 'question-attente']);
+  assert.equal(opensHookWait({ event: 'question-pour-toi', questions: [] }), true);
+  assert.equal(opensHookWait({ event: 'question-pour-toi' }), false);
+  assert.equal(opensHookWait(null), false);
 });
 
 test('registre : une conversation relue à l\'instant (fichier changé, disparu, illisible, repris par une autre)', () => {
