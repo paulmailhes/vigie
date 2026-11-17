@@ -122,8 +122,8 @@ struct WindowNavigationTests {
             // rien à faire : réponse choisie pour toi, lancée sur un autre compte
             ["id": "q:1", "kind": "question", "conversationId": "atelier", "conversationTitle": "Atelier",
              "title": "Quel fond ?", "ts": iso(-60)],
-            ["id": "cf:autre:travail2", "kind": "notice", "conversationId": "autre", "conversationTitle": "Atelier",
-             "title": "Lancée sur Perso au lieu de Travail 2", "detail": "Elle reprendra sur Travail 2.", "ts": iso(-60)],
+            ["id": "cf:autre:pro", "kind": "notice", "conversationId": "autre", "conversationTitle": "Atelier",
+             "title": "Lancée sur Perso au lieu de Pro", "detail": "Elle reprendra sur Pro.", "ts": iso(-60)],
         ]
         let reports: [[String: Any]] = [
             ["kind": "workflowDone", "id": "wf:fini:1", "conversationId": "fini", "conversationTitle": "Atelier",
@@ -163,7 +163,7 @@ struct WindowNavigationTests {
 
         // rien à faire : discrètes
         #expect(try candidate("r:q:1").quiet)
-        #expect(try candidate("r:cf:autre:travail2").quiet)
+        #expect(try candidate("r:cf:autre:pro").quiet)
         #expect(try candidate("m:wf:fini:1").quiet)
         let day = try #require(list.first { $0.key.hasPrefix("bg:day:") }, "les données d'exemple ont 2 oubliés, 2,1 Go")
         #expect(day.quiet)
