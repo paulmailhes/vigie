@@ -65,7 +65,8 @@ enum NotifyKind: String, CaseIterable, Identifiable, Sendable {
 final class Notifier {
     static let shared = Notifier()
 
-    private struct Candidate {
+    /// Une notification à envoyer (lue par les essais : `collect`).
+    struct Candidate {
         var key: String
         var kind: NotifyKind
         var title: String
@@ -99,6 +100,10 @@ final class Notifier {
     private static let workflowGrace: TimeInterval = 2 * 60
     /// Au-delà, les notifications d'un même relevé vont dans le centre de notifications, sans bannière.
     private static let maxBanners = 3
+    /// Une conversation qui se dit « en attente » depuis moins longtemps n'est pas notifiée : en mode VS Code, Claude
+    /// Code passe « en attente » le temps que Vigie accepte seule (≈ 120 ms). Le moteur applique la même règle ; celle-ci
+    /// protège d'un moteur plus ancien, le temps de la mise à jour.
+    static let waitConfirm: TimeInterval = 20
 
     private var enabled = false
     private var seen: [String: Double] = [:]
@@ -171,9 +176,13 @@ final class Notifier {
             versions[candidate.key] = candidate.version
         }
 
+        // les discrètes ne prennent pas la place d'une bannière
         let shown = fresh.filter(\.kind.isOn).sorted { $0.kind.priority < $1.kind.priority }
-        for (index, candidate) in shown.enumerated() {
-            post(candidate, banner: index < Self.maxBanners && !candidate.quiet && !isInFront(candidate, store))
+        var banners = 0
+        for candidate in shown {
+            let banner = banners < Self.maxBanners && !candidate.quiet && !isInFront(candidate, store)
+            if banner { banners += 1 }
+            post(candidate, banner: banner)
         }
         for candidate in updated where candidate.kind.isOn { post(candidate, banner: false) }
 
@@ -200,7 +209,10 @@ final class Notifier {
 
     // MARK: Ce qui mérite une notification
 
-    private func collect(_ store: VigieStore) -> [Candidate] {
+    /// Bannière pour ce qui demande un geste (autoriser, répondre, relancer) ou qui a mal tourné ; discrète (centre de
+    /// notifications, sans bannière ni son) pour ce qui ne demande rien : réponse choisie pour toi, workflow réussi,
+    /// processus oubliés, conversation lancée sur un autre compte, agent fini qu'elle va lire.
+    func collect(_ store: VigieStore) -> [Candidate] {
         var list: [Candidate] = []
         func name(_ id: String?, _ fallback: String?) -> String {
             id.flatMap { store.conversation($0)?.shortTitle } ?? fallback ?? "Une conversation"
@@ -210,7 +222,9 @@ final class Notifier {
             let conversation = name(item.conversationId, item.conversationTitle)
             switch item.reviewKind {
             case .waiting:
-                list.append(waiting(item, conversation: conversation, store: store))
+                // attente de moins de 20 s (moteur plus ancien) : pas encore, et pas marquée vue
+                if item.id.hasPrefix("c:"), let since = item.ts, Date.now.timeIntervalSince(since) < Self.waitConfirm { continue }
+                list.append(waiting(item, conversation: conversation))
             case .blocked where item.needsDecision:
                 // ce que c'est et ce qui se passe sans réponse ; jamais la commande brute (elle est dans la fiche)
                 list.append(Candidate(key: "r:" + item.id, kind: .sensitive, title: "À autoriser · \(conversation)",
@@ -224,9 +238,10 @@ final class Notifier {
                 let chosen = item.question?.items.first?.chosenLabels.joined(separator: ", ")
                 var body = "« \(item.title ?? "Question") »"
                 if let chosen, !chosen.isEmpty { body += " → \(chosen)" }
+                // rien à faire : elle se relit dans Vigie
                 list.append(Candidate(key: "r:" + item.id, kind: .question,
                                       title: "Réponse choisie pour toi · \(conversation)",
-                                      body: body, conversationId: nil, reviewId: item.id))
+                                      body: body, conversationId: nil, reviewId: item.id, quiet: true))
             case .limit:
                 // Arrêtée par une limite : elle n'a pas fini. Seulement si c'est récent.
                 guard recent(item.ts) else { continue }
@@ -236,11 +251,12 @@ final class Notifier {
             case .other:
                 // un avis du moteur (compte à reconnecter, compte changé, module Codex) : son propre titre, jamais
                 // « … t'attend » (rien à décider dans une conversation), et sa conversation en sous-titre (après « Tout
-                // passer sur… », quatre « Compte changé » disent chacun laquelle relancer)
+                // passer sur… », quatre « Compte changé » disent chacun laquelle relancer). « Lancée sur X au lieu de
+                // Y » (`cf:`) est discrète : elle reprendra seule sur son compte.
                 list.append(Candidate(key: "r:" + item.id, kind: .waiting, title: item.title ?? "Vigie",
                                       subtitle: item.conversationId != nil ? conversation : "",
                                       body: item.detail ?? "", conversationId: item.conversationId, reviewId: nil,
-                                      accountId: item.accountId))
+                                      quiet: item.id.hasPrefix("cf:"), accountId: item.accountId))
             case .blocked:
                 continue
             }
@@ -294,8 +310,8 @@ final class Notifier {
         return list
     }
 
-    /// Ce que les conversations ont laissé tourner : chaque arrêt automatique (discret), et une alerte par jour au plus
-    /// quand les oubliés pèsent (2 Go, ou 10 processus).
+    /// Ce que les conversations ont laissé tourner : chaque arrêt automatique, et un récapitulatif par jour au plus quand
+    /// les oubliés pèsent (2 Go, ou 10 processus). Tous discrets : rien ne presse, la page En fond les arrête.
     private func background(_ store: VigieStore) -> [Candidate] {
         guard let summary = store.backgroundSummary else { return [] }
         var list: [Candidate] = []
@@ -314,25 +330,40 @@ final class Notifier {
             list.append(Candidate(key: "bg:day:\(day)", kind: .background,
                                   title: "En fond : \(Fmt.count(count, "oublié")) · \(Fmt.memory(mb: mb))",
                                   subtitle: "Leurs conversations sont fermées",
-                                  body: summary.forgottenLabels.joined(separator: ", "), conversationId: nil, reviewId: nil))
+                                  body: summary.forgottenLabels.joined(separator: ", "), conversationId: nil, reviewId: nil,
+                                  quiet: true))
         }
         return list
     }
 
     /// Une conversation t'attend : sa question si Vigie l'a vue, sinon ce qu'elle dit attendre. Le clic ouvre la
     /// conversation, et la fiche pour répondre d'ici quand la question s'y prête.
-    private func waiting(_ item: ReviewItem, conversation: String, store: VigieStore) -> Candidate {
+    private func waiting(_ item: ReviewItem, conversation: String) -> Candidate {
         if item.id.hasPrefix("w:") {
             return Candidate(key: "r:" + item.id, kind: .waiting,
                              title: Self.isPlan(item.title) ? "\(conversation) te propose un plan" : "\(conversation) te pose une question",
                              subtitle: Self.deadline(item.detail), body: item.title ?? "Elle attend ta réponse",
                              conversationId: item.conversationId, reviewId: item.id)
         }
-        let summary = item.conversationId.flatMap { store.conversation($0) }
+        // `c:` : l'heure du début de l'attente fait la clé, une seule notification par attente
         let stamp = item.ts.map { String(Int($0.timeIntervalSince1970)) } ?? ""
-        return Candidate(key: "r:\(item.id):\(stamp)", kind: .waiting, title: "\(conversation) t'attend",
-                         body: summary?.waitingFor ?? item.detail ?? "Elle attend ta réponse",
-                         conversationId: item.conversationId, reviewId: item.id)
+        return Candidate(key: "r:\(item.id):\(stamp)", kind: .waiting, title: Self.waitTitle(item, conversation: conversation),
+                         body: Self.waitBody(item), conversationId: item.conversationId, reviewId: item.id)
+    }
+
+    /// « Atelier attend ton accord » (une action que Vigie n'a pas validée seule), sinon « Atelier attend ta réponse ».
+    static func waitTitle(_ item: ReviewItem, conversation: String) -> String {
+        item.title?.hasPrefix("Attend ton accord") == true ? "\(conversation) attend ton accord" : "\(conversation) attend ta réponse"
+    }
+
+    /// « Une action à autoriser : Vigie ne l'a pas validée seule. En attente depuis 14:05. » Le texte est figé une fois
+    /// posté : l'heure du début de l'attente, pas une durée.
+    static func waitBody(_ item: ReviewItem) -> String {
+        var text = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if text.isEmpty { text = "Elle attend ta réponse." }
+        if let last = text.last, !".!?…»".contains(last) { text += "." }
+        if let since = item.ts { text += " En attente depuis \(Fmt.time(since))." }
+        return text
     }
 
     /// Un plan à approuver : le titre que le moteur donne à ExitPlanMode (l'ancien « Plan à valider » compris).
@@ -456,8 +487,8 @@ final class Notifier {
                                   conversationId: report.conversationId, version: version))
     }
 
-    /// Un workflow fini : en échec ou arrêté, toujours ; réussi, seulement si la conversation n'a pas repris la main
-    /// (sinon il entre dans la fin de la conversation).
+    /// Un workflow fini : en échec ou arrêté, toujours, en bannière ; réussi, seulement si la conversation n'a pas repris
+    /// la main (sinon il entre dans la fin de la conversation), et discret : rien à faire.
     private func workflowEnd(_ report: Report, reports: [Report], store: VigieStore,
                              name: (String?, String?) -> String) -> Candidate? {
         guard recent(report.ts), let end = report.ts else { return nil }
@@ -485,7 +516,8 @@ final class Notifier {
         return remember(Candidate(key: "m:" + report.stableKey, kind: failed || stopped ? .stopped : .missionDone,
                                   title: "\(conversation) · workflow \(outcome)", subtitle: report.title ?? "",
                                   body: lines.isEmpty ? "Workflow \(outcome)" : lines.joined(separator: "\n"),
-                                  conversationId: report.conversationId, version: end.timeIntervalSince1970))
+                                  conversationId: report.conversationId, version: end.timeIntervalSince1970,
+                                  quiet: !failed && !stopped))
     }
 
     /// Un agent lancé seul, fini après plus de 10 min : dans le centre de notifications, sans bannière ; une bannière

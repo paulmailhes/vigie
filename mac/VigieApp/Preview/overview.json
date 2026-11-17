@@ -178,8 +178,8 @@
       "kind": "waiting",
       "conversationId": "c3d2e1f0-8a9b-4c7d-b6e5-1f2a3b4c5d6e",
       "conversationTitle": "Portail/front",
-      "title": "Attend ta réponse dans VS Code",
-      "detail": "Pousser la branche paiement ?",
+      "title": "Attend ton accord dans VS Code",
+      "detail": "Une action à autoriser : Vigie ne l'a pas validée seule.",
       "ts": "2026-10-19T21:12:00.000Z"
     },
     {
@@ -530,7 +530,7 @@
       "lastActivity": "2026-10-19T21:12:00.000Z",
       "needsYou": 2,
       "headline": "Pousser la branche paiement ?",
-      "waitingFor": "Je peux pousser la branche paiement ?",
+      "waitingFor": "Une action à autoriser : Vigie ne l'a pas validée seule.",
       "rate": {
         "weekPctPerHour": 0.0,
         "tokensPerMin": 0,

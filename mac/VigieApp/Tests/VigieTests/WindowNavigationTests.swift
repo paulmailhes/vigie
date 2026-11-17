@@ -83,6 +83,92 @@ struct WindowNavigationTests {
                 == "Atelier, Boutique et Portail/back vont bientôt s'arrêter")
     }
 
+    /// Les données d'exemple dans un dossier temporaire, avec ce que l'essai remplace dans la vue d'ensemble.
+    private func store(replacing changes: [String: Any]) async throws -> VigieStore {
+        let source = Self.previewFolder.appending(path: "overview.json")
+        var overview = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as? [String: Any])
+        for (key, value) in changes { overview[key] = value }
+        let folder = FileManager.default.temporaryDirectory.appending(path: "vigie-notifications-\(UUID().uuidString)",
+                                                                       directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: overview).write(to: folder.appending(path: "overview.json"))
+        let store = VigieStore(client: VigieClient(source: .fixtures(folder)))
+        await store.refreshOverview()
+        try? FileManager.default.removeItem(at: folder)
+        return store
+    }
+
+    /// Une bannière seulement pour ce qui demande un geste ; « t'attend » au bout de 20 s, en français, une fois par
+    /// attente ; le reste dans le centre de notifications, sans bannière.
+    @Test func notificationsAreForWhatNeedsYou() async throws {
+        let now = Date.now
+        func iso(_ seconds: TimeInterval) -> String { now.addingTimeInterval(seconds).formatted(.iso8601) }
+        let toReview: [[String: Any]] = [
+            // attentes annoncées par Claude Code (moteur : 20 s au moins, ts = début de l'attente)
+            ["id": "c:accord", "kind": "waiting", "conversationId": "accord", "conversationTitle": "Atelier",
+             "title": "Attend ton accord dans VS Code", "detail": "Une action à autoriser : Vigie ne l'a pas validée seule.", "ts": iso(-60)],
+            ["id": "c:reponse", "kind": "waiting", "conversationId": "reponse", "conversationTitle": "Boutique",
+             "title": "Attend ta réponse dans VS Code", "detail": "Une question ou un choix à faire.", "ts": iso(-30)],
+            // moteur plus ancien : « en attente » depuis 5 s (la fenêtre que Vigie accepte seule) : pas encore
+            ["id": "c:breve", "kind": "waiting", "conversationId": "breve", "conversationTitle": "Portail",
+             "title": "Attend ta réponse dans VS Code", "detail": "Refaire l'accueil", "ts": iso(-5)],
+            // à agir : question du hook, action sensible, compte changé
+            ["id": "w:question:1", "kind": "waiting", "conversationId": "question", "conversationTitle": "Atelier",
+             "title": "Quel fond ?", "detail": "Réponds dans VS Code.", "ts": iso(-10)],
+            ["id": "g:garde:1", "kind": "blocked", "state": "waiting", "pendingId": "123", "conversationId": "garde",
+             "conversationTitle": "Atelier", "title": "Pousser en force", "ts": iso(-2)],
+            ["id": "s:bascule:1", "kind": "notice", "conversationId": "bascule", "conversationTitle": "Atelier",
+             "title": "Compte changé", "detail": "Écris-lui un message.", "ts": iso(-60)],
+            // rien à faire : réponse choisie pour toi, lancée sur un autre compte
+            ["id": "q:1", "kind": "question", "conversationId": "atelier", "conversationTitle": "Atelier",
+             "title": "Quel fond ?", "ts": iso(-60)],
+            ["id": "cf:autre:travail2", "kind": "notice", "conversationId": "autre", "conversationTitle": "Atelier",
+             "title": "Lancée sur Perso au lieu de Travail 2", "detail": "Elle reprendra sur Travail 2.", "ts": iso(-60)],
+        ]
+        let reports: [[String: Any]] = [
+            ["kind": "workflowDone", "id": "wf:fini:1", "conversationId": "fini", "conversationTitle": "Atelier",
+             "title": "Relecture", "status": "done", "ts": iso(-300)],
+            ["kind": "workflowDone", "id": "wf:rate:1", "conversationId": "rate", "conversationTitle": "Atelier",
+             "title": "Relecture", "status": "failed", "ts": iso(-300)],
+        ]
+        let store = try await store(replacing: ["toReview": toReview, "reports": reports])
+        let list = Notifier().collect(store)
+        func candidate(_ key: String) throws -> Notifier.Candidate { try #require(list.first { $0.key == key }, "\(key) absente") }
+        func since(_ id: String) throws -> Date { try #require(store.toReview.first { $0.id == id }?.ts) }
+        func stamp(_ id: String) throws -> String { String(Int(try since(id).timeIntervalSince1970)) }
+
+        // « Atelier attend ton accord », l'heure du début de l'attente dans le texte et dans la clé
+        let accord = try candidate("r:c:accord:\(try stamp("c:accord"))")
+        #expect(accord.title == "Atelier attend ton accord")
+        #expect(accord.body == "Une action à autoriser : Vigie ne l'a pas validée seule. En attente depuis \(Fmt.time(try since("c:accord"))).")
+        #expect(!accord.quiet)
+        let reponse = try candidate("r:c:reponse:\(try stamp("c:reponse"))")
+        #expect(reponse.title == "Boutique attend ta réponse")
+        #expect(reponse.body.hasPrefix("Une question ou un choix à faire. En attente depuis "))
+        // une attente de moins de 20 s ne notifie rien (et n'est pas marquée vue : elle partira plus tard)
+        #expect(!list.contains { $0.key.hasPrefix("r:c:breve") })
+        #expect(!list.contains { $0.body.contains("permission prompt") || $0.title.contains("t'attend") })
+        // texte d'un moteur plus ancien (ce que fait la conversation) : une phrase finie
+        let old = try JSONDecoder().decode(ReviewItem.self, from: Data(#"{ "id": "c:x", "detail": "Refaire l'accueil" }"#.utf8))
+        #expect(Notifier.waitBody(old) == "Refaire l'accueil.")
+        #expect(Notifier.waitTitle(old, conversation: "Portail") == "Portail attend ta réponse")
+
+        // à agir : en bannière
+        #expect(try !candidate("r:w:question:1").quiet)
+        #expect(try candidate("r:g:garde:1").kind == .sensitive)
+        #expect(try !candidate("r:g:garde:1").quiet)
+        #expect(try !candidate("r:s:bascule:1").quiet)
+        #expect(try candidate("m:wf:rate:1").kind == .stopped)
+        #expect(try !candidate("m:wf:rate:1").quiet, "un workflow en échec garde sa bannière")
+
+        // rien à faire : discrètes
+        #expect(try candidate("r:q:1").quiet)
+        #expect(try candidate("r:cf:autre:travail2").quiet)
+        #expect(try candidate("m:wf:fini:1").quiet)
+        let day = try #require(list.first { $0.key.hasPrefix("bg:day:") }, "les données d'exemple ont 2 oubliés, 2,1 Go")
+        #expect(day.quiet)
+    }
+
     @Test func backAndForwardKeepThePanel() {
         let store = VigieStore(client: VigieClient(source: .fixtures(URL(filePath: "/nonexistent"))))
         #expect(!store.canGoBack)

@@ -95,7 +95,11 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Me prévenir quand")
             } footer: {
-                Text("Une seule notification par élément. Un clic l'ouvre dans Vigie.")
+                Text("""
+                    Une seule notification par élément. Un clic l'ouvre dans Vigie.
+                    Une conversation qui attend ton accord ou ta réponse est signalée au bout de 20 s, quand Vigie n'a pas pu valider seule.
+                    Ce qui ne demande rien de toi (réponse choisie pour toi, workflow réussi, processus oubliés, conversation lancée sur un autre compte) arrive sans bannière, dans le centre de notifications.
+                    """)
                     .foregroundStyle(.secondary)
             }
         }
