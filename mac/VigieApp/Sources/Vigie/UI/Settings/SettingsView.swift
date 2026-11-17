@@ -97,7 +97,8 @@ struct NotificationSettingsView: View {
             } footer: {
                 Text("""
                     Une seule notification par élément. Un clic l'ouvre dans Vigie.
-                    Une conversation qui attend ton accord ou ta réponse est signalée au bout de 20 s, quand Vigie n'a pas pu valider seule.
+                    Questions, plans et actions sensibles : tout de suite.
+                    Une autre fenêtre de VS Code que Vigie n'a pas pu valider seule : au bout de 20 s.
                     Ce qui ne demande rien de toi (réponse choisie pour toi, workflow réussi, processus oubliés, conversation lancée sur un autre compte) arrive sans bannière, dans le centre de notifications.
                     """)
                     .foregroundStyle(.secondary)
