@@ -414,7 +414,10 @@ async function onQuestionRequest(input) {
   log(input, mode === 'wait' ? 'question-attente' : 'question-pour-toi', mode === 'wait' ? { minutes: waitMin, ...asked } : asked);
   // La fenêtre reste affichée ; on reste en éveil pour suivre un changement de réglage fait dans Vigie.
   for (;;) {
-    onKill = mode === 'wait' ? () => log(input, 'question-tu-as-repondu') : null;
+    // Claude Code tue le hook quand l'utilisateur répond dans VS Code : la ligne note la réponse dans les deux modes. Elle
+    // ferme l'attente (pendingWaits) et tient la fenêtre le temps que le registre repasse à « busy » (heldByHook) : sans
+    // elle, « Attend ta réponse » pouvait partir juste après la réponse.
+    onKill = () => log(input, 'question-tu-as-repondu');
     let done = early; early = null;
     const r = await waitFor(() => (mode === 'wait' ? since + waitMin * 60_000 : Infinity), (s) => {
       if (input.tool_name === 'AskUserQuestion' && (given = takeAnswer(pendingId, { since, sessionId: sid }))) return 'app';

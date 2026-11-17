@@ -918,7 +918,11 @@ function decorate(sum, ctx, needs, accepted) {
   // ce que Claude Code attend, en français (jamais son texte anglais « permission prompt ») ; rien tant que l'attente
   // n'est pas confirmée
   if (typeof sum.waitingFor === 'string' && (status === 'waiting' || status === 'blocked')) {
-    out.waitingFor = waitWording(liveWaitOf(ctx, sum)?.waitingFor ?? sum.waitingFor).detail;
+    // une attente du hook dit elle-même ce qu'elle attend : Claude Code écrit « permission prompt » aussi pour un plan
+    const held = ctx.waits.get(sum.id)?.[0];
+    out.waitingFor = held
+      ? (held.question ? (held.tool === 'ExitPlanMode' ? 'Un plan à approuver.' : 'Une question ou un choix à faire.') : 'Une action sensible à autoriser.')
+      : waitWording(liveWaitOf(ctx, sum)?.waitingFor ?? sum.waitingFor).detail;
   }
   if (stopped) {
     const label = ctx.model.accounts.find((a) => a.id === stopped.to)?.label || stopped.to;

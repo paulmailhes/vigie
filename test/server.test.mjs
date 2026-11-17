@@ -1722,6 +1722,49 @@ test('plan en « toujours me demander » : « Plan à approuver » tout de suite
 
 // « Toujours me demander » : une question restée sans réponse plus de 2 h. Le hook s'est arrêté (fin de vie, plantage,
 // tué) sans rien noter, la fenêtre de VS Code attend toujours : la conversation attend vraiment l'utilisateur.
+// Réponse donnée dans VS Code en « toujours me demander » : Claude Code tue le hook, qui note sa réponse
+// (question-tu-as-repondu, avec son pid). Le registre repasse à « busy » un peu après : pendant cet écart, pas de
+// « Attend ta réponse » pour la fenêtre qu'on vient de fermer.
+test('réponse dans VS Code en « toujours me demander » : pas de « Attend ta réponse » juste après', async () => {
+  const SID_A = 'ab12cd34-ef56-4a78-9b90-cd1234ef5678';
+  const F = path.join(CODE, 'galerie');
+  fs.mkdirSync(F, { recursive: true });
+  const M = mk(SID_A, F);
+  const asked = Date.now() - 30_000;
+  writeLines(path.join(PROJECTS, '-maison-Code-galerie', `${SID_A}.jsonl`), [M.human('refais la galerie', new Date(asked - 120_000).toISOString()),
+    M.call('Read', { file_path: path.join(F, 'galerie.tsx') }, new Date(asked - 60_000).toISOString())]);
+  const [proc, hook] = [0, 1].map(() => spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' }));
+  const reg = path.join(SESSIONS, `${proc.pid}.json`);
+  wj(reg, { pid: proc.pid, sessionId: SID_A, cwd: F, startedAt: asked - 600_000, entrypoint: 'claude-vscode', name: 'galerie',
+    status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: asked, updatedAt: asked });
+  const question = { tool: 'AskUserQuestion', action: 'Quelle mise en page ? [Grille / Liste]',
+    questions: [{ question: 'Quelle mise en page ?', header: 'Galerie', multiSelect: false, options: [{ label: 'Grille', description: null }, { label: 'Liste', description: null }] }] };
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date(asked + 300).toISOString(), event: 'question-pour-toi',
+    sessionId: SID_A, cwd: F, pid: hook.pid, ...question }) + '\n');
+  try {
+    // la question du hook, tout de suite, sans « c: »
+    let o = (await get('/api/v2/overview')).body;
+    for (let i = 0; i < 80 && !o.toReview.some((x) => x.conversationId === SID_A); i++) {
+      await new Promise((res) => setTimeout(res, 100));
+      o = (await get('/api/v2/overview')).body;
+    }
+    assert.deepEqual(o.toReview.filter((x) => x.conversationId === SID_A).map((x) => x.id.slice(0, 2)), ['w:']);
+    // l'utilisateur répond dans VS Code : le hook est tué et note sa réponse ; le registre dit encore « en attente »
+    hook.kill('SIGTERM');
+    fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'question-tu-as-repondu',
+      sessionId: SID_A, cwd: F, pid: hook.pid, tool: question.tool, action: question.action }) + '\n');
+    await new Promise((res) => setTimeout(res, 300));
+    o = (await get('/api/v2/overview')).body;
+    const items = o.toReview.filter((x) => x.conversationId === SID_A);
+    assert.deepEqual(items.map((x) => x.id), [], 'ni question, ni « Attend ta réponse » pour la fenêtre fermée');
+    assert.notEqual(o.conversations.find((c) => c.id === SID_A)?.status, 'waiting');
+  } finally {
+    fs.rmSync(reg, { force: true });
+    proc.kill('SIGKILL');
+    hook.kill('SIGKILL');
+  }
+});
+
 // La ligne du hook, datée d'il y a 2 h, est ajoutée en fin de journal : cet essai reste le dernier du fichier.
 test('question restée 2 h 01 sans réponse, hook arrêté sans rien noter : « Attend ta réponse », jamais perdue', async () => {
   const SID_Q = 'ff11aa22-bb33-4c44-8d55-ee6677889900';

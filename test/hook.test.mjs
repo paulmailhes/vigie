@@ -570,7 +570,7 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
       h.child.kill('SIGTERM'); // l'utilisateur répond dans VS Code
       const { out } = await h.done;
       assert.equal(out, null, 'plan ni approuvé ni refusé par Vigie');
-      assert.deepEqual(sb.events(), ['question-pour-toi']);
+      assert.deepEqual(sb.events(), ['question-pour-toi', 'question-tu-as-repondu']);
     } finally {
       h.child.kill('SIGKILL'); // en mode « me demander », le hook attendrait 2 h
     }
