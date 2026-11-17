@@ -692,8 +692,10 @@ const waitTracker = createWaitTracker();
 // { since, waitingFor } d'une attente confirmée, sinon null ; une fois par requête et par conversation (reviewItems puis
 // decorate). Seule une attente déjà assez longue sur la photo du registre (4 s au plus) fait relire son fichier : la
 // photo peut encore dire « en attente » juste après une réponse dans VS Code. La fenêtre d'une attente du hook à
-// laquelle l'utilisateur vient de répondre dans Vigie n'en est pas une : le hook n'a pas encore lu sa décision
-// (heldByHook).
+// laquelle l'utilisateur vient de répondre dans Vigie n'en est pas une, le temps que le hook lise sa décision et
+// réponde (heldByHook) : l'historique est alors relu (sinon au tour suivant, jusqu'à 4 s plus tard) pour voir sa
+// réponse, notée juste avant qu'il s'arrête. Tant qu'il vit, son attente est de nouveau listée (pendingWaits) et passe
+// devant.
 function liveWaitOf(ctx, s) {
   ctx.liveWaits ??= new Map();
   if (ctx.liveWaits.has(s.id)) return ctx.liveWaits.get(s.id);
@@ -704,7 +706,11 @@ function liveWaitOf(ctx, s) {
     if (confirmedWait({ snapshot, firstSeen, now: ctx.now })) {
       wait = confirmedWait({ snapshot, fresh: indexer.liveNow(s.id), firstSeen, now: ctx.now });
     }
-    if (wait && heldByHook({ wait, history, sessionId: s.id, firstSeen })) wait = null;
+    if (wait) {
+      try { readHistory(); } catch (e) { console.error('[vigie] historique :', clean(e)); }
+      ctx.decided ??= new Set(Object.keys(readDecisions()));
+      if (heldByHook({ wait, history, sessionId: s.id, firstSeen, decided: ctx.decided, now: ctx.now })) wait = null;
+    }
   }
   ctx.liveWaits.set(s.id, wait);
   return wait;

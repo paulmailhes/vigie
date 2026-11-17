@@ -537,6 +537,24 @@ test('attentes (conversation VS Code)', { concurrency: true }, async (t) => {
     assert.deepEqual(sb.questions(), []);
   });
 
+  // « Toujours me demander » (réglage par défaut des questions) : le hook attend avec la fenêtre de VS Code. S'il s'arrête
+  // sans répondre (fin de vie, Claude Code mort), il le note : sinon Vigie croirait la fenêtre encore tenue par le hook.
+  await t.test('question « me demander » : fin de vie du hook ou Claude Code mort, la fenêtre est rendue (question-rendue)', async () => {
+    const sb = sandbox({ questions: 'ask' });
+    const { out } = await sb.start({ hook_event_name: 'PermissionRequest', tool_name: 'AskUserQuestion', tool_input: Q }, { VIGIE_HOOK_LIFETIME_MS: '300' }).done;
+    assert.equal(out, null, 'rien répondu à la place de l\'utilisateur');
+    assert.deepEqual(sb.events(), ['question-pour-toi', 'question-rendue']);
+    assert.equal(sb.history()[1].raison, 'fin');
+    assert.equal(sb.history()[1].pid, sb.history()[0].pid);
+    const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout;
+    const sb2 = sandbox({ questions: 'ask' });
+    const r2 = await sb2.start({ hook_event_name: 'PermissionRequest', tool_name: 'AskUserQuestion', tool_input: Q }, { CLAUDE_PID: dead }).done;
+    assert.equal(r2.out, null);
+    assert.deepEqual(sb2.events(), ['question-pour-toi', 'question-rendue']);
+    assert.equal(sb2.history()[1].raison, 'orphelin');
+    assert.deepEqual([...sb.questions(), ...sb2.questions()], [], 'aucun choix noté à la place de l\'utilisateur');
+  });
+
   // Un plan proposé en « toujours me demander » : le hook attend vraiment, sa ligne porte donc `questions` (vide : un plan
   // se répond dans VS Code), pour que Vigie le montre tout de suite (« Plan à approuver »). Une réponse écrite pour son pid
   // n'approuve pas le plan.

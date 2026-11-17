@@ -1623,9 +1623,28 @@ test('décision donnée dans Vigie : pas de « Attend ton accord » le temps que
     assert.deepEqual(v.items, [], 'ni le garde-fou décidé, ni « Attend ton accord » pour la même fenêtre');
     assert.deepEqual([v.conv.status, v.conv.needsYou], ['working', 0]);
 
-    // le hook a pris la décision ; une autre fenêtre, ouverte 35 s après celle du garde-fou, que Vigie n'a pas validée
-    // seule : notifiée
-    line(Date.now(), 'garde-fou-autorise-app', hook1.pid);
+    // le hook prend la décision (entrée effacée), répond, le note et s'arrête ; le registre dit encore « en attente » :
+    // sa réponse, relue aussitôt dans le journal (sans attendre le tour du moteur), tient la fenêtre 5 s
+    const gone = new Promise((res) => hook1.once('exit', res));
+    fs.writeFileSync(path.join(DATA, 'decisions.json'), '{}');
+    const answered = Date.now();
+    line(answered, 'garde-fou-autorise-app', hook1.pid);
+    hook1.kill('SIGKILL');
+    await gone;
+    v = await view();
+    assert.deepEqual(v.items, [], 'rien juste après la réponse du hook');
+    assert.deepEqual([v.conv.status, v.conv.needsYou], ['working', 0]);
+    while (Date.now() - answered < 4500) {
+      await new Promise((res) => setTimeout(res, 250));
+      v = await view();
+      assert.deepEqual([v.items, v.conv.status], [[], 'working'], 'rien pendant les 5 s qui suivent sa réponse');
+    }
+    // au-delà, la même fenêtre est toujours là : elle attend vraiment l'utilisateur
+    v = await until((x) => x.items.some((i) => i.id === `c:${SID_D}`), 'fenêtre restée ouverte après la réponse');
+    assert.ok(Date.now() - answered > 5000);
+    assert.deepEqual(v.items.map((i) => [i.id, i.ts]), [[`c:${SID_D}`, new Date(opened).toISOString()]]);
+
+    // une autre fenêtre, ouverte 35 s après celle du garde-fou, que Vigie n'a pas validée seule : notifiée
     const later = Date.now() - 25_000;
     entry(later);
     v = await until((x) => x.items.some((i) => i.id === `c:${SID_D}`), 'autre fenêtre notifiée');
@@ -1696,6 +1715,41 @@ test('plan en « toujours me demander » : « Plan à approuver » tout de suite
     assert.equal(hook.exitCode, null, 'le hook attend toujours, sans avoir répondu');
   } finally {
     hook.kill('SIGKILL');
+    fs.rmSync(reg, { force: true });
+    proc.kill('SIGKILL');
+  }
+});
+
+// « Toujours me demander » : une question restée sans réponse plus de 2 h. Le hook s'est arrêté (fin de vie, plantage,
+// tué) sans rien noter, la fenêtre de VS Code attend toujours : la conversation attend vraiment l'utilisateur.
+// La ligne du hook, datée d'il y a 2 h, est ajoutée en fin de journal : cet essai reste le dernier du fichier.
+test('question restée 2 h 01 sans réponse, hook arrêté sans rien noter : « Attend ta réponse », jamais perdue', async () => {
+  const SID_Q = 'ff11aa22-bb33-4c44-8d55-ee6677889900';
+  const F = path.join(CODE, 'menu');
+  fs.mkdirSync(F, { recursive: true });
+  const M = mk(SID_Q, F);
+  const asked = Date.now() - 7_260_000;
+  writeLines(path.join(PROJECTS, '-maison-Code-menu', `${SID_Q}.jsonl`), [M.human('refais le menu', new Date(asked - 120_000).toISOString()),
+    M.call('Read', { file_path: path.join(F, 'menu.tsx') }, new Date(asked - 60_000).toISOString())]);
+  const proc = spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' });
+  const reg = path.join(SESSIONS, `${proc.pid}.json`);
+  wj(reg, { pid: proc.pid, sessionId: SID_Q, cwd: F, startedAt: asked - 600_000, entrypoint: 'claude-vscode', name: 'menu',
+    status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: asked, updatedAt: asked });
+  fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date(asked + 300).toISOString(), event: 'question-pour-toi',
+    sessionId: SID_Q, cwd: F, tool: 'AskUserQuestion', action: 'Quel menu ? [Haut / Bas]', pid: deadPid,
+    questions: [{ question: 'Quel menu ?', header: 'Menu', multiSelect: false, options: [{ label: 'Haut', description: null }, { label: 'Bas', description: null }] }] }) + '\n');
+  try {
+    let v;
+    for (let i = 0; i < 120; i++) {
+      const o = (await get('/api/v2/overview')).body;
+      v = { conv: o.conversations.find((c) => c.id === SID_Q), items: o.toReview.filter((x) => x.conversationId === SID_Q) };
+      if (v.items.length) break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.deepEqual(v.items.map((i) => [i.id, i.title, i.detail, i.ts]),
+      [[`c:${SID_Q}`, 'Attend ta réponse dans VS Code', 'Une question ou un choix à faire.', new Date(asked).toISOString()]], JSON.stringify(v));
+    assert.deepEqual([v.conv.status, v.conv.needsYou, v.conv.waitingFor], ['waiting', 1, 'Une question ou un choix à faire.']);
+  } finally {
     fs.rmSync(reg, { force: true });
     proc.kill('SIGKILL');
   }

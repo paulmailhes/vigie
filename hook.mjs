@@ -435,7 +435,9 @@ async function onQuestionRequest(input) {
     if (r === 'mode:ask') { mode = 'ask'; log(input, 'question-rendue'); continue; }
     onKill = null;
     if (r === 'repondu') return log(input, 'question-tu-as-repondu', { extrait: done.extrait });
-    if (mode === 'wait') log(input, 'question-rendue', { raison: r });
+    // Fin de vie du hook ou Claude Code mort, sans réponse : la fenêtre reste à l'utilisateur. Noté dans les deux modes :
+    // sans cette ligne, Vigie croirait la fenêtre encore tenue par le hook.
+    log(input, 'question-rendue', { raison: r });
     return;
   }
 }
