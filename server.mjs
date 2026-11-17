@@ -168,9 +168,8 @@ const mcp = createMcp({
   onChange: stateChanged,
 });
 // L'extension Claude Code lit la confiance d'un dossier sur le compte du Mac, la conversation l'enregistre sur son
-// compte : chaque accord est recopié sur les autres comptes, en ajout seulement (lib/trust.mjs).
+// compte : chaque accord est recopié sur les autres comptes, en ajout seulement et sans mémoire (lib/trust.mjs).
 const trust = createTrustSync({
-  dataDir: DATA,
   home: HOME,
   accounts: () => accounts.load().accounts.map((a) => ({ id: a.id, label: a.label, file: claudeJsonPath(a) })),
   log: (m) => console.error(`[vigie] ${m}`),

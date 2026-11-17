@@ -930,7 +930,7 @@ test('confiance des dossiers : accordée par une conversation sur un compte, rec
   assert.equal(m.mcpServers['figma-perso'].headers.Authorization, `Bearer ${SECRETS[0]}`, 'le reste du fichier est gardé');
   assert.deepEqual(m.projects[CWD].mcpServers['figma-desktop'], { type: 'http', url: `http://127.0.0.1:3845/mcp?token=${SECRETS[1]}` });
   assert.match(logs, /confiance des dossiers recopiée : .*confiance → /);
-  assert.equal(fs.statSync(path.join(DATA, 'trust-sync.json')).mode & 0o777, 0o600);
+  assert.equal(fs.existsSync(path.join(DATA, 'trust-sync.json')), false, 'aucune mémoire de la confiance');
 });
 
 // ---------- HTTP ----------
