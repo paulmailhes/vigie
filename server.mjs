@@ -26,6 +26,7 @@ import { createProcesses } from './lib/processes.mjs';
 import { createOpener, runBin, vscodeLink, chooseSurface, launchMessage } from './lib/opener.mjs';
 import { rateOf, runawayAlert, RATE_MINUTES, SERIES_WINDOWS, SERIES_POINTS, seriesFrom, seriesPoints, weekRatio, weekFullAt } from './lib/usage.mjs';
 import { limitResetAt, limitView } from './lib/limits.mjs';
+import { confirmedWait, createWaitTracker, waitWording } from './lib/live-wait.mjs';
 
 const PORT = Number(process.env.VIGIE_PORT || 4777); // 0 : port libre (tests)
 const HOST = '127.0.0.1';
@@ -669,6 +670,29 @@ function connectionNotices(sums) {
   return out;
 }
 
+// Attentes que Claude Code annonce dans son registre (lib/live-wait.mjs) : vraies seulement après 20 s sans
+// interruption. Sinon c'est presque toujours la fenêtre de permission que VS Code affiche le temps que le hook de Vigie
+// accepte (≈ 120 ms), photographiée par hasard. waitTracker suit chaque photo (tick) pour un registre sans
+// statusUpdatedAt.
+const waitTracker = createWaitTracker();
+// { since, waitingFor } d'une attente confirmée, sinon null ; une fois par requête et par conversation (reviewItems puis
+// decorate). Seule une attente déjà assez longue sur la photo du registre (4 s au plus) fait relire son fichier : la
+// photo peut encore dire « en attente » juste après une réponse dans VS Code.
+function liveWaitOf(ctx, s) {
+  ctx.liveWaits ??= new Map();
+  if (ctx.liveWaits.has(s.id)) return ctx.liveWaits.get(s.id);
+  let wait = null;
+  if (s.running && s.status === 'waiting') {
+    const snapshot = indexer.live.get(s.id);
+    const firstSeen = waitTracker.firstSeen(s.id);
+    if (confirmedWait({ snapshot, firstSeen, now: ctx.now })) {
+      wait = confirmedWait({ snapshot, fresh: indexer.liveNow(s.id), firstSeen, now: ctx.now });
+    }
+  }
+  ctx.liveWaits.set(s.id, wait);
+  return wait;
+}
+
 // « À regarder » : ce qui attend l'utilisateur maintenant d'abord, puis ce qui a mal tourné ces dernières 24 h.
 // Chaque garde-fou porte de quoi décider ou refaire l'action : state, pendingId, expiresAt, rule, command
 // (masquée, 4000 caractères au plus), byAgent, cwd, needsPassword. Son titre dit ce que fait l'action (« Pousser en
@@ -701,10 +725,16 @@ function reviewItems(ctx, sums) {
       }
     }
   }
+  // Claude Code dit attendre l'utilisateur, sans attente du hook (ex. auto-accept coupé, fenêtre de VS Code, question
+  // d'un MCP) : seulement après 20 s (liveWaitOf). ts = début de l'attente : une seule notification par attente, même
+  // si des agents écrivent pendant ce temps.
   for (const s of sums) {
     if (s.status !== 'waiting' || ctx.waits.has(s.id)) continue;
+    const wait = liveWaitOf(ctx, s);
+    if (!wait) continue;
+    const say = waitWording(wait.waitingFor);
     live.push({ id: `c:${s.id}`, kind: 'waiting', conversationId: s.id, conversationTitle: s.title,
-      title: `Attend ta réponse dans ${where(s.id)}`, detail: s.headline || null, ts: s.lastActivity || new Date(ctx.now).toISOString() });
+      title: say.title(where(s.id)), detail: say.detail, ts: new Date(wait.since).toISOString() });
   }
   // Codex : actions sensibles retenues dans Vigie (lib/approvals.mjs), à autoriser ici (une fois, pour l'appel exact).
   for (const a of awaitingOf(ctx)) {
@@ -820,6 +850,9 @@ function decorate(sum, ctx, needs, accepted) {
   let status = sum.status;
   if (sum.running && waits.some((w) => !w.question)) status = 'blocked';
   else if (sum.running && waits.length) status = 'waiting';
+  // « en attente » d'après Claude Code, depuis moins de 20 s ou plus du tout : elle travaille (le plus souvent, la
+  // fenêtre de permission que Vigie vient d'accepter seule). La pastille « T'attend » ne clignote plus.
+  else if (status === 'waiting' && !liveWaitOf(ctx, sum)) status = 'working';
   // arrêtée pour changer de compte : elle attend un message de l'utilisateur dans VS Code pour repartir sur le nouveau compte
   const stopped = !sum.running ? accounts.stoppedFor(sum.id, ctx.model) : null;
   if (stopped) status = 'waiting';
@@ -859,7 +892,11 @@ function decorate(sum, ctx, needs, accepted) {
     checks: sum.checks ?? null,
     compactions: sum.compactions ?? null,
   };
-  if (typeof sum.waitingFor === 'string') out.waitingFor = sum.waitingFor;
+  // ce que Claude Code attend, en français (jamais son texte anglais « permission prompt ») ; rien tant que l'attente
+  // n'est pas confirmée
+  if (typeof sum.waitingFor === 'string' && (status === 'waiting' || status === 'blocked')) {
+    out.waitingFor = waitWording(liveWaitOf(ctx, sum)?.waitingFor ?? sum.waitingFor).detail;
+  }
   if (stopped) {
     const label = ctx.model.accounts.find((a) => a.id === stopped.to)?.label || stopped.to;
     out.resume = { to: stopped.to, at: stopped.at };
@@ -2047,6 +2084,7 @@ async function tick() {
   if (ticking) return;
   ticking = true;
   try { readHistory(); await indexer.refresh(); } catch (e) { console.error('[vigie] indexation :', clean(e)); }
+  try { waitTracker.note(indexer.live); } catch (e) { console.error('[vigie] attentes :', clean(e)); }
   try {
     const r = accounts.processPending(liveEnriched());
     const now = new Date().toISOString();

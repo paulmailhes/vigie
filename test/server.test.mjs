@@ -1480,3 +1480,78 @@ test('conversation jamais associée : affichée sur le compte des nouvelles conv
   assert.equal(o.conversations.find((c) => c.id === SID_B).accountId, 'travail1', 'associée : son compte');
   assert.equal((await post('/api/v2/accounts', { action: 'setDefault', id: 'travail1' })).status, 200);
 });
+
+// Claude Code se dit « en attente » (registre : status waiting) au moment même où il lance le hook PermissionRequest de
+// Vigie, qui accepte en ~120 ms : une photo du registre tombée là ne doit rien notifier. Une attente n'est vraie qu'après
+// 20 s (statusUpdatedAt), relue à l'instant dans le registre ; une attente du hook passe devant.
+test('attente annoncée par Claude Code : rien avant 20 s, puis « Attend ton accord » daté du début de l\'attente', async () => {
+  const SID_W = 'aa11bb22-cc33-4d44-8e55-ff6677889900';
+  const F = path.join(CODE, 'attente');
+  fs.mkdirSync(F, { recursive: true });
+  const M = mk(SID_W, F);
+  const at = (min) => new Date(Date.now() + min * 60_000).toISOString();
+  writeLines(path.join(PROJECTS, '-maison-Code-attente', `${SID_W}.jsonl`), [M.human('corrige le menu', at(-10)), M.call('Bash', { command: 'npm test' }, at(-9))]);
+  const sleeper = spawn(process.execPath, [FAKE_HOOK], { stdio: 'ignore' });
+  const reg = path.join(SESSIONS, `${sleeper.pid}.json`);
+  const entry = (more) => wj(reg, { pid: sleeper.pid, sessionId: SID_W, cwd: F, startedAt: Date.now() - 600_000, entrypoint: 'claude-vscode', name: 'attente', ...more });
+  const view = async () => {
+    const o = (await get('/api/v2/overview')).body;
+    return { o, conv: o.conversations.find((c) => c.id === SID_W), items: o.toReview.filter((x) => x.conversationId === SID_W) };
+  };
+  const until = async (ok, what) => {
+    let v;
+    for (let i = 0; i < 120; i++) { v = await view(); if (ok(v)) return v; await new Promise((res) => setTimeout(res, 100)); }
+    assert.fail(`${what} : ${JSON.stringify({ conv: v.conv && { status: v.conv.status, needsYou: v.conv.needsYou, waitingFor: v.conv.waitingFor }, items: v.items })}`);
+  };
+  try {
+    // la fenêtre de permission vient de s'ouvrir (Vigie va l'accepter seule) : elle travaille, rien à regarder
+    const started = Date.now() - 2000;
+    entry({ status: 'waiting', waitingFor: 'permission prompt', statusUpdatedAt: started, updatedAt: started });
+    // ouverte = vue sur la photo du registre, qui la dit donc « en attente »
+    let v = await until((x) => x.conv?.running, 'conversation ouverte');
+    assert.equal(v.conv.status, 'working', 'une attente de moins de 20 s ne fait pas « t\'attend »');
+    assert.equal(v.conv.needsYou, 0);
+    assert.equal(v.conv.waitingFor, undefined, 'pas de texte d\'attente tant qu\'elle n\'est pas confirmée');
+    assert.deepEqual(v.items, [], 'rien à regarder pour une attente de moins de 20 s');
+
+    // la même attente, commencée il y a 25 s : « Attend ton accord », en français, datée du début de l'attente
+    const since = Date.now() - 25_000;
+    entry({ status: 'waiting', waitingFor: 'permission prompt', statusUpdatedAt: since, updatedAt: since });
+    v = await until((x) => x.items.some((i) => i.id === `c:${SID_W}`), 'attente de 25 s notifiée');
+    conforms(v.o, Overview);
+    const c = v.items.find((i) => i.id === `c:${SID_W}`);
+    assert.deepEqual([c.kind, c.title, c.detail, c.ts], ['waiting', 'Attend ton accord dans VS Code',
+      'Une action à autoriser : Vigie ne l\'a pas validée seule.', new Date(since).toISOString()]);
+    assert.deepEqual([v.conv.status, v.conv.needsYou, v.conv.waitingFor], ['waiting', 1, 'Une action à autoriser : Vigie ne l\'a pas validée seule.']);
+    assert.ok(!JSON.stringify(v.o).includes('permission prompt'), 'jamais le texte anglais de Claude Code');
+    // le détail de la conversation dit la même chose
+    const d = (await get(`/api/v2/conversation/${SID_W}`)).body;
+    assert.deepEqual([d.summary.status, d.summary.needsYou], ['waiting', 1]);
+
+    // Paul répond dans VS Code : le registre repasse à « busy ». La photo du moteur (jusqu'à 4 s) dit encore « en
+    // attente », mais le fichier relu à l'instant fait foi : plus rien, tout de suite.
+    entry({ status: 'busy', statusUpdatedAt: Date.now(), updatedAt: Date.now() });
+    v = await view();
+    assert.deepEqual(v.items, [], 'pas de « t\'attend » juste après la réponse');
+    assert.equal(v.conv.status, 'working');
+
+    // une question (ou une question d'un MCP) : « Attend ta réponse »
+    const asked = Date.now() - 30_000;
+    entry({ status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: asked, updatedAt: asked });
+    v = await until((x) => x.items.some((i) => i.id === `c:${SID_W}`), 'question de 30 s notifiée');
+    const q = v.items.find((i) => i.id === `c:${SID_W}`);
+    assert.deepEqual([q.title, q.detail, q.ts], ['Attend ta réponse dans VS Code', 'Une question ou un choix à faire.', new Date(asked).toISOString()]);
+
+    // la même attente, mais le hook de Vigie l'attend aussi (question en attente) : sa question passe devant, pas de « c: »
+    fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'question-attente', sessionId: SID_W, cwd: F,
+      tool: 'AskUserQuestion', action: 'Quel menu ? [Haut / Bas]', minutes: 20, pid: sleeper.pid }) + '\n');
+    v = await until((x) => x.items.some((i) => i.id.startsWith('w:')), 'question du hook');
+    assert.deepEqual(v.items.map((i) => i.id.slice(0, 2)), ['w:'], 'la question du hook seule, sans « t\'attend » générique');
+    assert.equal(v.conv.status, 'waiting');
+  } finally {
+    fs.appendFileSync(path.join(DATA, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: 'question-tu-as-repondu', sessionId: SID_W, cwd: F,
+      tool: 'AskUserQuestion', action: 'Quel menu ? [Haut / Bas]' }) + '\n');
+    fs.rmSync(reg, { force: true });
+    sleeper.kill('SIGKILL');
+  }
+});

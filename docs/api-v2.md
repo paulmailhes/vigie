@@ -226,10 +226,10 @@ Toutes les réponses portent `X-Frame-Options: DENY` et une `Content-Security-Po
 
 ### ConversationSummary
 - `accountId` : le compte noté pour la conversation (`data/accounts.json`), sinon `"travail1"` : sans choix noté, le lanceur la reprend sur Travail 1.
-- `status` : `blocked` quand un garde-fou attend la décision de l'utilisateur dans VS Code, `waiting` quand une question attend (ou quand Claude Code dit « en attente »).
+- `status` : `blocked` quand un garde-fou attend la décision de l'utilisateur dans VS Code, `waiting` quand une question attend (ou quand Claude Code dit « en attente » depuis au moins 20 s sans interruption, d'après `statusUpdatedAt` de son registre : avant, `working`. En mode VS Code, Claude Code passe « en attente » le temps que le hook de Vigie accepte seul, environ 120 ms).
 - `weekPct` = poids d'usage de la conversation depuis le début de la semaine du compte (`week.resetsAt` − 7 j), divisé par le poids de toutes les conversations de ce compte sur la même période, multiplié par `week.pct`. Poids = input + 5 × output + 1,25 × écriture cache + 0,1 × lecture cache, rangé par organisation (pièces jointes `credential_org`), l'organisation du compte venant de `oauthAccount.organizationUuid`. Arrondi au dixième. `null` si le compte n'a pas de relevé hebdomadaire, pas d'organisation connue, ou aucun usage sur la période.
 - `needsYou` = nombre d'éléments de `toReview` de cette conversation.
-- Champs ajoutés : `contextTokens` (? taille du contexte, dans l'aide d'une bascule de compte ; la phrase « Elle relira toute la conversation sur Perso : sa première réponse coûtera plus qu'un message ordinaire. » ne dit pas de chiffre), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? texte de Claude Code). Dans le détail seulement : `branch`, `startedAt`.
+- Champs ajoutés : `contextTokens` (? taille du contexte, dans l'aide d'une bascule de compte ; la phrase « Elle relira toute la conversation sur Perso : sa première réponse coûtera plus qu'un message ordinaire. » ne dit pas de chiffre), `pendingAccountId` (? bascule en attente vers ce compte), `waitingFor` (? ce que la conversation attend, en français, seulement quand `status` vaut `waiting` ou `blocked` : « Une action à autoriser : Vigie ne l'a pas validée seule. » pour `permission prompt`, « Une question ou un choix à faire. » pour `input needed`, sinon « Elle attend ta réponse. » ; jamais le texte anglais de Claude Code ; arrêtée pour changer de compte : « Écris-lui un message dans VS Code : elle reprendra sur … »). Dans le détail seulement : `branch`, `startedAt`.
 
 ### toReview
 Ce qui attend l'utilisateur maintenant d'abord (plus récent d'abord), puis ce qui s'est passé depuis `since`, 100 au plus. Le préfixe de `id` dit d'où vient l'élément :
@@ -237,7 +237,7 @@ Ce qui attend l'utilisateur maintenant d'abord (plus récent d'abord), puis ce q
 |---|---|---|
 | `g:<conv>:<ts>` | `blocked` | garde-fou en attente dans VS Code (`title` : ce que fait l'action, la règle dans `rule`, le délai dans `expiresAt`) |
 | `w:<conv>:<ts>` | `waiting` | question en attente (« … Claude choisit l'option recommandée dans N min ») ; un plan proposé (`ExitPlanMode`) a pour titre « Plan à approuver » (« Plan à valider » avant le 2026-11-07) |
-| `c:<conv>` | `waiting` | conversation que Claude Code dit en attente de l'utilisateur |
+| `c:<conv>` | `waiting` | conversation que Claude Code dit en attente de l'utilisateur depuis au moins 20 s sans interruption (`statusUpdatedAt` de son registre, relu au moment de la requête ; registre sans ce champ : depuis la première fois que le moteur l'a vue ; et dans tous les cas si le moteur l'a vue en attente sur chacun de ses relevés depuis 60 s), sans attente du hook (`w:`/`g:` passent devant). `title` « Attend ton accord dans VS Code » (`permission prompt`) ou « Attend ta réponse dans VS Code » ; `detail` en français, comme `waitingFor` ; `ts` : début de l'attente (une seule notification par attente) |
 | `s:<conv>:<ts>` | `notice` | bascule de compte faite : envoyer un message pour relancer la conversation |
 | `cx:<compte>:<état>` | `notice` | compte à reconnecter (`accountId`) |
 | `cf:<conv>:<compte>` | `notice` | conversation lancée sur un autre compte que le sien |
