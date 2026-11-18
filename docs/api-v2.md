@@ -188,6 +188,28 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
 }
 ```
 
+## Jeton de lecture
+
+Pour qu'une autre app du même Mac lise l'usage des comptes Claude sans rien pouvoir changer. Rien dans l'interface : sans autre app, rien ne change.
+
+- **Fichier** : `data/read-token`, 0600, 64 caractères hexadécimaux, différent de `data/api-token`. Le moteur le crée au démarrage s'il manque et le repose s'il disparaît (vérifié toutes les 60 s), le même jeton tant que le moteur tourne. Sa lecture par une conversation est retenue par le garde-fou, comme celle de `api-token` (règles `jeton-vigie` et `jeton-vigie-fichier`, « Lecture d'un jeton de Vigie »), recherche dans tout le dossier comprise (`grep -r . ~/.vigie/data`).
+- **En-tête** : `X-Vigie-Read-Token: <jeton>`. Il n'ouvre qu'une liste fermée de routes, en `GET` seulement : aujourd'hui `GET /api/v2/accounts`. Toute requête qui porte cet en-tête passe par cette liste et rien d'autre, même avec un `X-Vigie-Token` valide : autre route, autre méthode (écriture comprise), jeton faux → `403 { "ok": false, "error": "Jeton de lecture : accès refusé." }`.
+- **Jamais un jeton d'accès** : placé dans `X-Vigie-Token`, le jeton de lecture compte comme aucun jeton (401 sur toute route `/api/` qui exige le jeton d'accès) ; le jeton d'accès placé dans `X-Vigie-Read-Token` répond 403. L'hôte (403) et l'adresse (400) sont vérifiés avant, comme pour toute requête.
+- **Réponse** de `GET /api/v2/accounts` avec ce jeton : les comptes Claude réduits à cinq champs, ni adresse, ni dossier, ni trousseau, ni lanceur, ni compte Codex. `label` est le nom du compte dans Vigie : un compte jamais renommé peut reprendre la partie de son adresse avant le @ (« Pro · alex »). `usage` a la forme de `AccountSummary.usage`, `week.fullAt` compris.
+
+```jsonc
+{
+  "accounts": [
+    { "id": "travail1", "label": "Travail 1", "isDefault": true, "connected": true,
+      "usage": { "session": { "pct": 42, "resetsAt": "2026-11-18T15:00:00.000Z" },
+                 "week": { "pct": 39, "resetsAt": "2026-11-24T19:00:00.000Z", "fullAt": null },
+                 "weekModel": null, "observedAt": "2026-11-18T12:05:00.000Z", "source": "session" } }
+  ]
+}
+```
+
+- **Aucun relevé** : la lecture rend ce que le moteur connaît déjà (aucune requête au modèle, aucun `refresh`, paramètres d'adresse ignorés). Une lecture par minute suffit.
+
 ## Écritures
 
 | Point d'entrée | Corps | Effet |
@@ -216,7 +238,7 @@ Toute erreur renvoie `{ "ok": false, "error": "phrase courte" }`, en lecture com
 |---|---|
 | 400 | JSON illisible, corps qui n'est pas un objet, valeur refusée, action MCP ou compte refusée, adresse invalide (`//`) |
 | 401 | `X-Vigie-Token` absent ou faux (toute route `/api/` sauf `/api/v2/health`) |
-| 403 | hôte autre que 127.0.0.1/localhost, `X-Vigie: 1` absent, `Origin` d'un autre site |
+| 403 | hôte autre que 127.0.0.1/localhost, `X-Vigie: 1` absent, `Origin` d'un autre site ; `X-Vigie-Read-Token` faux ou hors de sa liste fermée (voir « Jeton de lecture ») |
 | 404 | adresse inconnue ; conversation ou question introuvable (une conversation de plus de 48 h n'a plus de détail) |
 | 405 | méthode non prise en charge sur une adresse connue (ex. `GET /api/v2/settings`) |
 | 413 | corps de plus de 1 Mo |

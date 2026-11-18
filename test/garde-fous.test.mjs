@@ -137,6 +137,38 @@ test('jeton d\'accès de Vigie : ses lectures courantes sont retenues, même par
   assert.equal(rule('Grep', { pattern: 'x', path: `${home}/.vigie/lib` }), null);
 });
 
+test('jeton de lecture de Vigie (data/read-token) : retenu comme le jeton d\'accès, sans faux positifs', () => {
+  for (const c of ['cat ~/.vigie/data/read-token', 'cd ~/.vigie/data && cat read-token', 'D=~/.vigie/data; cat $D/read-token',
+    'cat ./read-token', 'cat ~/.vigie/*/read-token', 'cat ~/.vigie/data/READ-TOKEN', 'xxd ~/.vigie/data/read-tok*',
+    'node -e "require(\'fs\').readFileSync(\'read-token\')"']) {
+    assert.equal(bash(c), 'jeton-vigie', c);
+    assert.equal(readOnlyShell('Bash', { command: c }), false, `${c} : jamais rangée dans les lectures anodines`);
+  }
+  assert.equal(rule('Read', { file_path: `${home}/.vigie/data/read-token` }), 'jeton-vigie-fichier');
+  assert.equal(rule('Glob', { pattern: '**/read-token' }), 'jeton-vigie-fichier');
+  assert.equal(rule('Grep', { pattern: 'x', glob: 'read-token' }), 'jeton-vigie-fichier');
+  // l'en-tête, une option, un fichier de projet : rien
+  for (const c of ['curl -H "X-Vigie-Read-Token: $T" http://127.0.0.1:4777/api/v2/accounts', 'gh api --read-token x', 'cat src/read-token.ts',
+    'ls packages/read-token/']) {
+    assert.equal(bash(c), null, c);
+  }
+  assert.equal(rule('Read', { file_path: `${home}/Code/projet/src/read-token.ts` }), null);
+  assert.equal(rule('Glob', { pattern: '**/read-token.ts' }), null);
+});
+
+test('recherche dans tout le dossier de Vigie : elle lirait aussi les jetons', () => {
+  for (const c of ['grep -r . ~/.vigie/data', 'grep -rn x ~/.vigie', 'rg token ~/.vigie/data/', 'egrep -R foo $HOME/.vigie/data',
+    'find ~/.vigie/data -type f -exec cat {} +']) {
+    assert.equal(bash(c), 'jeton-vigie', c);
+    assert.equal(readOnlyShell('Bash', { command: c }), false, `${c} : jamais rangée dans les lectures anodines`);
+  }
+  // un fichier précis, la liste des noms, un autre dossier de Vigie : rien de plus qu'avant
+  for (const c of ['grep -c auto-accepte ~/.vigie/data/history.jsonl', 'tail -5 ~/.vigie/data/launches.log', 'ls ~/.vigie/data',
+    'find ~/.vigie -name "*.log"', 'grep -rn x ~/.vigie/lib']) {
+    assert.equal(bash(c), null, c);
+  }
+});
+
 test('dossier d\'un agent ({{dossier_agent}} : ~/.vigie/agents/<id>, hors de data) : ses scripts se lancent librement', () => {
   for (const dir of [`${home}/.vigie/agents/ourama-demarrer-projet`, '~/.vigie/agents/x', '$HOME/.vigie/agents/x']) {
     for (const c of [`cd ${dir} && node figma/01-fondations.js`, `cd "${dir}" && node figma/01-fondations.js`, `ls ${dir}/figma/*.js`,

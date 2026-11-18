@@ -238,6 +238,7 @@ before(async () => {
     VIGIE_OPEN_BIN: mac('open'), VIGIE_OSASCRIPT: mac('osascript'), VIGIE_PBCOPY: mac('pbcopy'), VIGIE_SHELL: '/bin/zsh',
     VIGIE_APPS_DIR: APPS, VIGIE_IDE_WAIT_MS: '1500', // fenêtre VS Code attendue 1,5 s au plus (25 s pour de vrai)
     VIGIE_TRUST_FIRST_MS: '300', // confiance des dossiers : premier passage tout de suite (10 s pour de vrai)
+    VIGIE_TOKEN_CHECK_MS: '300', // jetons reposés au tour suivant (60 s pour de vrai)
   };
   child = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', (d) => { logs += d; });
@@ -637,6 +638,71 @@ test('jeton d\'accès : exigé partout sur /api/ (lecture comprise), sauf l\'ét
   assert.equal(rj(path.join(DATA, 'state.json')).autoAccept, before, 'rien n\'a changé');
   assert.equal((await raw('GET', '/api/v2/health', { token: null })).status, 200, 'l\'installeur attend le moteur sans jeton');
   assert.equal((await get('/api/v2/overview')).status, 200);
+});
+
+test('jeton de lecture : GET /api/v2/accounts réduit, tout le reste refusé ; jamais un jeton d\'accès ; fichier recréé en 0600', async () => {
+  const file = path.join(DATA, 'read-token');
+  const readToken = () => fs.readFileSync(file, 'utf8').trim();
+  const rt = readToken();
+  assert.match(rt, /^[0-9a-f]{64}$/);
+  assert.notEqual(rt, token(), 'différent du jeton d\'accès');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const asReader = (method, p, opts = {}) => raw(method, p, { token: null, ...opts, headers: { 'X-Vigie-Read-Token': rt, ...(opts.headers || {}) } });
+  const refused = (r, what) => {
+    assert.equal(r.status, 403, what);
+    assert.equal(r.body?.error, 'Jeton de lecture : accès refusé.', what);
+  };
+
+  // lecture permise : seulement id, nom, compte par défaut, connecté et usage, comme dans la vue complète
+  const r = await asReader('GET', '/api/v2/accounts');
+  assert.equal(r.status, 200);
+  assert.deepEqual(Object.keys(r.body), ['accounts']);
+  assert.ok(r.body.accounts.length > 0);
+  const full = (await get('/api/v2/accounts')).body.accounts;
+  for (const a of r.body.accounts) {
+    assert.deepEqual(Object.keys(a).sort(), ['connected', 'id', 'isDefault', 'label', 'usage'], a.id);
+    const same = full.find((x) => x.id === a.id);
+    assert.ok(same, `${a.id} : un compte de la vue complète`);
+    assert.deepEqual([a.label, a.isDefault, a.connected], [same.label, same.isDefault, same.connected], a.id);
+    assert.deepEqual(a.usage, same.usage, `${a.id} : même usage, prévision de la semaine comprise`);
+  }
+  for (const k of ['email', 'expectedEmail', 'configDir', 'keychainItem', 'dirReady', 'login', 'sameAs', 'wrongAccount']) {
+    assert.ok(!r.text.includes(`"${k}"`), `${k} retiré`);
+  }
+  assert.ok(!r.text.includes('wrapper') && !r.text.includes('defaultForNew'), 'ni lanceur, ni réglages');
+  assert.ok(!r.text.includes(HOME), 'aucun chemin');
+  noSecret(r);
+  // une adresse avec paramètres ne déclenche rien de plus (pas de relevé)
+  assert.deepEqual((await asReader('GET', '/api/v2/accounts?refresh=1')).body, r.body);
+
+  // écriture refusée, même avec l'en-tête X-Vigie ; rien n'a changé
+  const view = async () => { const v = (await get('/api/v2/accounts')).body; return { defaultForNew: v.defaultForNew, ids: v.accounts.map((a) => [a.id, a.label]) }; };
+  const before = await view();
+  const other = full.find((a) => a.id !== before.defaultForNew)?.id ?? full[0].id;
+  refused(await asReader('POST', '/api/v2/accounts', { body: { action: 'setDefault', id: other },
+    headers: { 'Content-Type': 'application/json', 'X-Vigie': '1' } }), 'écriture');
+  assert.deepEqual(await view(), before, 'rien n\'a changé');
+  refused(await asReader('POST', '/api/v2/settings', { body: { autoAccept: false }, headers: { 'Content-Type': 'application/json', 'X-Vigie': '1' } }), 'réglages');
+  // autres routes et autres méthodes refusées, santé comprise
+  for (const p of ['/api/v2/overview', '/api/v2/history', '/api/v2/health', '/api/v2/mcp', `/api/v2/conversation/${SID_A}`, '/', '/mcp/x/y']) {
+    refused(await asReader('GET', p), p);
+  }
+  assert.equal((await asReader('HEAD', '/api/v2/accounts')).status, 403, 'HEAD (sans corps)');
+  // jeton faux, ou jeton d'accès glissé dans l'en-tête de lecture : refusé
+  refused(await raw('GET', '/api/v2/accounts', { token: null, headers: { 'X-Vigie-Read-Token': 'f'.repeat(64) } }), 'jeton faux');
+  refused(await raw('GET', '/api/v2/accounts', { token: null, headers: { 'X-Vigie-Read-Token': token() } }), 'jeton d\'accès dans l\'en-tête de lecture');
+  // le jeton de lecture ne vaut jamais comme X-Vigie-Token
+  assert.equal((await raw('GET', '/api/v2/accounts', { token: rt })).status, 401);
+  assert.equal((await raw('GET', '/api/v2/overview', { token: rt })).status, 401);
+  // les deux en-têtes : seule la liste fermée du jeton de lecture compte
+  refused(await raw('GET', '/api/v2/overview', { headers: { 'X-Vigie-Read-Token': rt } }), 'les deux en-têtes');
+
+  // fichier disparu : reposé, le même, en 0600
+  fs.rmSync(file);
+  for (let i = 0; i < 100 && !fs.existsSync(file); i++) await new Promise((res) => setTimeout(res, 100));
+  assert.equal(readToken(), rt, 'le même jeton, reposé');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal((await asReader('GET', '/api/v2/accounts')).status, 200);
 });
 
 test('réglages d\'une conversation, et bascule de compte', async () => {

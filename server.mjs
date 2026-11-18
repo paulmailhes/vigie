@@ -144,18 +144,35 @@ const API_TOKEN = (() => {
   try { const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim(); if (/^[0-9a-f]{64}$/.test(t)) return t; } catch { /* premier démarrage */ }
   return crypto.randomBytes(32).toString('hex');
 })();
-function keepToken() {
-  try { if (fs.readFileSync(TOKEN_FILE, 'utf8').trim() === API_TOKEN) return; } catch { /* absent : on le repose */ }
+// Jeton de lecture (data/read-token, 0600, différent du jeton d'accès) : une autre app du Mac lit l'usage des comptes
+// sans pouvoir rien changer. En-tête X-Vigie-Read-Token, en GET seulement, sur la liste fermée READ_ROUTES ; il ne vaut
+// jamais comme X-Vigie-Token. Rien dans l'interface : sans autre app, rien ne change. Sa lecture par une conversation
+// est retenue par le garde-fou (règles jeton-vigie). Recréé s'il disparaît, comme le jeton d'accès.
+const READ_TOKEN_FILE = path.join(DATA, 'read-token');
+const READ_TOKEN = (() => {
+  try { const t = fs.readFileSync(READ_TOKEN_FILE, 'utf8').trim(); if (/^[0-9a-f]{64}$/.test(t) && t !== API_TOKEN) return t; } catch { /* premier démarrage */ }
+  let t;
+  do { t = crypto.randomBytes(32).toString('hex'); } while (t === API_TOKEN);
+  return t;
+})();
+function keepSecret(file, value, what) {
+  try { if (fs.readFileSync(file, 'utf8').trim() === value) return; } catch { /* absent : on le repose */ }
   try {
     fs.mkdirSync(DATA, { recursive: true, mode: 0o700 });
-    const tmp = `${TOKEN_FILE}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${API_TOKEN}\n`, { mode: 0o600 });
-    fs.renameSync(tmp, TOKEN_FILE);
-  } catch (e) { console.error('[vigie] jeton d\'accès :', String(e?.message || e)); }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${value}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch (e) { console.error(`[vigie] ${what} :`, String(e?.message || e)); }
+}
+function keepToken() {
+  keepSecret(TOKEN_FILE, API_TOKEN, 'jeton d\'accès');
+  keepSecret(READ_TOKEN_FILE, READ_TOKEN, 'jeton de lecture');
 }
 keepToken();
-const TOKEN_BUF = Buffer.from(API_TOKEN);
-const tokenOk = (v) => { const b = Buffer.from(String(v || '')); return b.length === TOKEN_BUF.length && crypto.timingSafeEqual(b, TOKEN_BUF); };
+// comparaison en temps constant ; chaque jeton n'est comparé qu'à lui-même
+const sameSecret = (expected) => { const want = Buffer.from(expected); return (v) => { const b = Buffer.from(String(v || '')); return b.length === want.length && crypto.timingSafeEqual(b, want); }; };
+const tokenOk = sameSecret(API_TOKEN);
+const readTokenOk = sameSecret(READ_TOKEN);
 const QUOTA_FILE = process.env.VIGIE_QUOTA_FILE || null;
 const mcp = createMcp({
   home: HOME,
@@ -2015,6 +2032,26 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 
 function health() { return { ok: true, version: 2, indexing: indexer.progress, history: history.length }; }
 
+// Ce que le jeton de lecture ouvre, en GET seulement. Les comptes Claude réduits à id, nom, compte par défaut, connecté
+// et usage (même forme que dans GET /api/v2/accounts, prévision de la semaine comprise) : ni adresse, ni dossier, ni
+// trousseau, ni lanceur. Aucun relevé : ce qui est déjà connu.
+const READ_ROUTES = new Map([
+  ['/api/v2/accounts', () => ({
+    accounts: withForecast(accounts.summaries(), Date.now()).map((a) => ({
+      id: a.id, label: a.label, isDefault: !!a.isDefault, connected: !!a.connected, usage: a.usage ?? null,
+    })),
+  })],
+]);
+// Toute requête qui porte X-Vigie-Read-Token passe ici, et seulement ici (même avec un X-Vigie-Token valide) : la liste
+// fermée en GET, 403 pour tout le reste, jeton faux compris.
+function readOnly(req, res, url) {
+  const route = req.method === 'GET' && readTokenOk(req.headers['x-vigie-read-token']) ? READ_ROUTES.get(url.pathname) : null;
+  if (!route) return send(res, 403, { ok: false, error: 'Jeton de lecture : accès refusé.' });
+  let out;
+  try { out = route(); } catch (e) { console.error('[vigie] jeton de lecture :', clean(e)); return send(res, 500, { ok: false, error: 'Lecture impossible pour l\'instant.' }); }
+  return send(res, 200, out);
+}
+
 async function handle(req, res) {
   // On refuse tout autre hôte (protection contre le « DNS rebinding ») et, pour les écritures, toute requête
   // sans l'en-tête maison, qu'une page web tierce ne peut pas envoyer sans autorisation CORS (jamais donnée).
@@ -2022,6 +2059,8 @@ async function handle(req, res) {
   if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return send(res, 403, { ok: false, error: 'Hôte refusé.' });
   let url;
   try { url = new URL(req.url, `http://${host}`); } catch { return send(res, 400, { ok: false, error: 'Adresse invalide.' }); }
+  // Jeton de lecture (autre app du Mac) : sa liste fermée, rien d'autre, avant toute autre route.
+  if (req.headers['x-vigie-read-token'] !== undefined) return readOnly(req, res, url);
   // Passerelle MCP : relayée telle quelle (pas de lecture JSON ni d'en-tête X-Vigie : la clé du MCP suffit).
   const relay = /^\/mcp\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
   if (relay) return gateway.proxy(req, res, decodeURIComponent(relay[1]), relay[2] || '', url.search);
@@ -2106,6 +2145,9 @@ let healthNotices = [];
 let switchNotices = []; // bascules appliquées : L'utilisateur doit envoyer un message pour relancer la conversation
 let ticking = false;
 let lastHealth = 0;
+// Jetons (data/api-token, data/read-token) reposés s'ils ont disparu : toutes les 60 s (VIGIE_TOKEN_CHECK_MS pour les essais).
+const TOKEN_CHECK_MS = Number(process.env.VIGIE_TOKEN_CHECK_MS) || 60_000;
+let lastTokenCheck = Date.now();
 let nextMcpCheck = Date.now() + MCP_CHECK_FIRST_MS;
 async function tick() {
   noteTick(); // avant le garde : un tour long n'est pas pris pour une veille
@@ -2124,9 +2166,12 @@ async function tick() {
     });
     // Toutes les 60 s : liens des dossiers de comptes réparés (quelques lstat), et relevés d'usage frais pour
     // les comptes qui ne travaillent pas (requête minimale, au plus toutes les 10 min par compte).
+    if (Date.now() - lastTokenCheck > TOKEN_CHECK_MS) {
+      lastTokenCheck = Date.now();
+      keepToken();
+    }
     if (Date.now() - lastHealth > 60_000) {
       lastHealth = Date.now();
-      keepToken();
       healthNotices = accounts.health().notices || [];
       accounts.autoRefresh({ calm: calm() });
     }
