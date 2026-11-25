@@ -2165,7 +2165,7 @@ async function tick() {
       return Date.now() - Date.parse(n.ts) < 6 * HOUR && !(live && Number(live.startedAt) > Date.parse(n.ts));
     });
     // Toutes les 60 s : liens des dossiers de comptes réparés (quelques lstat), et relevés d'usage frais pour
-    // les comptes qui ne travaillent pas (requête minimale, au plus toutes les 10 min par compte).
+    // les comptes connectés (demande d'usage de Claude Code, sans requête au modèle ; au plus toutes les 10 min par compte).
     if (Date.now() - lastTokenCheck > TOKEN_CHECK_MS) {
       lastTokenCheck = Date.now();
       keepToken();

@@ -22,11 +22,13 @@ Tout champ marqué `?` peut être `null` ou absent. Les textes sont déjà en fr
     "week":      { "pct": 39,  "resetsAt": "2026-10-26T19:00:00.000Z", "fullAt": null },   // ? fullAt : voir « Jusqu'où tient chaque compte »
     "weekModel": { "label": "Fable", "pct": 55, "resetsAt": "2026-10-26T18:59:00.000Z" }, // ?
     "observedAt": "2026-10-20T00:12:00.000Z",  // ? âge du relevé (affiché « il y a 12 min »)
-    "source": "session"             // session (relevé écrit par une vraie session) | ping (petite requête de relevé) ; null si aucun
+    "source": "session"             // session (relevé rangé par Claude Code) | ping (relevé de Vigie) ; null si aucun
   }
   // Règle : jamais de relevé périmé. Un pourcentage dont la remise à zéro est passée, ou un relevé de plus de 6 h,
   // est remplacé par null (l'app affiche « — » et propose « Actualiser »).
-  // weekModel n'arrive que par les vraies sessions : null pour un compte qui n'a pas travaillé récemment.
+  // session : { pct: 0, resetsAt: null } quand la session de 5 h n'a pas encore commencé.
+  // weekModel (semaine d'un modèle, comme Fable) : pour tout compte connecté, par le relevé de Vigie (demande d'usage de
+  // Claude Code) ; null si le compte n'a pas de limite propre à un modèle.
 }
 
 // ConversationSummary
@@ -220,7 +222,7 @@ Pour qu'une autre app du même Mac lise l'usage des comptes Claude sans rien pou
 | `POST /api/v2/mcp/user` | `{ action: "add"\|"update"\|"remove", name, config?, accounts?: [ids] }` | via `claude mcp … --scope user` par compte |
 | `POST /api/v2/mcp/project` | `{ action: "add"\|"update"\|"remove", path, name, config? }` | édite `<path>/.mcp.json` (sauvegarde) |
 | `POST /api/v2/mcp/disable` | `{ path, name, disabled: bool }` | coupe ou rallume un MCP pour un projet |
-| `POST /api/v2/accounts` | `{ action: "create", label }`, `{ action: "rename", id, label }`, `{ action: "setDefault", id }`, `{ action: "connect", id }`, `{ action: "remove", id }`, `{ action: "wrapper", enable: bool }`, `{ action: "refresh", id? }` | gestion des comptes ; remove supprime un compte ajouté (`claude auth logout` dans son dossier, dossier mis de côté dans `<comptes>/.supprimes/`, copie du coffre retirée, conversations rendues au compte des nouvelles conversations ; `notices` dit ce qui n'a pas pu se faire ; le compte du Mac refuse) ; connect retrouve Claude Code à chaque fois (extension ou app mise à jour depuis le démarrage du moteur) ; refresh relève l'usage (session, semaine) du compte (ou de tous) par une requête minimale, au plus une fois toutes les 10 min par compte |
+| `POST /api/v2/accounts` | `{ action: "create", label }`, `{ action: "rename", id, label }`, `{ action: "setDefault", id }`, `{ action: "connect", id }`, `{ action: "remove", id }`, `{ action: "wrapper", enable: bool }`, `{ action: "refresh", id? }` | gestion des comptes ; remove supprime un compte ajouté (`claude auth logout` dans son dossier, dossier mis de côté dans `<comptes>/.supprimes/`, copie du coffre retirée, conversations rendues au compte des nouvelles conversations ; `notices` dit ce qui n'a pas pu se faire ; le compte du Mac refuse) ; connect retrouve Claude Code à chaque fois (extension ou app mise à jour depuis le démarrage du moteur) ; refresh relève l'usage du compte (ou de tous) : session de 5 h, semaine et semaine d'un modèle (Fable), par la demande d'usage de Claude Code (celle de /usage, sans requête au modèle ; l'ancienne requête minimale si Claude Code ne la connaît pas), au plus une fois toutes les 10 min par compte |
 | `GET /api/v2/agents/runs` | — | les derniers lancements d'agents (50 au plus, le dernier par agent et par dossier) et le rapport de chacun : `{ runs: [{ id, agent, name, icon, folder, surface, session, conversation, at, report, reportFile, unreadable, changedAt }] }` (voir « Rapports d'agents ») |
 | `POST /api/v2/agents/runs` | `{ action: "todo", id, index, done }` ou `{ action: "hide", id }` | coche ou décoche une action du rapport (le fichier est réécrit, le reste intact) ; retire un lancement de la liste (le rapport reste dans le dossier du projet) ; 404 lancement inconnu, 400 action introuvable |
 | `POST /api/v2/agents/launch` | `{ id, values: { "<champ>": "texte" }, folder, files?, surface?, session?, mcp? }` | prépare le dossier d'un agent (fichiers joints copiés, consigne écrite) et l'ouvre dans VS Code ou l'app Claude (voir « Agents » plus bas) |

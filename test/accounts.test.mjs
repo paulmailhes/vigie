@@ -258,18 +258,44 @@ test('jamais de relevé périmé : plus de 6 h ou remise à zéro passée = « �
   wj(RUNCAT, rc);
 });
 
-test('relevé par requête minimale : faux binaire, compte et options vérifiés, Fable gardé, au plus une fois par minute', async () => {
+test('relevé d\'usage par get_usage (session, semaine, Fable, sans requête au modèle) ; ancienne requête en secours ; au plus une fois par minute', async () => {
   const fake = path.join(TMP, 'faux claude', 'claude');
   const log = path.join(TMP, 'faux claude', 'appels.jsonl');
   const mode = path.join(TMP, 'faux claude', 'mode');
   w(fake, `#!${process.execPath}
 import fs from 'node:fs';
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args: process.argv.slice(2), dir: process.env.CLAUDE_CONFIG_DIR || null, cwd: process.cwd() }) + '\\n');
-if (fs.existsSync(${JSON.stringify(mode)}) && fs.readFileSync(${JSON.stringify(mode)}, 'utf8').trim() === 'panne') process.exit(1);
+const m = fs.existsSync(${JSON.stringify(mode)}) ? fs.readFileSync(${JSON.stringify(mode)}, 'utf8').trim() : '';
+if (m === 'panne') process.exit(1);
 const t = Math.floor(Date.now() / 1000);
-console.log(JSON.stringify({ type: 'system', subtype: 'init' }));
-console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.42, resetsAt: t + 7200 }, seven_day: { utilization: 0.1, resetsAt: t + 3 * 86400 } } } }));
-console.log(JSON.stringify({ type: 'result', result: '.' }));
+const at = (s) => new Date(s * 1000).toISOString();
+const reply = (id, more) => console.log(JSON.stringify({ type: 'control_response', response: { request_id: id, ...more } }));
+if (process.argv.includes('--input-format')) {
+  // la demande d'usage (comme /usage) : session de 5 h (absente au repos), semaine, semaine Fable
+  let rest = '';
+  process.stdin.on('data', (d) => {
+    rest += d;
+    let i;
+    while ((i = rest.indexOf('\\n')) >= 0) {
+      const r = JSON.parse(rest.slice(0, i));
+      rest = rest.slice(i + 1);
+      if (r.request.subtype === 'initialize') reply(r.request_id, { subtype: 'success', response: {} });
+      if (r.request.subtype !== 'get_usage') continue;
+      if (m === 'ancien') { reply(r.request_id, { subtype: 'error', error: 'Unsupported control request subtype: get_usage' }); continue; }
+      const five = m === 'repos' ? null : { utilization: 42, resets_at: at(t + 7200) };
+      reply(r.request_id, { subtype: 'success', response: { rate_limits: { five_hour: five, seven_day: { utilization: 10, resets_at: at(t + 3 * 86400) },
+        limits: [...(five ? [{ kind: 'session', group: 'session', percent: 42, resets_at: at(t + 7200) }] : []),
+          { kind: 'weekly_all', group: 'weekly', percent: 10, resets_at: at(t + 3 * 86400) },
+          { kind: 'weekly_scoped', group: 'weekly', percent: 7, resets_at: at(t + 3 * 86400), scope: { model: { display_name: 'Fable' } } }] } } });
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
+} else {
+  // l'ancienne requête minimale au modèle
+  console.log(JSON.stringify({ type: 'system', subtype: 'init' }));
+  console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.42, resetsAt: t + 7200 }, seven_day: { utilization: 0.1, resetsAt: t + 3 * 86400 } } } }));
+  console.log(JSON.stringify({ type: 'result', result: '.' }));
+}
 `, 0o755);
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
   // Perso devient connecté : aucun relevé encore
@@ -283,11 +309,13 @@ console.log(JSON.stringify({ type: 'result', result: '.' }));
   const [c1] = calls();
   assert.equal(c1.dir, perso);
   assert.equal(fs.realpathSync(c1.cwd), fs.realpathSync(os.tmpdir()));
-  for (const a of ['-p', '--model', 'haiku', '--max-turns', '--strict-mcp-config', '--setting-sources', '--tools', '--no-session-persistence']) assert.ok(c1.args.includes(a), a);
+  for (const a of ['-p', '--input-format', 'stream-json', '--strict-mcp-config', '--setting-sources', '--tools', '--no-session-persistence']) assert.ok(c1.args.includes(a), a);
+  assert.ok(!c1.args.includes('--max-turns'), 'la demande d\'usage, pas de requête au modèle');
   assert.equal(c1.args[c1.args.indexOf('--setting-sources') + 1], '', 'ni réglages ni hooks');
   assert.equal(c1.args[c1.args.indexOf('--tools') + 1], '', 'aucun outil');
+  assert.equal(calls().length, 1, 'un seul lancement');
   const u = P.summaries().find((a) => a.id === 'perso').usage;
-  assert.deepEqual([u.source, u.session.pct, u.week.pct, u.weekModel], ['ping', 42, 10, null]);
+  assert.deepEqual([u.source, u.session.pct, u.week.pct, u.weekModel?.label, u.weekModel?.pct], ['ping', 42, 10, 'Fable', 7]);
   assert.ok(Date.parse(u.session.resetsAt) > Date.now());
   assert.deepEqual(P.autoRefresh(), [], 'relevé frais : rien à faire');
   // « Actualiser » : Travail 1 relevé tout de suite, sa semaine Fable (vraie session) gardée
@@ -296,13 +324,31 @@ console.log(JSON.stringify({ type: 'result', result: '.' }));
   await P.refreshSettled();
   assert.equal(calls().at(-1).dir, null, 'Travail 1 : sans CLAUDE_CONFIG_DIR');
   const u1 = P.summaries()[0].usage;
-  assert.deepEqual([u1.source, u1.session.pct, u1.weekModel?.label, u1.weekModel?.pct], ['ping', 42, 'Fable', 55]);
+  assert.deepEqual([u1.source, u1.session.pct, u1.weekModel?.label, u1.weekModel?.pct], ['ping', 42, 'Fable', 7], 'le relevé le plus récent, Fable compris');
   // un clic répété dans la minute ne relance rien
   assert.deepEqual(P.apply({ action: 'refresh', id: 'travail1' }).started, []);
   assert.match(P.apply({ action: 'refresh', id: 'travail1' }).message, /moins d'une minute/);
   // refus clairs
   assert.deepEqual(P.apply({ action: 'refresh', id: 'inconnu' }), { ok: false, error: 'Compte inconnu.' });
   assert.deepEqual(P.apply({ action: 'refresh', id: 'eteperso' }), { ok: false, error: 'Ce compte n\'est pas connecté.' });
+  // session de 5 h pas encore commencée : 0 %, sans remise à zéro (pas « pas de chiffre »)
+  fs.writeFileSync(mode, 'repos');
+  const R = createAccounts({ ...opts, claudeBin: fake });
+  assert.deepEqual(R.apply({ action: 'refresh', id: 'perso' }).started, ['perso']);
+  await R.refreshSettled();
+  const ur = R.summaries().find((a) => a.id === 'perso').usage;
+  assert.deepEqual([ur.session, ur.week.pct, ur.weekModel?.pct], [{ pct: 0, resetsAt: null }, 10, 7]);
+  // Claude Code qui ne connaît pas la demande d'usage : l'ancienne requête minimale, dans la même file
+  fs.writeFileSync(mode, 'ancien');
+  const O = createAccounts({ ...opts, claudeBin: fake });
+  fs.rmSync(path.join(DATA, 'usage', 'perso.json'));
+  const before = calls().length;
+  assert.deepEqual(O.apply({ action: 'refresh', id: 'perso' }).started, ['perso']);
+  await O.refreshSettled();
+  const [ask, legacy] = calls().slice(before);
+  assert.ok(ask.args.includes('--input-format') && legacy.args.includes('--max-turns'), 'demande d\'usage, puis requête minimale');
+  const uo = O.summaries().find((a) => a.id === 'perso').usage;
+  assert.deepEqual([uo.source, uo.session.pct, uo.week.pct, uo.weekModel], ['ping', 42, 10, null]);
   // panne du binaire : aucun relevé écrit, rien ne casse
   fs.writeFileSync(mode, 'panne');
   const Q = createAccounts({ ...opts, claudeBin: fake });

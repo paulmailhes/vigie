@@ -360,7 +360,8 @@ struct UsageGaugeRow: View {
 
     private var resetText: String {
         guard window?.pct != nil else { return "pas de chiffre récent" }
-        guard let date = window?.resetsAt else { return "" }
+        // une session de 5 h pas encore commencée : 0 %, sans remise à zéro
+        guard let date = window?.resetsAt else { return window?.pct == 0 ? "pas commencée" : "" }
         if date < store.now { return "remis à zéro" }
         return "remise à zéro \(Fmt.reset(date, now: store.now))"
     }

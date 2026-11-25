@@ -14,7 +14,7 @@ struct AccountUsage: Decodable, Equatable, Sendable {
     @Tolerant var week: UsageWindow?
     @Tolerant var weekModel: UsageWindow?
     @FlexDate var observedAt: Date?
-    /// session (relevé écrit par une vraie session) | ping (petite requête de relevé).
+    /// session (relevé rangé par Claude Code) | ping (relevé de Vigie : demande d'usage de Claude Code).
     var source: String?
 }
 
